@@ -203,7 +203,16 @@ func (service *SIMAKAService) IMSIdentity(ctx context.Context, request SIMIMSIde
 		PublicIdentities:      append([]string(nil), material.PublicIdentities...),
 		ApplicationDiscovery:  material.ApplicationDiscovery,
 		ApplicationCandidates: material.ApplicationCandidates,
+		SMSOverIP:             cloneSIMIMSSMSConfiguration(material.SMSOverIP),
 	}, nil
+}
+
+func cloneSIMIMSSMSConfiguration(value *SIMIMSSMSConfiguration) *SIMIMSSMSConfiguration {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (service *SIMAKAService) Authenticate(ctx context.Context, request SIMAKAAuthenticationRequest) (SIMAKAAuthenticationResponse, error) {

@@ -335,8 +335,10 @@ function isSMSMessage(value: unknown): value is SMSMessage {
       return candidate.direction === 'outbound' && candidate.providerMessageId === '' && candidate.errorCode === '' && candidate.sentAt === undefined
     case 'sent':
       return candidate.direction === 'outbound' && candidate.providerMessageId.length > 0 && candidate.errorCode === '' && hasSentAt
+    case 'unconfirmed':
+      return candidate.direction === 'outbound' && /^[A-Z][A-Z0-9_]{0,63}$/.test(candidate.errorCode) && candidate.sentAt === undefined
     case 'failed':
-      return candidate.direction === 'outbound' && candidate.providerMessageId === '' && /^[A-Z][A-Z0-9_]{0,63}$/.test(candidate.errorCode) && candidate.sentAt === undefined
+      return candidate.direction === 'outbound' && /^[A-Z][A-Z0-9_]{0,63}$/.test(candidate.errorCode) && candidate.sentAt === undefined
     case 'received':
       return candidate.direction === 'inbound' && candidate.providerMessageId.length > 0 && candidate.errorCode === '' && candidate.sentAt === undefined
     default:

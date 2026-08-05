@@ -77,5 +77,6 @@ func validControllerAddress(address string) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && !ip.IsUnspecified() && (ip.IsLoopback() || ip.IsPrivate())
+	isIPv4Wildcard := ip != nil && ip.To4() != nil && ip.Equal(net.IPv4zero)
+	return ip != nil && (isIPv4Wildcard || ip.IsLoopback() || ip.IsPrivate())
 }

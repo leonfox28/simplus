@@ -19,7 +19,7 @@
 | 型号 | 已验证 | 尚未验证或未开放 |
 | --- | --- | --- |
 | QDC507 | USB identity、固定 primary AT/QMI 角色、SIM/RF/注册/通话计数的 HIL-0；PDU-mode SMS 候选在 fixture 中完成编码、传输状态和 durable replay | production 短信、真实电话、数字音频、RF 写入、eUICC mutation |
-| ML307A | USB identity、固定 primary AT、SIM READY/RF Off 白名单探测；类型化 SIM AKA；Host VoWiFi ePDG/IMS 注册与持续运行 | 普通真实短信/电话、数字媒体、eUICC mutation、蜂窝数据拨号 |
+| ML307A | USB identity、固定 primary AT、SIM READY/RF Off 白名单探测；类型化 SIM AKA；Host VoWiFi ePDG/IMS 注册与持续运行；SMS over IMS 真实单段和 multipart 入站；受控单段服务请求的关联出站 RP-ACK、公开 Web/API 异步 `sent` 状态提升、普通号码单段及两段 UCS-2 长短信自号码回环、自动重连后再次收发、multipart 业务回复 | SMS over IMS 其他收件人互通、普通蜂窝短信/电话、数字媒体、eUICC mutation、蜂窝数据拨号 |
 
 两个型号共用同一个 Agent 协议、adapter registry、Modem/Line 领域模型和 Web/API；差异只位于经过证据约束的型号 adapter，不包装成两套平台。
 
@@ -43,6 +43,7 @@
 - RF Off 与 SIM READY 前置条件；
 - SIM AKA、IKEv2/ePDG、IMS APN、P-CSCF、Gm transport-mode IPsec 与受保护 REGISTER；
 - 定期 keepalive、服务器注册周期、提前刷新、有界重连和 XFRM 健康检查；
+- ePDG 暂时不可用时按有界退避自动恢复注册，并在恢复后再次完成 SMS over IMS 收发；
 - `simplusd` 重启不破坏现有 session；网络 owner 重启后按持久激活意图清理并重建；
 - 同一 Line 不会并存多套 namespace、路由、nftables 或 worker；
 - Web/API 和普通日志不暴露身份、AKA 材料、内部地址、SPI、节点凭据或完整 SIP 鉴权头。
@@ -51,8 +52,10 @@
 
 - 显式 IMS de-registration；
 - 数日稳定性和小时级 IKE/CHILD rekey；
-- SMS over IMS、来电、拨号、RTP/RTCP 和数字语音媒体；
+- SMS over IMS 其他收件人互通、来电、拨号、RTP/RTCP 和数字语音媒体；
 - 运营商长期策略或所有国家出口组合。
+
+SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信中心固定读取、RPDU/SIP 编解码、SIP 接受与异步 RP submit report 分离、数字及 GSM7 字母型发送方、类型化 supervisor API、persist-before-RP-ACK，以及 multipart 分片持久化、歧义拒绝和数据库重开恢复。受控 HIL 已验证真实单段与 multipart 入站、服务请求的关联 RP-ACK 和业务回复、公开 Web/API 的 `unconfirmed → sent` 状态闭环、普通号码单段与两段 UCS-2 自回环，以及自动重连后再次完成同类收发；长短信出站与重组后的入站正文逐字符一致。该证据覆盖 Web/API、业务数据库、typed supervisor 和 IMS worker，但自号码回环不能外推为其他收件人互通。
 
 ## 前端与安装
 

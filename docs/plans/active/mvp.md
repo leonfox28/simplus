@@ -29,6 +29,7 @@
 | 17：External UI | 固定版本 Zashboard、Mihomo 托管和私有 controller secret |
 | 18：真实 Host VoWiFi 纵切 | ML307A 类型化 SIM AKA、ePDG、Gm IPsec 和最小 IMS 注册 |
 | 19：Web 管理的持续运行态 | per-Line 生命周期、keepalive、提前刷新、有界重连、恢复和脱敏 Web 状态 |
+| 21：Host VoWiFi 短信 | 真实单段与 multipart 入站、Web/API 异步提交结果、单段与两段 UCS-2 自回环，以及自动重连后再次收发 |
 
 ## Milestone 20：公开源码准备
 
@@ -42,14 +43,33 @@
 - [x] 经仓库所有者最终确认后创建公开远程并推送；
 - [ ] 解决 Umi 构建工具链尚未消除的传递依赖审计告警，并继续复核后续 Actions、issues 和 release assets。
 
+## Milestone 21：Host VoWiFi 短信
+
+- [x] 按 TS 24.341/24.011 实现 RP-DATA、RP-ACK、RP-ERROR 和 binary SIP MESSAGE 的有界编解码；
+- [x] 通过固定 root-only 读取发现 SIM 已配置短信中心，并仅在可用时注册 `+g.3gpp.smsip`；
+- [x] 在 per-Line worker 内实现受保护 SIP 发送、`In-Reply-To` 关联的异步提交报告、入站队列和 persist-before-RP-ACK；
+- [x] 通过 `simplus-netd` 类型化 API 接入既有短信服务、历史页、幂等 operation 和后台入站同步；
+- [x] 增加持久化 multipart 入站分片 spool、逐分片 ACK、歧义拒绝、重启恢复和过期清理；
+- [x] 在明确授权后完成真实 multipart 入站的逐片持久化、delivery report、完整重组和 worker 队列清空，并把脱敏结论写入兼容性文档；
+- [x] 完成真实 GSM7 字母型发送方单段入站、业务落库、RP-ACK 与队列清空 HIL；
+- [x] 将发送结果未知建模为持久 `unconfirmed` 状态并在 Web 中单独显示，保持 operation 幂等且禁止自动重发；
+- [x] 用 SIP/RP fixture 证明提交请求不等待 RP 最终报告：同一 multipart 操作逐段各提交一次并先保持 `unconfirmed`，后续匹配的 RP-ACK 经持久化同步后才成为 `sent`；
+- [x] 修正标准 RP-ERROR cause-length 解析、普通 SMS-DELIVER-REPORT TPDU、REGISTER `P-Associated-URI` 身份选择、RP reference 生命周期和 RFC Call-ID 校验；
+- [x] 短信页面在可见期间有界自动刷新，避免后台已接收消息仍需手动刷新；
+- [x] 完成一条受控单段 GSM7 服务请求的出站 RP 最终结果 HIL：SIP `accepted` 后取得关联 RP-ACK，且对应 multipart 业务回复完成持久化与重组；
+- [x] 完成从公开 Web/API 发起的单段服务请求 HIL，并确认业务库由带 provider ID 的 `unconfirmed` 异步提升为 `sent`；
+- [x] 完成普通号码的单段自号码回环 HIL：出站取得关联 RP-ACK，随后同一业务消息重新入站、持久化并确认；
+- [x] 完成普通号码的两段 UCS-2 长短信自号码回环 HIL，并逐字符确认出站与重组后入站正文一致；
+- [x] 完成自动重连后的短信行为 HIL：重新注册后再次取得出站关联 RP-ACK，并完成两段消息入站重组与确认。
+
 ## 后续产品工作
 
 以下能力尚未完成，且不能因为 Simulator 或 Host VoWiFi 注册成功而宣称可用：
 
-1. 真实模组短信收发；
+1. 真实模组原生蜂窝短信收发；
 2. 真实呼入、外呼、DTMF 和媒体；
 3. 真实 eUICC 已安装 Profile 切换；
-4. SMS over IMS、VoWiFi 通话和 RTP/RTCP；
+4. SMS over IMS 的其他收件人互通、VoWiFi 通话和 RTP/RTCP；
 5. 显式 IMS de-registration、IKE/CHILD rekey 与多日稳定性；
 6. ARM64、其他发行版、签名包和供应链发布材料。
 
@@ -73,4 +93,4 @@
 5. 公开资料检查与 secret scan；
 6. 真实硬件只执行当前任务明确授权的 HIL。
 
-公开仓库准备完成不等于 V1 的真实短信和电话目标完成。
+公开仓库准备完成不等于 V1 的模组原生蜂窝短信和电话目标完成。

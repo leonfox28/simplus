@@ -47,6 +47,90 @@ func (client *Client) Stop(ctx context.Context, lineID string) (Status, error) {
 	return status, err
 }
 
+func (client *Client) SendSMS(ctx context.Context, request SMSSendRequest) (SMSSendResponse, error) {
+	if !validSMSSendRequest(request) {
+		return SMSSendResponse{}, ErrRequestInvalid
+	}
+	var response SMSSendResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/send", request, &response); err != nil {
+		return SMSSendResponse{}, err
+	}
+	if !validSMSSendResponse(response) {
+		return SMSSendResponse{}, ErrSMSUnavailable
+	}
+	return response, nil
+}
+
+func (client *Client) ListSMS(ctx context.Context, lineID string) ([]SMSMessageReference, error) {
+	if !hardwareLinePattern.MatchString(lineID) {
+		return nil, ErrRequestInvalid
+	}
+	var response SMSListResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/list", SMSListRequest{LineID: lineID}, &response); err != nil {
+		return nil, err
+	}
+	if !validSMSMessageReferences(response.Messages) {
+		return nil, ErrSMSUnavailable
+	}
+	return response.Messages, nil
+}
+
+func (client *Client) ReadSMS(ctx context.Context, lineID, messageID string) (SMSMessage, error) {
+	if !validSMSMessageRequest(lineID, messageID) {
+		return SMSMessage{}, ErrRequestInvalid
+	}
+	var response SMSMessage
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/read", SMSReadRequest{LineID: lineID, MessageID: messageID}, &response); err != nil {
+		return SMSMessage{}, err
+	}
+	if !validSMSMessagePayload(response, messageID) {
+		return SMSMessage{}, ErrSMSUnavailable
+	}
+	return response, nil
+}
+
+func (client *Client) AcknowledgeSMS(ctx context.Context, request SMSAcknowledgeRequest) error {
+	if !validSMSAcknowledgeRequest(request) {
+		return ErrRequestInvalid
+	}
+	var response SMSAcknowledgeResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/acknowledge", request, &response); err != nil {
+		return err
+	}
+	if !response.Acknowledged {
+		return ErrSMSUnavailable
+	}
+	return nil
+}
+
+func (client *Client) ListSMSSubmitReports(ctx context.Context, lineID string) (SMSSubmitReportListResponse, error) {
+	if !hardwareLinePattern.MatchString(lineID) {
+		return SMSSubmitReportListResponse{}, ErrRequestInvalid
+	}
+	var response SMSSubmitReportListResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/reports/list", SMSListRequest{LineID: lineID}, &response); err != nil {
+		return SMSSubmitReportListResponse{}, err
+	}
+	if !validSMSSubmitReports(response.Reports) {
+		return SMSSubmitReportListResponse{}, ErrSMSUnavailable
+	}
+	return response, nil
+}
+
+func (client *Client) AcknowledgeSMSSubmitReport(ctx context.Context, request SMSSubmitReportAcknowledgeRequest) error {
+	if !validSMSSubmitReportAcknowledgeRequest(request) {
+		return ErrRequestInvalid
+	}
+	var response SMSAcknowledgeResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/reports/acknowledge", request, &response); err != nil {
+		return err
+	}
+	if !response.Acknowledged {
+		return ErrSMSUnavailable
+	}
+	return nil
+}
+
 func (client *Client) request(ctx context.Context, method, path string, input, output any) error {
 	var body io.Reader
 	if input != nil {
@@ -80,12 +164,22 @@ func (client *Client) request(ctx context.Context, method, path string, input, o
 			return ErrNotRunning
 		case "STARTUP_FAILED":
 			return ErrStartupFailed
+		case "SMS_UNAVAILABLE":
+			return ErrSMSUnavailable
+		case "SMS_MESSAGE_NOT_FOUND":
+			return ErrSMSMessageNotFound
+		case "SMS_SEND_OUTCOME_UNKNOWN":
+			return ErrSMSOutcomeUnknown
+		case "SMS_REJECTED":
+			return ErrSMSRejected
 		default:
 			return fmt.Errorf("Host VoWiFi supervisor returned HTTP %d", response.StatusCode)
 		}
 	}
 	if output != nil {
-		return json.NewDecoder(io.LimitReader(response.Body, 16<<10)).Decode(output)
+		return json.NewDecoder(io.LimitReader(response.Body, maxSMSResponseBytes)).Decode(output)
 	}
 	return nil
 }
+
+var _ SMSAPI = (*Client)(nil)

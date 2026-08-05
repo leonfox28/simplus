@@ -30,17 +30,17 @@ func DecodeDeliverPDU(pdu []byte) (DeliverPDU, error) {
 	if position+2 > len(pdu) {
 		return DeliverPDU{}, errors.New("SMS-DELIVER PDU is missing its originating address")
 	}
-	addressDigits := int(pdu[position])
+	addressLength := int(pdu[position])
 	addressType := pdu[position+1]
 	position += 2
-	if addressDigits < 1 || addressDigits > 20 || addressType&0x80 == 0 || addressType&0x70 == 0x50 {
+	if addressLength < 1 || addressLength > 20 || addressType&0x80 == 0 {
 		return DeliverPDU{}, errors.New("SMS-DELIVER PDU uses an unsupported originating address")
 	}
-	addressBytes := (addressDigits + 1) / 2
+	addressBytes := (addressLength + 1) / 2
 	if position+addressBytes+10 > len(pdu) {
 		return DeliverPDU{}, errors.New("SMS-DELIVER PDU is truncated before user data")
 	}
-	sender, err := decodeTPAddress(pdu[position:position+addressBytes], addressDigits, addressType)
+	sender, err := decodeTPAddress(pdu[position:position+addressBytes], addressLength, addressType)
 	if err != nil {
 		return DeliverPDU{}, err
 	}
@@ -67,12 +67,32 @@ func DecodeDeliverPDU(pdu []byte) (DeliverPDU, error) {
 	return DeliverPDU{Sender: sender, ReceivedAt: receivedAt, Segment: segment, DCS: dcs}, nil
 }
 
-func decodeTPAddress(encoded []byte, digits int, addressType byte) (string, error) {
-	decoded := make([]byte, 0, digits+1)
+func decodeTPAddress(encoded []byte, addressLength int, addressType byte) (string, error) {
+	if addressType&0x70 == 0x50 {
+		// TS 23.040 9.1.2.5 expresses Address-Length in useful
+		// semi-octets even when TP-OA contains a packed GSM 7-bit name.
+		// This is the same conversion used by AOSP's GsmSmsAddress.
+		septetCount := addressLength * 4 / 7
+		packedBytes := (septetCount*7 + 7) / 8
+		if septetCount < 1 || packedBytes > len(encoded) {
+			return "", errors.New("SMS-DELIVER alphanumeric originating address has an invalid length")
+		}
+		septets, err := unpackSeptets(encoded[:packedBytes], septetCount, 0)
+		if err != nil {
+			return "", fmt.Errorf("decode SMS-DELIVER alphanumeric originating address: %w", err)
+		}
+		decoded, err := decodeGSM7Septets(septets)
+		if err != nil || decoded == "" {
+			return "", errors.New("SMS-DELIVER alphanumeric originating address is invalid")
+		}
+		return decoded, nil
+	}
+
+	decoded := make([]byte, 0, addressLength+1)
 	if addressType&0x70 == 0x10 {
 		decoded = append(decoded, '+')
 	}
-	for index := 0; index < digits; index++ {
+	for index := 0; index < addressLength; index++ {
 		value := encoded[index/2]
 		nibble := value & 0x0f
 		if index%2 == 1 {
@@ -83,7 +103,7 @@ func decodeTPAddress(encoded []byte, digits int, addressType byte) (string, erro
 		}
 		decoded = append(decoded, '0'+nibble)
 	}
-	if digits%2 == 1 && encoded[len(encoded)-1]>>4 != 0x0f {
+	if addressLength%2 == 1 && encoded[len(encoded)-1]>>4 != 0x0f {
 		return "", errors.New("SMS-DELIVER originating address has an invalid filler nibble")
 	}
 	return string(decoded), nil

@@ -266,7 +266,7 @@ func BuildIMSAuthenticatedRegisterSequence(input IMSInitialRegisterInput, challe
 	fmt.Fprintf(&message, "To: <%s>\r\n", input.PublicIdentity)
 	fmt.Fprintf(&message, "Call-ID: %s\r\n", input.CallID)
 	fmt.Fprintf(&message, "CSeq: %d REGISTER\r\n", sequence)
-	fmt.Fprintf(&message, "Contact: <sip:%s:%d>;expires=%d\r\n", source, input.ProtectedServerPort, expires)
+	fmt.Fprintf(&message, "Contact: <sip:%s:%d>;expires=%d%s\r\n", source, input.ProtectedServerPort, expires, smsCapabilityParameter(input.SMSCapable))
 	fmt.Fprintf(&message, "Authorization: %s\r\n", authorization.String())
 	fmt.Fprintf(&message, "Security-Client: %s\r\n", securityClient)
 	fmt.Fprintf(&message, "Security-Verify: %s\r\n", challenge.SecurityServer.Raw)

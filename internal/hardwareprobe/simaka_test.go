@@ -355,6 +355,23 @@ func TestML307AIdentityParserAcceptsOnlyCompleteIMSI(t *testing.T) {
 	}
 }
 
+func TestParseML307AServiceCentreAddressRequiresInternationalNumericValue(t *testing.T) {
+	for _, fixture := range []struct {
+		lines []string
+		want  string
+	}{
+		{lines: []string{`+CSCA: "+447700900123",145`, "OK"}, want: "+447700900123"},
+		{lines: []string{`+CSCA: "447700900123",145`, "OK"}, want: "+447700900123"},
+		{lines: []string{`+CSCA: "+447700900123",129`, "OK"}},
+		{lines: []string{`+CSCA: "+44secret",145`, "OK"}},
+		{lines: []string{`+CSCA: "+447700900123",145`, "ERROR"}},
+	} {
+		if got := parseML307AServiceCentreAddress(fixture.lines); got != fixture.want {
+			t.Fatalf("parse(%q) = %q, want %q", fixture.lines, got, fixture.want)
+		}
+	}
+}
+
 func successfulUSIMAKAPayload() []byte {
 	res := bytesFromRange(1, 8)
 	ck := bytesFromRange(0x10, 16)

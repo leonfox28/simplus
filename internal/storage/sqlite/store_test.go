@@ -10,6 +10,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/leonfox28/simplus/internal/domain/sms"
+	"github.com/pressly/goose/v3"
 )
 
 func TestOpenSetCreatesFiveSecuredWALDatabases(t *testing.T) {
@@ -104,6 +108,65 @@ func TestOpenSetRejectsAlteredMigrationSchema(t *testing.T) {
 		t.Fatal("OpenSet() accepted an altered Goose migration table")
 	} else if !strings.Contains(err.Error(), "schema manifest mismatch") {
 		t.Fatalf("OpenSet() error = %v", err)
+	}
+}
+
+func TestMessagesV3DatabaseUpgradesToUnconfirmedOutcome(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := sql.Open("sqlite", filepath.Join(root, MessagesDataset+".sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	goose.SetLogger(goose.NopLogger())
+	goose.SetBaseFS(migrationFiles)
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/messages", 3)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO sms_messages (
+    message_id, operation_id, direction, line_id, remote_address, body, status,
+    provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+) VALUES (?, ?, 'outbound', ?, ?, ?, 'queued', '', '', ?, ?, NULL)
+`, "msg_upgrade0123456789012345", "operation-upgrade01234567", "simulator-line-1", "13800138000", "upgrade", now.UnixMilli(), now.UnixMilli()); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	count, err := set.MarkQueuedOutboundSMSUnconfirmed(ctx, "SEND_OUTCOME_UNKNOWN_AFTER_RESTART", now.Add(time.Minute))
+	if err != nil || count != 1 {
+		t.Fatalf("mark upgraded queue unconfirmed: count=%d error=%v", count, err)
+	}
+	messages, err := set.ListSMS(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Status != sms.StatusUnconfirmed {
+		t.Fatalf("upgraded messages = %#v", messages)
 	}
 }
 

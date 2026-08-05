@@ -33,8 +33,23 @@ func TestDashboardManagerCreatesStablePrivateSecretAndReportsInstalledUI(t *test
 	}
 }
 
-func TestDashboardManagerRejectsPublicOrWildcardController(t *testing.T) {
-	for _, address := range []string{"0.0.0.0:19090", "8.8.8.8:19090", "192.168.50.10:9090"} {
+func TestDashboardManagerAcceptsIPv4WildcardController(t *testing.T) {
+	root := t.TempDir()
+	ui := filepath.Join(root, "runtime", "ui")
+	if err := os.MkdirAll(ui, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ui, "index.html"), []byte("zashboard"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := NewDashboardManager(root, "0.0.0.0:19090").Ensure()
+	if err != nil || !status.Available || status.URL != "http://0.0.0.0:19090/ui/" {
+		t.Fatalf("status=%#v err=%v", status, err)
+	}
+}
+
+func TestDashboardManagerRejectsPublicIPv6WildcardOrUnexpectedPort(t *testing.T) {
+	for _, address := range []string{"[::]:19090", "8.8.8.8:19090", "192.168.50.10:9090"} {
 		if _, err := NewDashboardManager(t.TempDir(), address).Ensure(); err == nil {
 			t.Fatalf("accepted controller %q", address)
 		}

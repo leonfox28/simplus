@@ -90,7 +90,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	mux := http.NewServeMux()
 	mux.Handle("/v1/vowifi/", http.StripPrefix("/v1/vowifi", vowifisupervisor.NewHandler(vowifiLocal, logger)))
 	mux.Handle("/", mihomosupervisor.NewHandler(local, logger))
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: agentapi.SMSRequestTimeout, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	serverErrors := make(chan error, 1)

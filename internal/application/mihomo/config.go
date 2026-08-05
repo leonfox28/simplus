@@ -160,7 +160,7 @@ func (manager *ConfigManager) Select(ctx context.Context, subscriptionID string)
 	if !found || !subscription.Enabled {
 		return ConfigStatus{}, ErrConfigNotReady
 	}
-	metadata, configPath, err := manager.artifact(subscriptionID)
+	metadata, configPath, err := manager.ensureDashboardArtifact(ctx, subscriptionID)
 	if err != nil {
 		return ConfigStatus{}, err
 	}
@@ -179,6 +179,40 @@ func (manager *ConfigManager) Select(ctx context.Context, subscriptionID string)
 		return ConfigStatus{}, err
 	}
 	return ConfigStatus{Published: true, Launchable: true, SHA256: metadata.ConfigSHA256, GeneratedAt: metadata.GeneratedAt, SelectedSubscriptionID: subscriptionID, RunningSubscriptionID: running}, nil
+}
+
+func (manager *ConfigManager) ensureDashboardArtifact(ctx context.Context, subscriptionID string) (ArtifactMetadata, string, error) {
+	metadata, configPath, err := manager.artifact(subscriptionID)
+	if err != nil {
+		return ArtifactMetadata{}, "", err
+	}
+	body, err := os.ReadFile(configPath)
+	if err != nil {
+		return ArtifactMetadata{}, "", ErrConfigNotReady
+	}
+	var dashboard struct {
+		Controller string `yaml:"external-controller"`
+		Secret     string `yaml:"secret"`
+		ExternalUI string `yaml:"external-ui"`
+	}
+	if yaml.Unmarshal(body, &dashboard) == nil &&
+		dashboard.Controller == manager.ControllerAddress &&
+		dashboard.Secret == manager.ControllerSecret &&
+		dashboard.ExternalUI == manager.ExternalUI {
+		return metadata, configPath, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), "raw.yaml"))
+	if err != nil {
+		return ArtifactMetadata{}, "", ErrConfigNotReady
+	}
+	nodes, err := manager.Store.ListMihomoSubscriptionNodes(ctx, subscriptionID)
+	if err != nil {
+		return ArtifactMetadata{}, "", err
+	}
+	if _, err := manager.BuildSubscription(ctx, subscriptionID, raw, nodes); err != nil {
+		return ArtifactMetadata{}, "", err
+	}
+	return manager.artifact(subscriptionID)
 }
 
 func (manager *ConfigManager) Status(ctx context.Context) (ConfigStatus, error) {

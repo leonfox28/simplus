@@ -243,6 +243,7 @@ func (querier atQuerier) ReadSIMIMSIdentity(ctx context.Context, endpoint, profi
 		return agentapi.SIMIMSIdentityMaterial{}, err
 	}
 	if available {
+		material.SMSOverIP = readML307ASMSOverIPConfiguration(ctx, query)
 		return material, nil
 	}
 	lines, err := query(ctx, "AT+CIMI", 2*time.Second)
@@ -260,7 +261,60 @@ func (querier atQuerier) ReadSIMIMSIdentity(ctx context.Context, endpoint, profi
 		HomeDomain: domain, PublicIdentities: []string{"sip:" + privateIdentity},
 		ApplicationDiscovery:  material.ApplicationDiscovery,
 		ApplicationCandidates: material.ApplicationCandidates,
+		SMSOverIP:             readML307ASMSOverIPConfiguration(ctx, query),
 	}, nil
+}
+
+func readML307ASMSOverIPConfiguration(ctx context.Context, query boundedATQuery) *agentapi.SIMIMSSMSConfiguration {
+	lines, err := query(ctx, "AT+CSCA?", 2*time.Second)
+	if err != nil {
+		return nil
+	}
+	address := parseML307AServiceCentreAddress(lines)
+	if address == "" {
+		return nil
+	}
+	return &agentapi.SIMIMSSMSConfiguration{
+		ServiceCentreURI: "tel:" + address, ServiceCentreAddress: address,
+	}
+}
+
+func parseML307AServiceCentreAddress(lines []string) string {
+	if !hasTerminalOK(lines) {
+		return ""
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "+CSCA:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "+CSCA:"))
+		comma := strings.LastIndexByte(value, ',')
+		if comma < 3 {
+			return ""
+		}
+		number := strings.TrimSpace(value[:comma])
+		if len(number) < 2 || number[0] != '"' || number[len(number)-1] != '"' {
+			return ""
+		}
+		number = number[1 : len(number)-1]
+		typeOfAddress, err := strconv.Atoi(strings.TrimSpace(value[comma+1:]))
+		if err != nil || typeOfAddress != 145 || len(number) < 3 || len(number) > 21 {
+			return ""
+		}
+		if number[0] != '+' {
+			number = "+" + number
+		}
+		if len(number) < 4 || len(number) > 21 {
+			return ""
+		}
+		for _, current := range number[1:] {
+			if current < '0' || current > '9' {
+				return ""
+			}
+		}
+		return number
+	}
+	return ""
 }
 
 func validateML307ASIMAKATarget(ctx context.Context, query boundedATQuery, identities IdentityPseudonymizer, expectedFingerprint string) error {

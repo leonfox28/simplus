@@ -47,12 +47,12 @@ type failOnceInbox struct {
 	failed bool
 }
 
-func (inbox *failOnceInbox) AcknowledgeSMS(ctx context.Context, deviceID, messageID, operationID string) error {
+func (inbox *failOnceInbox) AcknowledgeSMS(ctx context.Context, target InboxTarget, messageID, operationID string) error {
 	if !inbox.failed {
 		inbox.failed = true
 		return errors.New("injected acknowledge failure")
 	}
-	return inbox.Inbox.AcknowledgeSMS(ctx, deviceID, messageID, operationID)
+	return inbox.Inbox.AcknowledgeSMS(ctx, target, messageID, operationID)
 }
 
 func newAgentGatewayForTest(t *testing.T, messages ...agentapi.SMSStoredMessage) (*AgentSMSGateway, *agentapi.SimulatorSMSBackend) {
@@ -292,6 +292,30 @@ func TestTransportFailureBecomesDurableMessageState(t *testing.T) {
 	}
 }
 
+func TestUnknownTransportOutcomeBecomesDurableUnconfirmedState(t *testing.T) {
+	service, _ := newTestService(t, senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		return SendSMSResult{}, &TransportError{Code: ErrorSendOutcomeUnknown}
+	}))
+	request := SendRequest{
+		OperationID: "operation-unknown01234567", LineID: "simulator-line-1",
+		Destination: "13800138000", Body: "may have been sent",
+	}
+	result, err := service.Send(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message.Status != sms.StatusUnconfirmed || result.Message.ErrorCode != ErrorSendOutcomeUnknown {
+		t.Fatalf("unconfirmed result = %#v", result)
+	}
+	replayed, err := service.Send(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayed.Replayed || replayed.Message.ID != result.Message.ID || replayed.Message.Status != sms.StatusUnconfirmed {
+		t.Fatalf("replayed unconfirmed result = %#v", replayed)
+	}
+}
+
 func TestAgentGatewayPreservesUnknownSendOutcomeCode(t *testing.T) {
 	const instanceID = "01234567-89ab-cdef-0123-456789abcdef"
 	for _, transportErr := range []error{
@@ -348,7 +372,7 @@ func TestServiceStartupDoesNotRedispatchInterruptedQueuedSMS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if transportCalls != 0 || len(messages) != 1 || messages[0].Status != sms.StatusFailed || messages[0].ErrorCode != ErrorOutcomeUnknownAfterRestart {
+	if transportCalls != 0 || len(messages) != 1 || messages[0].Status != sms.StatusUnconfirmed || messages[0].ErrorCode != ErrorOutcomeUnknownAfterRestart {
 		t.Fatalf("transport calls = %d, messages = %#v", transportCalls, messages)
 	}
 }

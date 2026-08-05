@@ -31,6 +31,22 @@
 
 错误码必须保持脱敏，不得通过错误字符串补充地址、身份、SPI、节点名称或鉴权内容。
 
+## SMS over IMS 结果语义
+
+| 错误码 | 含义 | 行为边界 |
+| --- | --- | --- |
+| `IMS_SMS_ACCEPTED_AWAITING_REPORT` | 所有分段已取得 SIP `2xx`，正在等待异步 RP 最终报告 | 带 provider ID 持久化为橙色 `unconfirmed`；后台可在收到 RP-ACK 后自动提升为 `sent`，报告窗口到期则改为 `SMS_SEND_OUTCOME_UNKNOWN`，不得自动重发 |
+| `SMS_SEND_OUTCOME_UNKNOWN` | 已发起提交，但 SIP transaction 的结果不完整或连接中断 | 持久化为橙色 `unconfirmed`，不得自动重发；由用户决定是否创建新的发送操作 |
+| `SMS_REJECTED` / `IMS_SMS_REJECTED` | 在产生提交副作用前被 SIP 拒绝，或单段提交收到 RP-ERROR | 保留业务状态和入站分片；不要把 SIP 2xx 单独记为 sent |
+| `IMS_SMS_PARTIAL_OR_REJECTED` | multipart 至少一段收到 RP-ERROR，其他段可能已经被接受 | 保持 `unconfirmed`，不得自动补发整条消息 |
+| `SMS_UNAVAILABLE` | 当前 Line、IMS session 或 SIM 短信中心路由材料不可用 | 先恢复 `online` 和 `+g.3gpp.smsip` 前置条件，不得回退为伪成功 |
+
+发送请求只等待每个分段的 SIP 最终响应，不等待 RP-ACK/RP-ERROR。后续报告通过后台同步更新已持久化消息；报告超时不会变成 `failed`。长短信仍会将同一次用户操作的所有分段各提交一次，这属于完成同一 multipart 消息，不是自动重发。若在部分分段之后发生拒绝或连接丢失，仍保持 `unconfirmed`，不能降格为确定 `failed`，也不能自动补发。
+
+入站确认默认携带 SMS-DELIVER-REPORT 和 `In-Reply-To`；普通短信成功报告只包含 `TP-MTI=00` 与空 `TP-PI=00`，不附加虚构的 PID、DCS 或 UD 字段。若网关的 submit report 没有相关性 header，worker 只在仍占用且唯一的 RP reference 可匹配时接受并记住该会话不支持该 header。能力未知时，只有相关 delivery report 被明确以 SIP `488` 拒绝，才对同一 RP-ACK 做一次不带该 header 的兼容重试；其他拒绝、无响应或事务不匹配不切换报文形态。短信同步失败后从 15 秒开始指数退避并封顶五分钟，成功后恢复正常周期。运行诊断只允许输出 SIP/RP 类型、解析失败与关联失败计数；原始 SIP、Call-ID、身份、号码、PDU 和正文不得进入公开日志。
+
+运营商通知和验证码可能使用 GSM7 字母型 TP-Originating-Address，而不是电话号码。入站排查必须同时覆盖该地址类型；只看到 IMS MESSAGE 却没有业务消息时，先用脱敏计数区分 PDU 解码失败、持久化失败和 RP-ACK 失败，不得为诊断输出发送方、正文或验证码。
+
 ## 固定复查顺序
 
 1. 查看 Line 的 `state`、`stage`、`attempt`、`registeredAt`、`nextRefreshAt` 和稳定错误码；

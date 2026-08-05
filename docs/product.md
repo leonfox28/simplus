@@ -102,7 +102,7 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 局域网部署不等于完全取消边界。MVP 保留：
 
 - 管理员登录，防止局域网中误操作；
-- 默认只监听明确配置的本机/局域网地址，不开放公网发现；
+- production Web/API 与带实例密码的 Mihomo controller 监听所有 IPv4 接口，由部署者使用路由与主机防火墙确保它们只在可信 LAN 可达；开发模式默认只监听回环地址；
 - `simplus-agent` 以非 root 服务运行，Unix socket 限制调用者；
 - Web/API 只能调用固定类型的模组动作，不能传任意 AT/QMI 命令或设备路径；
 - 同一模组上的命令串行，超时后读取真实状态再决定结果；
@@ -126,6 +126,7 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 8. Simulator 完成 Host VoWiFi direct 的短信和电话状态机；
 9. Simulator 通过 `mihomo-required` 完成受控出口与无 direct fallback 验证；
 10. ML307A 受控纵切在 RF Off 下完成脱敏 SIM 身份、AKA、ePDG 和 IMS 注册验证，任何失败均不回退蜂窝或直连；
-11. 安装和运行步骤可以由仓库文档在目标机器上复现。
+11. SMS over IMS 先通过 fixture 验证 RPDU、SIP transaction、异步提交报告和 persist-before-RP-ACK，再在单独授权下完成真实单段与长短信收发；
+12. 安装和运行步骤可以由仓库文档在目标机器上复现。
 
-真实硬件默认禁止开启/关闭射频、建立蜂窝数据流量，以及短信、电话、eUICC 切换等任何会改变模组、SIM、网络或外部通信状态的操作。ML307A Host VoWiFi 仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。
+真实硬件默认禁止开启/关闭射频、建立蜂窝数据流量，以及短信、电话、eUICC 切换等任何会改变模组、SIM、网络或外部通信状态的操作。ML307A Host VoWiFi 注册仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；真实 SMS over IMS 还必须遵循 [`0016`](decisions/0016-vowifi-sms-over-ims.md) 的单独授权，其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。

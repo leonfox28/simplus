@@ -2,7 +2,7 @@
 
 > 更新：2026-08-05
 >
-> 状态：V1 管理面与 Host VoWiFi 常驻运行纵切已完成；脱敏后的首次公开源码仓库已经建立。
+> 状态：V1 管理面与 Host VoWiFi 常驻运行纵切已完成；SMS over IMS 真实入站、Web/API 异步 `sent` 提升、单段与两段 UCS-2 自回环，以及自动重连后再次收发均已完成。
 
 本文只记录可以公开的代码状态、验证等级和下一步；现场与个人环境材料遵循 [`privacy-and-publication.md`](privacy-and-publication.md) 留在仓库外。产品范围以 [`product.md`](product.md) 为准，进程与安全不变量以 [`architecture.md`](architecture.md) 为准，任务状态以 [`plans/active/mvp.md`](plans/active/mvp.md) 为准。
 
@@ -34,6 +34,9 @@
 - `simplus-netd` 独占 Mihomo、namespace、路由、nftables、strongSwan 和 XFRM 生命周期；
 - Host VoWiFi 已完成真实 ePDG/IMS 注册、持续 keepalive、连续提前刷新、有界重连、停用清理和服务恢复验证；
 - Web/API 只返回阶段、在线状态、出口、注册时间、下次刷新和稳定错误码，不返回内部地址、进程、SPI、P-CSCF 或鉴权材料。
+- Host VoWiFi worker 已实现条件 `+g.3gpp.smsip` 注册、binary SIP MESSAGE、RP-DATA/RP-ACK/RP-ERROR、REGISTER `P-Associated-URI` 身份选择、`In-Reply-To`/RP reference transaction 关联和类型化 `simplus-netd` 短信 API；现有短信历史页直接复用该 transport；
+- multipart 入站使用 SQLite 分片 spool：每片落库后独立 RP-ACK，十分钟内唯一完整组才成为可见消息，并已用关闭/重开数据库的 fixture 验证恢复；短信页面在可见期间有界刷新，后台新落库消息不要求用户手动刷新浏览器；
+- 出站请求收齐各段 SIP 最终响应即返回，不等待 RP 报告；SIP 已接受时带 provider ID 持久化为 `unconfirmed`，后台取得关联 RP-ACK 后才异步提升为 `sent`，报告缺失、响应未知和 multipart 部分拒绝均不自动重发。入站只有业务数据库持久化后才发送 RP-ACK；普通成功 SMS-DELIVER-REPORT 使用带空 TP-PI 的两字节 TPDU，不虚构 PID/DCS/UD 可选字段。受控 HIL 已完成真实单段与 multipart 入站，以及一条单段 GSM7 服务请求的关联出站 RP-ACK 和新 multipart 业务回复；失败同步使用有界指数退避。
 
 ### Mihomo
 
@@ -45,9 +48,10 @@
 
 ## 已验证边界
 
-- 完整短信、电话、数字音频和 eUICC 交互目前只在 Simulator 验证；
+- 模组原生蜂窝短信、电话、数字音频和 eUICC 交互目前只在 Simulator 验证；Host VoWiFi 的 SMS over IMS 证据单独列在下方；
 - QDC507 的真实短信候选驱动仅有 fixture/transcript 证据，没有进入 production Agent；
-- Host VoWiFi 在线只证明 ePDG/IMS 注册与刷新，不代表 SMS over IMS、通话或媒体已经可用；
+- Host VoWiFi 在线只证明 ePDG/IMS 注册与刷新；SMS over IMS 已有真实单段与 multipart 入站、服务请求出站 RP-ACK、公开 Web/API `unconfirmed → sent`、普通号码单段与两段 UCS-2 自回环，以及自动重连后再次收发证据，但不能外推到其他收件人，通话和媒体也仍不可用；
+- SMS over IMS 的其他收件人互通和真实网络侧失败映射尚未完成运营商 HIL；
 - 当前没有验证显式 IMS de-registration、数日稳定性或 IKE/CHILD 小时级 rekey；
 - Mihomo 配置中的协议字段、URL-Test 或普通 UDP 成功不能替代目标业务的真实 UDP/ePDG 探针；
 - 项目只面向可信 LAN，不应直接暴露到公网。
@@ -56,9 +60,9 @@
 
 ## 当前下一步
 
-1. 跟踪并处理 Umi 构建工具链当前未消除的传递依赖审计告警，不以降低审计门槛代替上游修复；
-2. 继续复核二进制发布产物中的第三方许可证、源码提供义务和 notice；
-3. 后续真实短信、电话、媒体或 eUICC 写能力必须分别建立决策、实现与获准 HIL。
+1. Host VoWiFi 短信纵切已达到当前可用测试条件；在具备合适测试号码时补充其他收件人互通；
+2. 跟踪 Umi 传递依赖审计告警并继续复核发布产物的第三方许可证材料；
+3. 后续电话、媒体或 eUICC 写能力仍需分别建立决策、实现与获准 HIL。
 
 ## 验证入口
 

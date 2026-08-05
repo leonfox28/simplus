@@ -63,6 +63,22 @@ func (service *Service) List(ctx context.Context) ([]domain.State, error) {
 	return service.listLocked(ctx)
 }
 
+// Available implements the messaging fail-closed access-path guard. SMS is
+// dispatched only while the exact Line has an online registered Host VoWiFi
+// worker; desired or reconnecting states are not sufficient.
+func (service *Service) Available(ctx context.Context, lineID string) bool {
+	states, err := service.List(ctx)
+	if err != nil {
+		return false
+	}
+	for _, state := range states {
+		if state.LineID == lineID {
+			return state.Online && state.State == vowifisupervisor.StateOnline
+		}
+	}
+	return false
+}
+
 func (service *Service) Activate(ctx context.Context, lineID string) (domain.State, error) {
 	service.mu.Lock()
 	defer service.mu.Unlock()

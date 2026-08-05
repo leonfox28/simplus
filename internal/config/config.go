@@ -130,8 +130,9 @@ func (cfg Config) Validate() error {
 		return errors.New("server.listen port must be an integer from 1 through 65535")
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
-		return fmt.Errorf("server.listen must use a numeric loopback or private LAN address: %q", cfg.Server.Listen)
+	isIPv4Wildcard := ip != nil && ip.To4() != nil && ip.Equal(net.IPv4zero)
+	if ip == nil || (!isIPv4Wildcard && !ip.IsLoopback() && !ip.IsPrivate()) {
+		return fmt.Errorf("server.listen must use a numeric loopback, private LAN address, or IPv4 wildcard: %q", cfg.Server.Listen)
 	}
 
 	if strings.TrimSpace(cfg.Storage.DataRoot) == "" {

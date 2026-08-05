@@ -22,9 +22,11 @@ import (
 const (
 	ErrorOutcomeUnknownAfterRestart = "SEND_OUTCOME_UNKNOWN_AFTER_RESTART"
 	ErrorSendOutcomeUnknown         = "SMS_SEND_OUTCOME_UNKNOWN"
+	ErrorAcceptedAwaitingReport     = "IMS_SMS_ACCEPTED_AWAITING_REPORT"
 	ErrorCancelledBeforeDispatch    = "SEND_CANCELLED_BEFORE_DISPATCH"
 	ErrorTransportFailed            = "SMS_TRANSPORT_FAILED"
 	HistoryCapacity                 = 10000
+	InboundFragmentRetention        = 7 * 24 * time.Hour
 )
 
 var (
@@ -49,9 +51,12 @@ var (
 type Repository interface {
 	CreateOutboundSMS(context.Context, sms.Message) (sms.Message, bool, error)
 	CreateInboundSMS(context.Context, sms.Message) (sms.Message, bool, error)
+	StoreInboundSMSFragment(context.Context, sms.InboundFragment) ([]sms.InboundFragment, bool, error)
+	PruneInboundSMSFragments(context.Context, time.Time) (int64, error)
 	MarkOutboundSMSSent(context.Context, string, string, time.Time) (sms.Message, error)
-	MarkOutboundSMSFailed(context.Context, string, string, time.Time) (sms.Message, error)
-	FailQueuedOutboundSMS(context.Context, string, time.Time) (int64, error)
+	MarkOutboundSMSUnconfirmed(context.Context, string, string, string, time.Time) (sms.Message, error)
+	MarkOutboundSMSFailed(context.Context, string, string, string, time.Time) (sms.Message, error)
+	MarkQueuedOutboundSMSUnconfirmed(context.Context, string, time.Time) (int64, error)
 	ListSMS(context.Context, int) ([]sms.Message, error)
 	CountSMS(context.Context) (int64, error)
 	DeleteSMS(context.Context, string) error
@@ -80,7 +85,16 @@ type SendSMSCommand struct {
 
 type SendSMSResult struct {
 	ProviderMessageID string
+	State             string
+	ErrorCode         string
 }
+
+const (
+	SendStateAccepted    = "accepted"
+	SendStateSent        = "sent"
+	SendStateFailed      = "failed"
+	SendStateUnconfirmed = "unconfirmed"
+)
 
 type Sender interface {
 	SendSMS(context.Context, SendSMSCommand) (SendSMSResult, error)
@@ -96,12 +110,31 @@ type InboxMessage struct {
 	Sender          string
 	Body            string
 	ReceivedAt      time.Time
+	Segment         *smscodec.Segment
+}
+
+type InboxTarget struct {
+	LineID           string
+	PhysicalDeviceID string
 }
 
 type Inbox interface {
-	ListSMS(context.Context, string) ([]InboxMessageReference, error)
-	ReadSMS(context.Context, string, string) (InboxMessage, error)
-	AcknowledgeSMS(context.Context, string, string, string) error
+	ListSMS(context.Context, InboxTarget) ([]InboxMessageReference, error)
+	ReadSMS(context.Context, InboxTarget, string) (InboxMessage, error)
+	AcknowledgeSMS(context.Context, InboxTarget, string, string) error
+}
+
+type SubmitReport struct {
+	MessageID         string
+	ProviderMessageID string
+	State             string
+	ErrorCode         string
+	CompletedAt       time.Time
+}
+
+type SubmitReportInbox interface {
+	ListSMSSubmitReports(context.Context, InboxTarget) ([]SubmitReport, error)
+	AcknowledgeSMSSubmitReport(context.Context, InboxTarget, string, string) error
 }
 
 type TransportError struct {
@@ -142,18 +175,34 @@ type Service struct {
 	lines      LineSource
 	sender     Sender
 	inbox      Inbox
+	reports    SubmitReportInbox
 	random     io.Reader
 	now        func() time.Time
 
-	gatesMu     sync.Mutex
-	gates       map[string]*serialGate
-	accessPaths AccessPathGuard
+	gatesMu       sync.Mutex
+	gates         map[string]*serialGate
+	accessPaths   AccessPathGuard
+	hostVoWiFiSMS bool
 }
 
 func (service *Service) UseAccessPathGuard(guard AccessPathGuard) {
 	if service != nil {
 		service.accessPaths = guard
 	}
+}
+
+func (service *Service) UseHostVoWiFiTransport(guard AccessPathGuard) {
+	if service != nil {
+		service.hostVoWiFiSMS = true
+		service.accessPaths = guard
+	}
+}
+
+func (service *Service) supportsSMS(line inventory.Line) bool {
+	if service != nil && service.hostVoWiFiSMS {
+		return line.AccessMode == accessmode.HostVoWiFiOnly && line.Capabilities.HostVoWiFiAuth
+	}
+	return line.Capabilities.SMS
 }
 
 func NewService(ctx context.Context, repository Repository, lines LineSource, sender Sender, inboxes ...Inbox) (*Service, error) {
@@ -170,9 +219,13 @@ func NewService(ctx context.Context, repository Repository, lines LineSource, se
 	}
 	if len(inboxes) != 0 {
 		service.inbox = inboxes[0]
+		service.reports, _ = inboxes[0].(SubmitReportInbox)
 	}
-	if _, err := repository.FailQueuedOutboundSMS(ctx, ErrorOutcomeUnknownAfterRestart, service.currentTime()); err != nil {
+	if _, err := repository.MarkQueuedOutboundSMSUnconfirmed(ctx, ErrorOutcomeUnknownAfterRestart, service.currentTime()); err != nil {
 		return nil, fmt.Errorf("%w: reconcile interrupted outbound SMS: %v", ErrPersistence, err)
+	}
+	if _, err := repository.PruneInboundSMSFragments(ctx, service.currentTime().Add(-InboundFragmentRetention)); err != nil {
+		return nil, fmt.Errorf("%w: prune expired inbound SMS fragments: %v", ErrPersistence, err)
 	}
 	return service, nil
 }
@@ -226,7 +279,7 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 	case gate.token <- struct{}{}:
 		defer func() { <-gate.token }()
 	case <-ctx.Done():
-		failed, persistenceErr := service.markFailed(message.ID, ErrorCancelledBeforeDispatch)
+		failed, persistenceErr := service.markFailed(message.ID, "", ErrorCancelledBeforeDispatch)
 		if persistenceErr != nil {
 			return SendResult{}, persistenceErr
 		}
@@ -239,26 +292,70 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 		Destination: request.Destination, Body: request.Body, Segments: segments,
 	})
 	if sendErr != nil {
-		failed, persistenceErr := service.markFailed(message.ID, transportErrorCode(sendErr))
+		errorCode := transportErrorCode(sendErr)
+		if errorCode == ErrorSendOutcomeUnknown {
+			unconfirmed, persistenceErr := service.markUnconfirmed(message.ID, "", errorCode)
+			if persistenceErr != nil {
+				return SendResult{}, persistenceErr
+			}
+			return SendResult{Message: unconfirmed}, nil
+		}
+		failed, persistenceErr := service.markFailed(message.ID, "", errorCode)
 		if persistenceErr != nil {
 			return SendResult{}, persistenceErr
 		}
 		return SendResult{Message: failed}, nil
 	}
 	if strings.TrimSpace(result.ProviderMessageID) == "" || len(result.ProviderMessageID) > 128 {
-		failed, persistenceErr := service.markFailed(message.ID, ErrorTransportFailed)
+		failed, persistenceErr := service.markFailed(message.ID, "", ErrorTransportFailed)
 		if persistenceErr != nil {
 			return SendResult{}, persistenceErr
 		}
 		return SendResult{Message: failed}, nil
 	}
-	finalizeCtx, cancel := service.finalizeContext(ctx)
-	defer cancel()
-	completed, err := service.repository.MarkOutboundSMSSent(finalizeCtx, message.ID, result.ProviderMessageID, service.currentTime())
-	if err != nil {
-		return SendResult{}, fmt.Errorf("%w: persist outbound SMS success: %v", ErrPersistence, err)
+	switch result.State {
+	case "", SendStateSent:
+		if result.ErrorCode != "" {
+			unconfirmed, persistenceErr := service.markUnconfirmed(message.ID, result.ProviderMessageID, ErrorSendOutcomeUnknown)
+			if persistenceErr != nil {
+				return SendResult{}, persistenceErr
+			}
+			return SendResult{Message: unconfirmed}, nil
+		}
+		finalizeCtx, cancel := service.finalizeContext(ctx)
+		defer cancel()
+		completed, err := service.repository.MarkOutboundSMSSent(finalizeCtx, message.ID, result.ProviderMessageID, service.currentTime())
+		if err != nil {
+			return SendResult{}, fmt.Errorf("%w: persist outbound SMS success: %v", ErrPersistence, err)
+		}
+		return SendResult{Message: completed}, nil
+	case SendStateAccepted:
+		if result.ErrorCode != "" {
+			result.ErrorCode = ErrorSendOutcomeUnknown
+		} else {
+			result.ErrorCode = ErrorAcceptedAwaitingReport
+		}
+	case SendStateUnconfirmed:
+		if !errorCodePattern.MatchString(result.ErrorCode) {
+			result.ErrorCode = ErrorSendOutcomeUnknown
+		}
+	case SendStateFailed:
+		if !errorCodePattern.MatchString(result.ErrorCode) {
+			result.ErrorCode = ErrorTransportFailed
+		}
+		failed, persistenceErr := service.markFailed(message.ID, result.ProviderMessageID, result.ErrorCode)
+		if persistenceErr != nil {
+			return SendResult{}, persistenceErr
+		}
+		return SendResult{Message: failed}, nil
+	default:
+		result.ErrorCode = ErrorSendOutcomeUnknown
 	}
-	return SendResult{Message: completed}, nil
+	unconfirmed, persistenceErr := service.markUnconfirmed(message.ID, result.ProviderMessageID, result.ErrorCode)
+	if persistenceErr != nil {
+		return SendResult{}, persistenceErr
+	}
+	return SendResult{Message: unconfirmed}, nil
 }
 
 func (service *Service) List(ctx context.Context, limit int) ([]sms.Message, error) {
@@ -268,7 +365,7 @@ func (service *Service) List(ctx context.Context, limit int) ([]sms.Message, err
 	if limit < 1 || limit > 100 {
 		return nil, ErrRequestInvalid
 	}
-	if service.inbox != nil {
+	if service.inbox != nil || service.reports != nil {
 		if _, err := service.SyncInbound(ctx); err != nil {
 			return nil, err
 		}
@@ -316,7 +413,7 @@ func (service *Service) sendLine(ctx context.Context, lineID string) (inventory.
 		if line.State != inventory.LineReady {
 			return inventory.Line{}, ErrLineUnavailable
 		}
-		if !line.Capabilities.SMS {
+		if !service.supportsSMS(line) {
 			return inventory.Line{}, ErrLineUnsupported
 		}
 		if line.ModemFunctionID == "" || line.PhysicalDeviceID == "" {
@@ -338,12 +435,22 @@ func (service *Service) gate(modemFunctionID string) *serialGate {
 	return gate
 }
 
-func (service *Service) markFailed(messageID, errorCode string) (sms.Message, error) {
+func (service *Service) markFailed(messageID, providerMessageID, errorCode string) (sms.Message, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	message, err := service.repository.MarkOutboundSMSFailed(ctx, messageID, errorCode, service.currentTime())
+	message, err := service.repository.MarkOutboundSMSFailed(ctx, messageID, providerMessageID, errorCode, service.currentTime())
 	if err != nil {
 		return sms.Message{}, fmt.Errorf("%w: persist outbound SMS failure: %v", ErrPersistence, err)
+	}
+	return message, nil
+}
+
+func (service *Service) markUnconfirmed(messageID, providerMessageID, errorCode string) (sms.Message, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	message, err := service.repository.MarkOutboundSMSUnconfirmed(ctx, messageID, providerMessageID, errorCode, service.currentTime())
+	if err != nil {
+		return sms.Message{}, fmt.Errorf("%w: persist unconfirmed outbound SMS: %v", ErrPersistence, err)
 	}
 	return message, nil
 }

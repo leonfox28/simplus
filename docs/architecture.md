@@ -23,12 +23,13 @@ simplusd ───── SQLite
 ### `simplusd`（目标职责）
 
 - 提供 Web API；开发时前端由 Umi Max dev server 提供，生产由 `simplusd` 承载构建后的静态资源；
+- production Web/API 固定监听 IPv4 wildcard `0.0.0.0:8080`，不依赖安装时或 DHCP 分配的具体地址；开发默认保持 loopback，公网隔离由部署网络和主机防火墙负责，见 [`0014`](decisions/0014-ipv4-wildcard-management-listener.md)；
 - 管理单一管理员会话；
 - 保存模组、短信、联系人和通话状态；
 - 为每个模组维护串行 worker；
 - 把硬件结果转换成面向用户的稳定状态。
 
-当前代码已经有 API、setup/auth、inventory 和存储，并完成 Simulator 短信纵切：发送前持久化、按 Modem 串行、GSM7/UCS-2 长短信编码、fake Agent list/read/send/ACK、入站 persist-before-ACK、最终状态和 Web 历史。真实模组 SMS backend 与电话业务尚未实现。
+当前代码已经有 API、setup/auth、inventory 和存储，并完成 Simulator 短信纵切：发送前持久化、按 Modem 串行、GSM7/UCS-2 长短信编码、fake Agent list/read/send/ACK、入站 persist-before-ACK、最终状态和 Web 历史。Host VoWiFi 已接入同一短信业务模型；普通蜂窝 SMS backend 与电话业务尚未实现。
 
 ### `simplus-agent`（目标职责）
 
@@ -90,10 +91,11 @@ simplusd typed SMS/Call/eUICC API
 - production 只有 root `simplus-netd` 拥有创建 namespace、veth、策略路由、nftables 和 XFRM 所需权限；`simplusd` 与 Web 始终没有网络管理 capability；
 - Mihomo supervisor 只接受已安装 core 和每订阅不可变生成配置的固定路径形状，并把 listener bind error 视为启动失败；
 - 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；
+- 同一 worker 还独占 SMS over IMS 的受保护 SIP socket、Service-Route、RP reference、异步出站提交事务与待确认入站消息；root-only worker socket 只提供固定的发送、入站 list/read/acknowledge、出站报告 list/acknowledge 操作，管理进程无法提交 SIP、RPDU、APDU、设备路径或网络参数；提交报告优先按 `In-Reply-To` 并始终按仍占用的 RP reference 关联原 SIP transaction；
 - worker 重新检查固定 ML307A、SIM identity fence、SIM READY、RF Off 与出口，维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连；停用、进程退出及服务重启都清理其临时网络对象；
 - core SQLite 只保存管理员的 `desired_active` 意图，实时 online 状态只来自 `simplus-netd`；`simplusd` 启动和每十秒协调二者；
-- 权限与协议决策见 [`0008`](decisions/0008-mihomo-tproxy-privilege-separation.md) 和 [`0012`](decisions/0012-web-managed-vowifi-runtime.md)。
-- Zashboard `v3.6.0` 作为固定摘要、MIT 许可的静态第三方产物安装到 Mihomo working directory，由 core 的 `external-ui` 直接托管；controller 仅绑定安装器选择的私网 IP `:19090` 并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md)。
+- 权限与协议决策见 [`0008`](decisions/0008-mihomo-tproxy-privilege-separation.md)、[`0012`](decisions/0012-web-managed-vowifi-runtime.md) 和 [`0016`](decisions/0016-vowifi-sms-over-ims.md)。
+- Zashboard `v3.6.0` 是安装到 Mihomo working directory 的固定摘要、MIT 许可静态产物，没有独立进程或 systemd unit，由运行中的 core 通过 `external-ui` 直接托管；controller 的监听范围跟随管理后台，production 为 `0.0.0.0:19090`，并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md) 与 [`0015`](decisions/0015-zashboard-wildcard-controller.md)。
 - 订阅节点的内部稳定 ID 仅用于持久化和 Line Binding；生成 Mihomo 配置时必须保留上游 `name`，重名节点应拒绝转换而不是暗中改名。
 - 订阅本身使用随机 128-bit `subscription_...` ID 作为稳定唯一身份；显示名称只供用户识别，可重复且可编辑，新建时默认为由内部随机 ID 派生的 6 位易读标识。
 - 当前订阅按实际国家预生成固定 localhost TPROXY listener。真实 Line 只绑定 `direct` 或一个国家 listener；该绑定不进入订阅 YAML，因此增删改 Line 不触发 Mihomo 配置重写或重启。
@@ -101,7 +103,7 @@ simplusd typed SMS/Call/eUICC API
 ### 分阶段启用的组件
 
 - V1 的媒体交互先由 Simulator 验证，不为真实硬件启动 Asterisk 或其他媒体进程；
-- 当前真实 Host IMS/ePDG 只覆盖经验证的 ML307A 注册与保活，不据此开放短信、电话或媒体；
+- 当前真实 Host IMS/ePDG 已开放 SMS over IMS，并有真实单段与 multipart 入站持久化、RP-ACK 和完整重组证据；受控单段服务请求已在 SIP 接受后取得关联出站 RP-ACK 及 multipart 业务回复，公开 Web/API 已证明业务库 `unconfirmed → sent` 的异步状态提升，普通号码单段与两段 UCS-2 长短信自回环及自动重连后再次收发也已完成。其他收件人互通仍未验收，电话或媒体仍未开放；
 - Mihomo 只作为 Host VoWiFi Line 的可选出口，不成为宿主通用代理。
 
 目标 Host VoWiFi 数据流是：
@@ -149,23 +151,23 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 
 ```text
 Web -> simplusd validation -> persist queued message
-    -> modem worker -> typed sender -> Agent sms.send -> modem
-    -> persist sent/failed -> Web update
+    -> typed sender -> Agent cellular SMS or simplus-netd per-Line IMS worker
+    -> persist sent/unconfirmed/failed -> Web update
 ```
 
-当前切片把 simplusd Simulator 接到进程内 Local Agent client；它与 Unix socket Client 使用相同的 list/read/send/ACK 类型。hardware 没有 SMS sender/inbox，replay 仍未实现，不会因开发功能误发真实短信。V1 不增加真实 SMS backend。
+Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独立 typed gateway，把 GSM7/UCS-2 产生的 SMS-SUBMIT TPDU 封装为 RP-DATA 和 binary SIP MESSAGE。worker 收齐各分段 SIP 最终响应即返回，绝不为 RP 报告占住业务请求；SIP `202` 只把带 provider ID 的消息持久化为橙色 `unconfirmed`。后台随后消费异步 RP 报告：全部匹配的 RP-ACK 才提升为 `sent`，单段 RP-ERROR 可成为 `failed`，multipart 的部分拒绝仍是 `unconfirmed`；响应丢失或报告超时也保持 `unconfirmed` 且不自动重发。同一个 multipart 操作始终逐段各提交一次，不会因为第一段缺少报告而截断，也不会重新提交已经处理过的分段。普通 hardware cellular SMS sender 仍未接入 production Agent。
 
 ### 接收短信
 
 ```text
-modem -> Agent bounded read -> simplusd
+modem/IMS worker -> bounded typed read -> simplusd
     -> persist raw/decoded message
     -> confirm persistence
     -> delete/ack modem copy when applicable
     -> Web update
 ```
 
-Simulator 在首次历史读取时执行同一流程，并提供一个固定 welcome 入站消息。ACK 失败会保留已落库记录并在下次同步重试；服务重启后以 `Line + Agent message ID` 去重。
+Simulator 提供固定 welcome 入站消息；Host VoWiFi worker 则解析 SIP MESSAGE、network→MS RP-DATA 和 SMS-DELIVER，包括数字号码与 GSM7 字母型 TP-Originating-Address。后台执行有界同步：单段消息先落库再发送新的 SIP MESSAGE/RP-ACK；multipart 每片先进入持久 spool 再独立确认，完整且唯一的组才解码为一条可见消息。控制面重启后可继续组装，ACK 失败会保留已落库记录并重试，引用号复用导致的歧义组 fail closed。
 
 ### 电话
 
@@ -200,6 +202,7 @@ Web -> emergency/number validation -> modem worker
 9. `mihomo-required` Line 在 Mihomo 不可用时不能回退 direct。
 10. Host VoWiFi 只有 ePDG、Gm 和受保护 IMS REGISTER 同时成立才能报告 online；
 11. `simplus-netd` 是 Host VoWiFi 临时网络对象的唯一 owner，Web/API 不得传入底层网络参数。
+12. SMS over IMS 不能把 SIP 2xx 当作短信提交成功，且入站 RP-ACK 只能发生在可恢复持久化之后。
 
 这些规则应优先由类型、测试和小型检查器强制执行，而不是在多份文档中重复描述。
 

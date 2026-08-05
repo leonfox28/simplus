@@ -31,15 +31,16 @@ type workerEvent struct {
 }
 
 type instance struct {
-	request StartRequest
-	plan    networkPlan
-	status  Status
-	command *exec.Cmd
-	ready   chan struct{}
-	done    chan struct{}
-	stop    bool
-	cleanup error
-	once    sync.Once
+	request    StartRequest
+	plan       networkPlan
+	status     Status
+	command    *exec.Cmd
+	ready      chan struct{}
+	done       chan struct{}
+	stop       bool
+	cleanup    error
+	runtimeDir string
+	once       sync.Once
 }
 
 type Local struct {
@@ -123,7 +124,7 @@ func (local *Local) Start(ctx context.Context, request StartRequest) (Status, er
 		local.mu.Unlock()
 		return Status{}, err
 	}
-	current := &instance{request: request, plan: plan, ready: make(chan struct{}), done: make(chan struct{}),
+	current := &instance{request: request, plan: plan, runtimeDir: runtimeDir, ready: make(chan struct{}), done: make(chan struct{}),
 		status: Status{LineID: request.LineID, State: StateStarting, Stage: "network", EgressMode: request.EgressMode,
 			CountryCode: request.CountryCode, StartedAt: local.Now().UTC()}}
 	local.instances[request.LineID] = current

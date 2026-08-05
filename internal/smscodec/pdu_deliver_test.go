@@ -59,6 +59,35 @@ func TestDecodeDeliverPDUMultipartRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeDeliverPDUAlphanumericOriginatingAddress(t *testing.T) {
+	parts, err := Encode("Your one-time code is 123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addressSeptets, ok := gsmTokens("VOXI")
+	if !ok {
+		t.Fatal("alphanumeric address fixture is not GSM7")
+	}
+	encodedSeptets := flattenByteTokens(addressSeptets)
+	addressLength := (len(encodedSeptets)*7 + 3) / 4
+	pdu := buildDeliverFixtureWithAddress(t, packSeptets(encodedSeptets, 0), 0xd0, addressLength, parts[0])
+
+	delivered, err := DecodeDeliverPDU(pdu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered.Sender != "VOXI" {
+		t.Fatalf("sender = %q", delivered.Sender)
+	}
+	body, err := Decode([]Segment{delivered.Segment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "Your one-time code is 123456" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
 func TestDecodeDeliverPDURejectsUnsupportedOrMalformedPayload(t *testing.T) {
 	fixture, err := hex.DecodeString("0891683108200105F0040D91685120012194F600F10180817144302304F4F29C0E")
 	if err != nil {
@@ -100,6 +129,11 @@ func buildDeliverFixture(t *testing.T, sender string, segment Segment) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return buildDeliverFixtureWithAddress(t, address, addressType, digits, segment)
+}
+
+func buildDeliverFixtureWithAddress(t *testing.T, address []byte, addressType byte, addressLength int, segment Segment) []byte {
+	t.Helper()
 	firstOctet := byte(0x00)
 	if segment.Total > 1 {
 		firstOctet |= 0x40
@@ -112,7 +146,7 @@ func buildDeliverFixture(t *testing.T, sender string, segment Segment) []byte {
 	} else if segment.Total > 1 {
 		userDataLength += 7
 	}
-	tpdu := []byte{firstOctet, byte(digits), addressType}
+	tpdu := []byte{firstOctet, byte(addressLength), addressType}
 	tpdu = append(tpdu, address...)
 	tpdu = append(tpdu, 0x00, dcs)
 	// 2026-08-03 12:34:56 +08:00 in swapped BCD.

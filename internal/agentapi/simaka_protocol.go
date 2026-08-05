@@ -78,15 +78,24 @@ type SIMIMSIdentityRequest struct {
 }
 
 type SIMIMSIdentityResponse struct {
-	ProtocolVersion       int      `json:"protocolVersion"`
-	AgentInstanceID       string   `json:"agentInstanceId"`
-	DeviceID              string   `json:"deviceId"`
-	IdentitySource        string   `json:"identitySource"`
-	PrivateIdentity       string   `json:"privateIdentity"`
-	HomeDomain            string   `json:"homeDomain"`
-	PublicIdentities      []string `json:"publicIdentities"`
-	ApplicationDiscovery  string   `json:"applicationDiscovery"`
-	ApplicationCandidates int      `json:"applicationCandidates"`
+	ProtocolVersion       int                     `json:"protocolVersion"`
+	AgentInstanceID       string                  `json:"agentInstanceId"`
+	DeviceID              string                  `json:"deviceId"`
+	IdentitySource        string                  `json:"identitySource"`
+	PrivateIdentity       string                  `json:"privateIdentity"`
+	HomeDomain            string                  `json:"homeDomain"`
+	PublicIdentities      []string                `json:"publicIdentities"`
+	ApplicationDiscovery  string                  `json:"applicationDiscovery"`
+	ApplicationCandidates int                     `json:"applicationCandidates"`
+	SMSOverIP             *SIMIMSSMSConfiguration `json:"smsOverIp,omitempty"`
+}
+
+// SIMIMSSMSConfiguration is transient, root-only routing material for SMS
+// over IMS. It is derived from the SIM's configured service centre and must
+// not be logged, persisted or returned through the management HTTP API.
+type SIMIMSSMSConfiguration struct {
+	ServiceCentreURI     string `json:"serviceCentreUri"`
+	ServiceCentreAddress string `json:"serviceCentreAddress"`
 }
 
 // SIMIMSIdentityMaterial is transient root-only HIL material.  It must not
@@ -99,6 +108,7 @@ type SIMIMSIdentityMaterial struct {
 	PublicIdentities      []string
 	ApplicationDiscovery  string
 	ApplicationCandidates int
+	SMSOverIP             *SIMIMSSMSConfiguration
 }
 
 type SIMAKAAuthenticationRequest struct {
@@ -175,6 +185,26 @@ func validSIMIMSIdentityMaterial(material SIMIMSIdentityMaterial) bool {
 			return false
 		}
 		seen[identity] = struct{}{}
+	}
+	if material.SMSOverIP != nil && !validSIMIMSSMSConfiguration(*material.SMSOverIP) {
+		return false
+	}
+	return true
+}
+
+func validSIMIMSSMSConfiguration(configuration SIMIMSSMSConfiguration) bool {
+	address := configuration.ServiceCentreAddress
+	if !strings.HasPrefix(address, "+") || len(address) < 4 || len(address) > 21 {
+		return false
+	}
+	for _, current := range address[1:] {
+		if current < '0' || current > '9' {
+			return false
+		}
+	}
+	uri := configuration.ServiceCentreURI
+	if uri != "tel:"+address || len(uri) > 255 {
+		return false
 	}
 	return true
 }

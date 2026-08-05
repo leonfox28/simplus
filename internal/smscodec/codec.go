@@ -75,21 +75,33 @@ func Decode(segments []Segment) (string, error) {
 	}
 	var decoded strings.Builder
 	for _, segment := range ordered {
-		var text string
-		switch segment.Encoding {
-		case EncodingGSM7:
-			text, err = decodeGSM7Segment(segment)
-		case EncodingUCS2:
-			text, err = decodeUCS2Segment(segment)
-		default:
-			err = fmt.Errorf("unsupported SMS encoding %q", segment.Encoding)
-		}
+		text, err := DecodeSegment(segment)
 		if err != nil {
 			return "", fmt.Errorf("decode SMS segment %d: %w", segment.Part, err)
 		}
 		decoded.WriteString(text)
 	}
 	return decoded.String(), nil
+}
+
+// DecodeSegment validates and decodes one SMS segment without requiring the
+// other members of its concatenation group. This is used at process trust
+// boundaries before a multipart segment is durably staged.
+func DecodeSegment(segment Segment) (string, error) {
+	if segment.Total < 1 || segment.Total > 255 || segment.Part < 1 || segment.Part > segment.Total {
+		return "", errors.New("invalid SMS concatenation envelope")
+	}
+	if segment.Total == 1 && (segment.Part != 1 || segment.Reference != 0) {
+		return "", errors.New("single-part SMS has an invalid concatenation envelope")
+	}
+	switch segment.Encoding {
+	case EncodingGSM7:
+		return decodeGSM7Segment(segment)
+	case EncodingUCS2:
+		return decodeUCS2Segment(segment)
+	default:
+		return "", fmt.Errorf("unsupported SMS encoding %q", segment.Encoding)
+	}
 }
 
 func encodeGSM7(text string, tokens [][]byte) []Segment {
@@ -274,6 +286,10 @@ func decodeGSM7Segment(segment Segment) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return decodeGSM7Septets(septets)
+}
+
+func decodeGSM7Septets(septets []byte) (string, error) {
 	var decoded strings.Builder
 	for index := 0; index < len(septets); index++ {
 		code := septets[index]

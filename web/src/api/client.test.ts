@@ -671,6 +671,32 @@ describe('SMS API client', () => {
     updatedAt: '2026-08-03T12:00:00Z',
   }
 
+  const unconfirmedMessage = {
+    ...sentMessage,
+    id: 'msg_unconfirmed012345678901',
+    operationId: 'operation-unconfirmed012345',
+    status: 'unconfirmed',
+    providerMessageId: '',
+    errorCode: 'SMS_SEND_OUTCOME_UNKNOWN',
+    sentAt: undefined,
+  }
+
+  const acceptedAwaitingReportMessage = {
+    ...unconfirmedMessage,
+    id: 'msg_accepted0123456789012345',
+    operationId: 'operation-accepted0123456789',
+    providerMessageId: 'ims_msg_0123456789abcdef012345',
+    errorCode: 'IMS_SMS_ACCEPTED_AWAITING_REPORT',
+  }
+
+  const rejectedByReportMessage = {
+    ...acceptedAwaitingReportMessage,
+    id: 'msg_rejected0123456789012345',
+    operationId: 'operation-rejected0123456789',
+    status: 'failed',
+    errorCode: 'IMS_SMS_REJECTED',
+  }
+
   it('validates history and sends a CSRF-protected typed request', async () => {
     document.cookie = 'simplus_csrf=sms-csrf; path=/'
     const fetchMock = vi.fn()
@@ -705,5 +731,35 @@ describe('SMS API client', () => {
       body: sentMessage.body,
     })).rejects.toThrow('MESSAGE_REQUEST_INVALID')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a durable unconfirmed message without treating it as sent or failed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      messages: [unconfirmedMessage],
+      totalCount: 1,
+      capacity: 10000,
+      nearCapacity: false,
+    })))
+    await expect(listSMSMessages()).resolves.toEqual([unconfirmedMessage])
+  })
+
+  it('accepts provider-bearing asynchronous IMS submit states', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json(acceptedAwaitingReportMessage, { status: 201 }))
+      .mockResolvedValueOnce(Response.json({
+        messages: [rejectedByReportMessage],
+        totalCount: 1,
+        capacity: 10000,
+        nearCapacity: false,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(sendSMSMessage({
+      operationId: acceptedAwaitingReportMessage.operationId,
+      lineId: acceptedAwaitingReportMessage.lineId,
+      destination: acceptedAwaitingReportMessage.remoteAddress,
+      body: acceptedAwaitingReportMessage.body,
+    })).resolves.toEqual(acceptedAwaitingReportMessage)
+    await expect(listSMSMessages()).resolves.toEqual([rejectedByReportMessage])
   })
 })

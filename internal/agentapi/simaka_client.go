@@ -42,6 +42,7 @@ func (client *Client) SIMIMSIdentity(ctx context.Context, request SIMIMSIdentity
 		HomeDomain: response.HomeDomain, PublicIdentities: response.PublicIdentities,
 		ApplicationDiscovery:  response.ApplicationDiscovery,
 		ApplicationCandidates: response.ApplicationCandidates,
+		SMSOverIP:             response.SMSOverIP,
 	}
 	if response.ProtocolVersion != ProtocolVersion || response.AgentInstanceID != request.AgentInstanceID ||
 		response.DeviceID != request.DeviceID || !validSIMIMSIdentityMaterial(material) {

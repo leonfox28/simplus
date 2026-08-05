@@ -142,6 +142,37 @@ func TestGeneratedSubscriptionIncludesPrivateLANZashboardController(t *testing.T
 	}
 }
 
+func TestSelectionRebuildsArtifactForWildcardDashboardWithoutRestartingRuntime(t *testing.T) {
+	manager, _, nodes := readyConfigFixture(t.TempDir())
+	manager.Run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("configuration test is successful"), nil
+	}
+	secret := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
+	manager.ConfigureDashboard(DashboardStatus{ControllerAddress: "192.168.50.10:19090", Secret: secret, Available: true})
+	first, err := manager.BuildSubscription(context.Background(), configTestSubscriptionID, []byte("proxies: fixture\n"), nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.ConfigureDashboard(DashboardStatus{ControllerAddress: "0.0.0.0:19090", Secret: secret, Available: true})
+	if _, err := manager.Select(context.Background(), configTestSubscriptionID); err != nil {
+		t.Fatal(err)
+	}
+	second, path, err := manager.Artifact(configTestSubscriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Version == first.Version {
+		t.Fatal("controller change did not create a new immutable artifact")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "external-controller: 0.0.0.0:19090") {
+		t.Fatalf("rebuilt config does not use wildcard controller:\n%s", body)
+	}
+}
+
 func TestArtifactValidationFailureKeepsPreviousVersionAndCannotBeSelected(t *testing.T) {
 	manager, store, nodes := readyConfigFixture(t.TempDir())
 	manager.Run = func(context.Context, string, ...string) ([]byte, error) { return nil, nil }

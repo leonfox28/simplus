@@ -36,11 +36,11 @@ func (gateway *AgentSMSGateway) SendSMS(ctx context.Context, command SendSMSComm
 		}
 		return SendSMSResult{}, &TransportError{Code: "AGENT_SMS_SEND_FAILED"}
 	}
-	return SendSMSResult{ProviderMessageID: response.Submission.MessageID}, nil
+	return SendSMSResult{ProviderMessageID: response.Submission.MessageID, State: SendStateSent}, nil
 }
 
-func (gateway *AgentSMSGateway) ListSMS(ctx context.Context, deviceID string) ([]InboxMessageReference, error) {
-	response, err := gateway.client.ListSMS(ctx, agentapi.SMSListRequest{AgentInstanceID: gateway.instanceID, DeviceID: deviceID})
+func (gateway *AgentSMSGateway) ListSMS(ctx context.Context, target InboxTarget) ([]InboxMessageReference, error) {
+	response, err := gateway.client.ListSMS(ctx, agentapi.SMSListRequest{AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID})
 	if err != nil {
 		return nil, fmt.Errorf("list Agent SMS: %w", err)
 	}
@@ -51,9 +51,9 @@ func (gateway *AgentSMSGateway) ListSMS(ctx context.Context, deviceID string) ([
 	return references, nil
 }
 
-func (gateway *AgentSMSGateway) ReadSMS(ctx context.Context, deviceID, messageID string) (InboxMessage, error) {
+func (gateway *AgentSMSGateway) ReadSMS(ctx context.Context, target InboxTarget, messageID string) (InboxMessage, error) {
 	response, err := gateway.client.ReadSMS(ctx, agentapi.SMSReadRequest{
-		AgentInstanceID: gateway.instanceID, DeviceID: deviceID, MessageID: messageID,
+		AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID, MessageID: messageID,
 	})
 	if err != nil {
 		return InboxMessage{}, fmt.Errorf("read Agent SMS: %w", err)
@@ -64,9 +64,9 @@ func (gateway *AgentSMSGateway) ReadSMS(ctx context.Context, deviceID, messageID
 	}, nil
 }
 
-func (gateway *AgentSMSGateway) AcknowledgeSMS(ctx context.Context, deviceID, messageID, operationID string) error {
+func (gateway *AgentSMSGateway) AcknowledgeSMS(ctx context.Context, target InboxTarget, messageID, operationID string) error {
 	_, err := gateway.client.AcknowledgeSMS(ctx, agentapi.SMSAcknowledgeRequest{
-		OperationID: operationID, AgentInstanceID: gateway.instanceID, DeviceID: deviceID, MessageID: messageID,
+		OperationID: operationID, AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID, MessageID: messageID,
 	})
 	if err != nil {
 		return fmt.Errorf("acknowledge Agent SMS: %w", err)

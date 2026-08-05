@@ -2218,7 +2218,7 @@ components:
           items: { $ref: "#/components/schemas/Contact" }
     SMSStatus:
       type: string
-      enum: [queued, sent, failed, received]
+      enum: [queued, unconfirmed, sent, failed, received]
     SMSMessage:
       type: object
       additionalProperties: false

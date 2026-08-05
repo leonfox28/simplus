@@ -107,6 +107,21 @@ func TestDecodeRejectsBrokenConcatenationEnvelope(t *testing.T) {
 	}
 }
 
+func TestDecodeSegmentValidatesOneMultipartPart(t *testing.T) {
+	segments, err := Encode(strings.Repeat("a", 161))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeSegment(segments[0])
+	if err != nil || decoded != strings.Repeat("a", 153) {
+		t.Fatalf("decoded=%q error=%v", decoded, err)
+	}
+	segments[0].UserData[3]++
+	if _, err := DecodeSegment(segments[0]); err == nil {
+		t.Fatal("DecodeSegment accepted a conflicting UDH")
+	}
+}
+
 func TestEncodeRejectsUnboundedOrInvalidText(t *testing.T) {
 	for _, text := range []string{"", strings.Repeat("短", 1601), string([]byte{0xff})} {
 		if _, err := Encode(text); err == nil {

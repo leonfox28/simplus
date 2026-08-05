@@ -30,6 +30,7 @@ type IMSInitialRegisterInput struct {
 	CallID              string
 	ContactUser         string
 	WLANNodeID          string
+	SMSCapable          bool
 }
 
 type IMSInitialResponseSummary struct {
@@ -64,7 +65,7 @@ func BuildIMSInitialRegisterSequence(input IMSInitialRegisterInput, sequence uin
 	fmt.Fprintf(&message, "To: <%s>\r\n", input.PublicIdentity)
 	fmt.Fprintf(&message, "Call-ID: %s\r\n", input.CallID)
 	fmt.Fprintf(&message, "CSeq: %d REGISTER\r\n", sequence)
-	fmt.Fprintf(&message, "Contact: <sip:%s:%d>;expires=%d\r\n", source, input.UnprotectedPort, expires)
+	fmt.Fprintf(&message, "Contact: <sip:%s:%d>;expires=%d%s\r\n", source, input.UnprotectedPort, expires, smsCapabilityParameter(input.SMSCapable))
 	fmt.Fprintf(&message, "Authorization: Digest username=\"%s\", realm=\"%s\", nonce=\"\", uri=\"%s\", response=\"\"\r\n",
 		input.PrivateIdentity, input.HomeDomain, requestURI)
 	fmt.Fprintf(&message, "Security-Client: %s\r\n", securityClient)
@@ -74,6 +75,13 @@ func BuildIMSInitialRegisterSequence(input IMSInitialRegisterInput, sequence uin
 	fmt.Fprintf(&message, "P-Access-Network-Info: IEEE-802.11;i-wlan-node-id=%s\r\n", input.WLANNodeID)
 	message.WriteString("Content-Length: 0\r\n\r\n")
 	return []byte(message.String()), securityClient, nil
+}
+
+func smsCapabilityParameter(capable bool) string {
+	if capable {
+		return ";+g.3gpp.smsip"
+	}
+	return ""
 }
 
 func ParseIMSInitialResponse(packet []byte, expectedCallID string) (IMSInitialResponseSummary, error) {

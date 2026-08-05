@@ -81,6 +81,8 @@ func run() int {
 	var inventoryService *inventory.Service
 	var messageSender messaging.Sender
 	var messageInbox messaging.Inbox
+	mihomoSupervisorSocket := os.Getenv("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET")
+	var voWiFiSupervisor *vowifisupervisor.Client
 	switch cfg.Runtime.Backend {
 	case config.BackendSimulator:
 		inventoryService = inventory.NewMultiSimulator(stores)
@@ -120,6 +122,21 @@ func run() int {
 			return 1
 		}
 		inventoryService = inventory.New(inventory.NewAgentSource(agentClient), stores)
+		if mihomoSupervisorSocket != "" {
+			voWiFiSupervisor, clientErr = vowifisupervisor.NewClient(mihomoSupervisorSocket)
+			if clientErr != nil {
+				logger.Error("Host VoWiFi supervisor client configuration failed", "error", clientErr)
+				_ = stores.Close()
+				return 2
+			}
+			voWiFiGateway, gatewayErr := messaging.NewVoWiFiSMSGateway(voWiFiSupervisor)
+			if gatewayErr != nil {
+				logger.Error("Host VoWiFi SMS gateway configuration failed", "error", gatewayErr)
+				_ = stores.Close()
+				return 2
+			}
+			messageSender, messageInbox = voWiFiGateway, voWiFiGateway
+		}
 	case config.BackendReplay:
 		logger.Error("replay backend is not implemented", "backend", cfg.Runtime.Backend)
 		_ = stores.Close()
@@ -167,25 +184,16 @@ func run() int {
 		callService.UseAccessPathGuard(accessPathService)
 	}
 	notificationService := notificationapp.New(stores, secretKeyring)
-	if result, syncErr := messageService.SyncInbound(ctx); syncErr != nil {
-		logger.Warn("initial inbound SMS synchronization failed", "error", syncErr)
-	} else if result.Persisted != 0 || result.AlreadyKnown != 0 {
-		logger.Info("initial inbound SMS synchronization completed",
-			"persisted", result.Persisted, "already_known", result.AlreadyKnown, "acknowledged", result.Acknowledged)
-		if result.Persisted > 0 {
-			go func(count int) {
-				deliveryCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				defer cancel()
-				if err := notificationService.Notify(deliveryCtx, "sms.received", fmt.Sprintf("[Simplus] 收到 %d 条新短信", count)); err != nil {
-					logger.Warn("inbound SMS notification failed", "error", err)
-				}
-			}(result.Persisted)
-		}
-	}
 	mihomoRoot := filepath.Join(cfg.Storage.DataRoot, "mihomo")
 	mihomoCoreManager := mihomoapp.NewCoreManager(mihomoRoot)
 	mihomoConfigManager := mihomoapp.NewConfigManager(mihomoRoot, stores, mihomoCoreManager)
-	mihomoDashboardManager := mihomoapp.NewDashboardManager(mihomoRoot, os.Getenv("SIMPLUS_MIHOMO_CONTROLLER_ADDR"))
+	mihomoController, controllerErr := mihomoControllerAddress(cfg.Server.Listen)
+	if controllerErr != nil {
+		logger.Error("Mihomo controller address derivation failed", "error", controllerErr)
+		_ = stores.Close()
+		return 1
+	}
+	mihomoDashboardManager := mihomoapp.NewDashboardManager(mihomoRoot, mihomoController)
 	mihomoDashboardStatus, dashboardErr := mihomoDashboardManager.Ensure()
 	if dashboardErr != nil {
 		logger.Error("Mihomo dashboard initialization failed", "error", dashboardErr)
@@ -193,7 +201,6 @@ func run() int {
 		return 1
 	}
 	mihomoConfigManager.ConfigureDashboard(mihomoDashboardStatus)
-	mihomoSupervisorSocket := os.Getenv("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET")
 	var mihomoRuntimeManager *mihomoapp.RuntimeManager
 	if mihomoSupervisorSocket == "" {
 		mihomoRuntimeManager = mihomoapp.NewRuntimeManager(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager)
@@ -210,13 +217,7 @@ func run() int {
 	mihomoEgressService := mihomoapp.NewEgressService(stores, mihomoCoreManager)
 	lineEgressService := lineegressapp.New(stores, inventoryService, mihomoRuntimeManager)
 	var voWiFiService *vowifiapp.Service
-	if cfg.Runtime.Backend == config.BackendHardware && mihomoSupervisorSocket != "" {
-		voWiFiSupervisor, supervisorErr := vowifisupervisor.NewClient(mihomoSupervisorSocket)
-		if supervisorErr != nil {
-			logger.Error("Host VoWiFi supervisor client configuration failed", "error", supervisorErr)
-			_ = stores.Close()
-			return 2
-		}
+	if cfg.Runtime.Backend == config.BackendHardware && voWiFiSupervisor != nil {
 		voWiFiService, err = vowifiapp.New(stores, inventoryService, lineEgressService, mihomoRuntimeManager, voWiFiSupervisor)
 		if err != nil {
 			logger.Error("Host VoWiFi service configuration failed", "error", err)
@@ -226,7 +227,9 @@ func run() int {
 		go voWiFiService.Run(ctx, 10*time.Second, func(reconcileErr error) {
 			logger.Warn("Host VoWiFi desired-state reconciliation failed", "error", reconcileErr)
 		})
+		messageService.UseHostVoWiFiTransport(voWiFiService)
 	}
+	go runSMSSync(ctx, messageService, notificationService, logger, 2*time.Second)
 	apiServer := httpapi.New(health.New(stores, cfg.Runtime.Backend), setupService, inventoryService, logger, authService, messageService, contactService)
 	if callService != nil {
 		apiServer = httpapi.WithCalls(apiServer, callService)
@@ -284,7 +287,7 @@ func run() int {
 		MaxHeaderBytes:    16 << 10,
 	}
 
-	listener, err := net.Listen("tcp", cfg.Server.Listen)
+	listener, err := net.Listen(managementListenerNetwork(cfg.Server.Listen), cfg.Server.Listen)
 	if err != nil {
 		logger.Error("control plane bind failed", "address", cfg.Server.Listen, "error", err)
 		_ = controlListener.Close()
@@ -336,6 +339,104 @@ func run() int {
 		exitCode = 1
 	}
 	return exitCode
+}
+
+func runSMSSync(ctx context.Context, messages *messaging.Service, notifications *notificationapp.Service,
+	logger *slog.Logger, interval time.Duration) {
+	if interval < time.Second {
+		interval = 2 * time.Second
+	}
+	sync := func() bool {
+		syncCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		result, err := messages.SyncInbound(syncCtx)
+		cancel()
+		if err != nil {
+			logger.Warn("SMS synchronization failed", "error", err)
+			return false
+		}
+		if result.Persisted == 0 && result.AlreadyKnown == 0 && result.OutboundSent == 0 &&
+			result.OutboundFailed == 0 && result.OutboundUnconfirmed == 0 {
+			return true
+		}
+		logger.Info("SMS synchronization completed",
+			"inbound_persisted", result.Persisted, "inbound_already_known", result.AlreadyKnown,
+			"inbound_acknowledged", result.Acknowledged, "outbound_sent", result.OutboundSent,
+			"outbound_failed", result.OutboundFailed, "outbound_unconfirmed", result.OutboundUnconfirmed,
+			"outbound_reports_acknowledged", result.OutboundReportsAcknowledged)
+		if result.Persisted == 0 {
+			return true
+		}
+		deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancelDelivery()
+		if err := notifications.Notify(deliveryCtx, "sms.received", fmt.Sprintf("[Simplus] 收到 %d 条新短信", result.Persisted)); err != nil {
+			logger.Warn("inbound SMS notification failed", "error", err)
+		}
+		return true
+	}
+	retryDelay := time.Duration(0)
+	for {
+		if sync() {
+			retryDelay = 0
+		} else {
+			retryDelay = nextSMSSyncRetryDelay(retryDelay, interval)
+		}
+		delay := interval
+		if retryDelay > 0 {
+			delay = retryDelay
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func nextSMSSyncRetryDelay(previous, interval time.Duration) time.Duration {
+	const minimumRetry = 15 * time.Second
+	const maximumRetry = 5 * time.Minute
+	if interval < 2*time.Second {
+		interval = 2 * time.Second
+	}
+	if previous <= 0 {
+		previous = minimumRetry
+		if interval*4 > previous {
+			previous = interval * 4
+		}
+	} else if previous < maximumRetry/2 {
+		previous *= 2
+	} else {
+		previous = maximumRetry
+	}
+	if previous > maximumRetry {
+		return maximumRetry
+	}
+	return previous
+}
+
+func mihomoControllerAddress(managementAddress string) (string, error) {
+	host, _, err := net.SplitHostPort(managementAddress)
+	if err != nil || net.ParseIP(host) == nil {
+		return "", fmt.Errorf("invalid management listen address %q", managementAddress)
+	}
+	return net.JoinHostPort(host, "19090"), nil
+}
+
+func managementListenerNetwork(address string) string {
+	host, _, err := net.SplitHostPort(address)
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+			return "tcp4"
+		}
+	}
+	return "tcp6"
 }
 
 func requireReadOnlyAgent(hello agentapi.Hello) error {

@@ -9,16 +9,18 @@ const (
 	DirectionOutbound = "outbound"
 	DirectionInbound  = "inbound"
 
-	StatusQueued   = "queued"
-	StatusSent     = "sent"
-	StatusFailed   = "failed"
-	StatusReceived = "received"
+	StatusQueued      = "queued"
+	StatusUnconfirmed = "unconfirmed"
+	StatusSent        = "sent"
+	StatusFailed      = "failed"
+	StatusReceived    = "received"
 )
 
 var (
 	ErrOperationConflict = errors.New("SMS operation id belongs to different parameters")
 	ErrMessageNotFound   = errors.New("SMS message was not found")
 	ErrSourceConflict    = errors.New("inbound SMS source id belongs to different content")
+	ErrStateConflict     = errors.New("SMS message state conflicts with the requested transition")
 )
 
 // Message is the durable, transport-neutral SMS representation used by the

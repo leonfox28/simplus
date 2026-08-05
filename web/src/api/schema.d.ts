@@ -1325,7 +1325,7 @@ export interface components {
             contacts: components["schemas"]["Contact"][];
         };
         /** @enum {string} */
-        SMSStatus: "queued" | "sent" | "failed" | "received";
+        SMSStatus: "queued" | "unconfirmed" | "sent" | "failed" | "received";
         SMSMessage: {
             id: string;
             operationId: string;

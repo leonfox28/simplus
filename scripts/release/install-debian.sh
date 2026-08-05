@@ -35,8 +35,7 @@ chown -R simplus:simplus /var/lib/simplus/mihomo/runtime/ui
 find /var/lib/simplus/mihomo/runtime/ui -type d -exec chmod 0755 {} +
 find /var/lib/simplus/mihomo/runtime/ui -type f -exec chmod 0644 {} +
 simplus_uid=$(id -u simplus); simplus_gid=$(getent group simplus|cut -d: -f3)
-listen_host=${SIMPLUS_LISTEN_HOST:-$(ip -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')}
-[[ -n $listen_host ]] || { printf 'could not determine a private LAN address; set SIMPLUS_LISTEN_HOST explicitly\n' >&2; exit 1; }
+display_host=${SIMPLUS_LISTEN_HOST:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')}
 tmp=$(mktemp -d /tmp/simplus-install.XXXXXX); trap 'rm -rf "$tmp"' EXIT
 cat >"$tmp/90-simplus-vowifi.conf" <<EOF
 # Required only by an explicitly selected direct Host VoWiFi egress.
@@ -98,12 +97,12 @@ UMask=0077
 Environment=SIMPLUS_BACKEND=hardware
 Environment=SIMPLUS_AGENT_SOCKET=/run/simplus-agent/simplus-agent.sock
 Environment=SIMPLUS_DATA_ROOT=/var/lib/simplus
-Environment=SIMPLUS_LISTEN_ADDR=$listen_host:8080
+Environment=SIMPLUS_LISTEN_ADDR=0.0.0.0:8080
 Environment=SIMPLUS_WEB_ROOT=/usr/local/share/simplus/web
 Environment=SIMPLUS_MIHOMO_SUPERVISOR_SOCKET=/run/simplus-netd/mihomo.sock
-Environment=SIMPLUS_MIHOMO_CONTROLLER_ADDR=$listen_host:19090
 ExecStart=/usr/local/libexec/simplus/simplusd
 Restart=on-failure
+RestartSec=5s
 NoNewPrivileges=true
 CapabilityBoundingSet=
 AmbientCapabilities=
@@ -167,5 +166,9 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 [[ -S /var/lib/simplus/run/simplusd-control.sock ]] || { printf 'simplusd control socket did not become ready\n' >&2; exit 1; }
-printf 'Simplus installed for trusted-LAN access on http://%s:8080\n' "$listen_host"
+if [[ -n $display_host ]]; then
+  printf 'Simplus installed for trusted-LAN access on http://%s:8080\n' "$display_host"
+else
+  printf 'Simplus installed; open http://<host-lan-ip>:8080 from the trusted LAN\n'
+fi
 /usr/local/bin/simplusctl provision-admin --socket /var/lib/simplus/run/simplusd-control.sock --username simplus_admin --locale zh-CN

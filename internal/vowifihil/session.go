@@ -36,22 +36,38 @@ type IMSRegistrationResult struct {
 type IMSSession struct {
 	mu sync.Mutex
 
-	input          IMSInitialRegisterInput
-	pcscf          netip.Addr
-	challenge      IMSRegistrationChallenge
-	securityClient string
-	res            []byte
-	cnonce         string
-	unprotected    *net.UDPConn
-	client         *net.UDPConn
-	server         *net.UDPConn
-	xfrm           *IMSXFRMInstallation
-	sequence       uint64
-	nonceCount     uint64
-	expires        time.Duration
-	registeredAt   time.Time
-	nextRefresh    time.Time
-	closed         bool
+	input                IMSInitialRegisterInput
+	pcscf                netip.Addr
+	challenge            IMSRegistrationChallenge
+	securityClient       string
+	res                  []byte
+	cnonce               string
+	unprotected          *net.UDPConn
+	client               *net.UDPConn
+	server               *net.UDPConn
+	xfrm                 *IMSXFRMInstallation
+	sequence             uint64
+	nonceCount           uint64
+	expires              time.Duration
+	registeredAt         time.Time
+	nextRefresh          time.Time
+	serviceCentreURI     string
+	serviceCentreAddress string
+	serviceRoutes        []string
+	authorizedIdentity   string
+	smsSequence          uint64
+	rpReference          byte
+	smsInReplyToMode     imsSMSInReplyToMode
+	smsSubmitReportWait  time.Duration
+	pendingSMS           map[string]pendingIMSSMS
+	acknowledgedSMS      map[string]string
+	submitSegments       map[byte]pendingIMSSubmitSegment
+	retiredRPReferences  map[byte]time.Time
+	submitOperations     map[string]*pendingIMSSubmitOperation
+	completedSMSReports  map[string]IMSSMSSubmitReport
+	acknowledgedReports  map[string]struct{}
+	smsProtocolCounters  imsSMSProtocolCounters
+	closed               bool
 }
 
 func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspection Inspection) (*IMSSession, IMSRegistrationResult, error) {
@@ -59,7 +75,13 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 		len(inspection.IMSIdentity.PublicIdentities) != 1 {
 		return nil, IMSRegistrationResult{}, errors.New("invalid IMS session input")
 	}
-	session := &IMSSession{pcscf: pcscf}
+	session := &IMSSession{
+		pcscf: pcscf, smsSequence: 1,
+		pendingSMS: make(map[string]pendingIMSSMS), acknowledgedSMS: make(map[string]string),
+		submitSegments: make(map[byte]pendingIMSSubmitSegment), retiredRPReferences: make(map[byte]time.Time),
+		submitOperations:    make(map[string]*pendingIMSSubmitOperation),
+		completedSMSReports: make(map[string]IMSSMSSubmitReport), acknowledgedReports: make(map[string]struct{}),
+	}
 	fail := func(err error) (*IMSSession, IMSRegistrationResult, error) {
 		session.Close()
 		return nil, IMSRegistrationResult{}, err
@@ -111,6 +133,12 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 		PublicIdentity:  inspection.IMSIdentity.PublicIdentities[0], HomeDomain: inspection.IMSIdentity.HomeDomain,
 		Branch: branch, FromTag: fromTag, CallID: callID + "@" + source.String(), ContactUser: contactUser,
 		WLANNodeID: wlanNodeID,
+	}
+	session.authorizedIdentity = session.input.PublicIdentity
+	if smsConfiguration := inspection.IMSIdentity.SMSOverIP; smsConfiguration != nil {
+		session.input.SMSCapable = true
+		session.serviceCentreURI = smsConfiguration.ServiceCentreURI
+		session.serviceCentreAddress = smsConfiguration.ServiceCentreAddress
 	}
 	initialSequence := uint64(1)
 	requestedExpires := DefaultIMSRegistrationExpires
@@ -228,6 +256,8 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 		session.nextRefresh = session.registeredAt.Add(minDuration(expires/2, 2*time.Minute))
 	}
 	result := IMSRegistrationResult{RegisteredAt: session.registeredAt, NextRefresh: session.nextRefresh, Expires: expires}
+	session.serviceRoutes = registrationServiceRoutes(protectedResponse)
+	session.authorizedIdentity = registrationAuthorizedIdentity(protectedResponse, session.input.PublicIdentity)
 	return session, result, nil
 }
 
@@ -277,8 +307,7 @@ func (session *IMSSession) Refresh(ctx context.Context) (IMSRegistrationResult, 
 		return IMSRegistrationResult{}, err
 	}
 	defer zeroBytes(packet)
-	response, err := exchangeProtectedSIP(ctx, session.client, session.server, session.pcscf,
-		session.challenge.SecurityServer, packet, session.input.CallID, sequence, 15*time.Second)
+	response, err := session.exchangeProtectedRequestLocked(ctx, packet, session.input.CallID, sequence, "REGISTER", 15*time.Second)
 	if err != nil {
 		if errors.Is(err, errProtectedIMSNoResponse) {
 			return IMSRegistrationResult{}, ErrIMSRefreshNoResponse
@@ -310,6 +339,8 @@ func (session *IMSSession) Refresh(ctx context.Context) (IMSRegistrationResult, 
 	session.expires = expires
 	session.registeredAt = time.Now().UTC()
 	session.nextRefresh = refreshDeadline(session.registeredAt, expires)
+	session.serviceRoutes = registrationServiceRoutes(response)
+	session.authorizedIdentity = registrationAuthorizedIdentity(response, session.messagePublicIdentityLocked())
 	if nextNonce != "" && nextNonce != session.challenge.Nonce {
 		return IMSRegistrationResult{}, ErrIMSReauthenticationRequired
 	}
@@ -350,6 +381,76 @@ func (session *IMSSession) Close() {
 	session.cnonce = ""
 	session.input.PrivateIdentity = ""
 	session.input.PublicIdentity = ""
+	session.serviceCentreURI = ""
+	session.serviceCentreAddress = ""
+	session.serviceRoutes = nil
+	session.authorizedIdentity = ""
+	clear(session.pendingSMS)
+	clear(session.acknowledgedSMS)
+	clear(session.submitSegments)
+	clear(session.retiredRPReferences)
+	clear(session.submitOperations)
+	clear(session.completedSMSReports)
+	clear(session.acknowledgedReports)
+}
+
+func registrationServiceRoutes(packet []byte) []string {
+	_, headers, err := parseSIPResponse(packet)
+	if err != nil || len(headers["service-route"]) > 8 {
+		return nil
+	}
+	routes := make([]string, 0, len(headers["service-route"]))
+	for _, value := range headers["service-route"] {
+		if !validSIPHeaderValue(value, 2048) {
+			return nil
+		}
+		routes = append(routes, value)
+	}
+	return routes
+}
+
+func registrationAuthorizedIdentity(packet []byte, fallback string) string {
+	if !validIMSURI(fallback) {
+		return ""
+	}
+	_, headers, err := parseSIPResponse(packet)
+	if err != nil {
+		return fallback
+	}
+	values := headers["p-associated-uri"]
+	if len(values) == 0 {
+		return fallback
+	}
+	if len(values) > 16 {
+		return fallback
+	}
+	first := firstSIPHeaderListValue(values[0])
+	if identity := firstSIPURI([]string{first}); identity != "" {
+		return identity
+	}
+	return fallback
+}
+
+func firstSIPHeaderListValue(value string) string {
+	value = strings.TrimSpace(value)
+	quoted, escaped, angleDepth := false, false, 0
+	for index, current := range value {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && current == '\\':
+			escaped = true
+		case current == '"':
+			quoted = !quoted
+		case !quoted && current == '<':
+			angleDepth++
+		case !quoted && current == '>' && angleDepth > 0:
+			angleDepth--
+		case !quoted && angleDepth == 0 && current == ',':
+			return strings.TrimSpace(value[:index])
+		}
+	}
+	return value
 }
 
 func exchangeSIP(ctx context.Context, connection *net.UDPConn, pcscf netip.Addr, port uint16, packet []byte,

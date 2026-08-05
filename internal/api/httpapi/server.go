@@ -299,6 +299,11 @@ func apiTimeout(next http.Handler) http.Handler {
 			timeout = 30 * time.Second
 		} else if strings.HasPrefix(r.URL.Path, "/api/v1/mihomo/subscriptions/") && strings.HasSuffix(r.URL.Path, "/refresh") {
 			timeout = 45 * time.Second
+		} else if r.URL.Path == "/api/v1/messages" && r.Method == http.MethodPost {
+			// A multipart SMS may require several independent modem or SIP
+			// transactions. The transport budgets 120 seconds for dispatch;
+			// RP submit reports remain asynchronous and do not consume this.
+			timeout = 130 * time.Second
 		}
 		timeoutJSON(timeout)(next).ServeHTTP(w, r)
 	})

@@ -41,15 +41,19 @@ func TestHardwareBackendRequiresAbsoluteAgentSocket(t *testing.T) {
 	}
 }
 
-func TestAcceptsPrivateLANListener(t *testing.T) {
-	t.Setenv("SIMPLUS_LISTEN_ADDR", "192.168.50.10:8080")
-	if _, err := Load(""); err != nil {
-		t.Fatalf("Load() rejected a private LAN listener: %v", err)
+func TestAcceptsPrivateLANOrIPv4WildcardListener(t *testing.T) {
+	for _, address := range []string{"192.168.50.10:8080", "0.0.0.0:8080"} {
+		t.Run(address, func(t *testing.T) {
+			t.Setenv("SIMPLUS_LISTEN_ADDR", address)
+			if _, err := Load(""); err != nil {
+				t.Fatalf("Load() rejected %q: %v", address, err)
+			}
+		})
 	}
 }
 
-func TestRejectsUnspecifiedOrPublicListener(t *testing.T) {
-	for _, address := range []string{"0.0.0.0:8080", "8.8.8.8:8080"} {
+func TestRejectsIPv6WildcardOrPublicListener(t *testing.T) {
+	for _, address := range []string{"[::]:8080", "8.8.8.8:8080"} {
 		t.Setenv("SIMPLUS_LISTEN_ADDR", address)
 		if _, err := Load(""); err == nil {
 			t.Fatalf("Load() accepted %q", address)

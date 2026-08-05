@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -184,12 +185,20 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 		return attemptFailure{"IMS_REGISTER_FAILED"}
 	}
 	defer session.Close()
+	smsService := &workerSMSService{session: session}
+	smsServer, smsListener, smsServerErrors, err := startWorkerSMSServer(config.RuntimeDir, smsService)
+	if err != nil {
+		return attemptFailure{"SMS_CONTROL_FAILED"}
+	}
+	defer stopWorkerSMSServer(smsServer, smsListener, config.RuntimeDir)
 	emit(workerEvent{State: StateOnline, Stage: "REGISTERED", Online: true, Attempt: attempt,
 		RegisteredAt: registration.RegisteredAt, NextRefresh: registration.NextRefresh})
 	keepalive := time.NewTicker(25 * time.Second)
 	health := time.NewTicker(15 * time.Second)
+	smsPoll := time.NewTicker(250 * time.Millisecond)
 	defer keepalive.Stop()
 	defer health.Stop()
+	defer smsPoll.Stop()
 	refresh := time.NewTimer(time.Until(registration.NextRefresh))
 	defer refresh.Stop()
 	for {
@@ -198,6 +207,18 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 			return nil
 		case <-charonDone:
 			return attemptFailure{"EPDG_PROCESS_EXITED"}
+		case serverErr := <-smsServerErrors:
+			if !errors.Is(serverErr, http.ErrServerClosed) {
+				return attemptFailure{"SMS_CONTROL_FAILED"}
+			}
+			return attemptFailure{"SMS_CONTROL_FAILED"}
+		case <-smsPoll.C:
+			pollCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+			err := session.PollSMS(pollCtx)
+			cancel()
+			if err != nil && !errors.Is(err, vowifihil.ErrIMSSMSUnavailable) {
+				return attemptFailure{"IMS_SMS_RECEIVE_FAILED"}
+			}
 		case <-keepalive.C:
 			keepaliveCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 			err := session.Keepalive(keepaliveCtx)

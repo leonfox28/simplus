@@ -73,6 +73,34 @@ func TestBuildAndParseIMSMinimumRegistrationInterval(t *testing.T) {
 	}
 }
 
+func TestBuildIMSInitialRegisterAdvertisesSMSCapabilityOnlyWhenProvisioned(t *testing.T) {
+	privateIdentity := "234150123456789@" + IMSHomeDomain
+	input := IMSInitialRegisterInput{
+		Source: netip.MustParseAddr("10.255.0.42"), UnprotectedPort: 42000,
+		ProtectedClientPort: 42001, ProtectedServerPort: 42002,
+		ClientSPI: 1234567890, ServerSPI: 2234567890,
+		PrivateIdentity: privateIdentity, PublicIdentity: "sip:" + privateIdentity, HomeDomain: IMSHomeDomain,
+		Branch: "0123456789abcdef", FromTag: "1123456789abcdef",
+		CallID: "2123456789abcdef@10.255.0.42", ContactUser: "3123456789abcdef",
+		WLANNodeID: "020000000001", SMSCapable: true,
+	}
+	packet, _, err := BuildIMSInitialRegister(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(packet), ";+g.3gpp.smsip\r\n") {
+		t.Fatalf("SMS capability missing from Contact: %s", packet)
+	}
+	input.SMSCapable = false
+	packet, _, err = BuildIMSInitialRegister(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(packet), "+g.3gpp.smsip") {
+		t.Fatalf("unprovisioned SMS capability was advertised: %s", packet)
+	}
+}
+
 func TestParseIMSInitialResponseRejectsMissingSecurityAndWrongTransaction(t *testing.T) {
 	callID := "2123456789abcdef@10.255.0.42"
 	response := "SIP/2.0 401 Unauthorized\r\nCall-ID: " + callID +
