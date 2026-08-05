@@ -1,0 +1,2647 @@
+openapi: 3.0.3
+info:
+  title: Simplus API
+  version: 0.1.0
+  description: Locale-neutral control-plane contract for Simplus.
+servers:
+  - url: /
+paths:
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Create an administrator browser session
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated administrator session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "400":
+          description: Invalid login request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Credentials are invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance is not ready for login
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Too many failed login attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Login could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/auth/session:
+    get:
+      operationId: getAuthSession
+      summary: Read the current administrator browser session
+      tags: [auth]
+      responses:
+        "200":
+          description: Current authenticated administrator
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Session state could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke the current administrator browser session
+      tags: [auth]
+      responses:
+        "204":
+          description: Session revoked
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: CSRF validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Logout could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/auth/password:
+    put:
+      operationId: changeAdministratorPassword
+      summary: Replace the sole administrator password and revoke all sessions
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeAdministratorPasswordRequest"
+      responses:
+        "204": { description: Password replaced; every administrator session was revoked }
+        "400":
+          description: Password request is invalid
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: Session or current password is invalid
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "403":
+          description: CSRF validation failed
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Password could not be replaced
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/inventory:
+    get:
+      operationId: getInventory
+      summary: Read the discovered device and active-line inventory
+      tags: [inventory]
+      responses:
+        "200":
+          description: Current inventory snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryResponse"
+        "409":
+          description: The instance has not completed setup or is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The inventory snapshot could not be produced
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/mihomo/core:
+    get:
+      operationId: getMihomoCoreStatus
+      summary: Read the locally installed Mihomo core status
+      tags: [mihomo]
+      responses:
+        "200": { description: Current core status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoCoreStatus" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Status unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/dashboard:
+    get:
+      operationId: getMihomoDashboardStatus
+      summary: Read the installed Zashboard entry point and Mihomo controller credentials
+      tags: [mihomo]
+      responses:
+        "200": { description: Zashboard status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoDashboardStatus" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Dashboard status unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/core/latest:
+    get:
+      operationId: getLatestMihomoCore
+      summary: Check the official MetaCubeX stable release
+      tags: [mihomo]
+      responses:
+        "200": { description: Supported official release candidate, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoCoreCandidate" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "502": { description: Official release metadata unavailable or invalid, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/core/install:
+    post:
+      operationId: installLatestMihomoCore
+      summary: Download, verify, probe, and atomically install the latest official stable core
+      tags: [mihomo]
+      responses:
+        "200": { description: Installed core status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoCoreStatus" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "403": { description: CSRF validation failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: This version is already installed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "502": { description: Download or verification failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/config:
+    get:
+      operationId: getMihomoConfigStatus
+      summary: Read generated configuration status without starting Mihomo
+      tags: [mihomo]
+      responses:
+        "200": { description: Configuration status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoConfigStatus" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: publishMihomoConfig
+      summary: Generate, validate, and atomically publish configuration without starting Mihomo
+      tags: [mihomo]
+      responses:
+        "200": { description: Validated configuration published, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoConfigStatus" } } } }
+        "400": { description: Profiles or selections are not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Candidate validation failed and was not published, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/runtime:
+    get:
+      operationId: getMihomoRuntimeStatus
+      summary: Read Mihomo process state and selected/running subscription distinction
+      tags: [mihomo]
+      responses:
+        "200": { description: Runtime status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoRuntimeStatus" } } } }
+  /api/v1/mihomo/runtime/start:
+    post:
+      operationId: startMihomo
+      summary: Start Mihomo with the currently selected and revalidated subscription artifact
+      tags: [mihomo]
+      responses:
+        "200": { description: Started, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoRuntimeStatus" } } } }
+        "409": { description: Not launchable or already running, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/runtime/restart:
+    post:
+      operationId: restartMihomo
+      summary: Revalidate selected artifact and restart Mihomo to apply it
+      tags: [mihomo]
+      responses:
+        "200": { description: Restarted, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoRuntimeStatus" } } } }
+        "409": { description: Selected artifact is not launchable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/runtime/stop:
+    post:
+      operationId: stopMihomo
+      summary: Stop the managed Mihomo process
+      tags: [mihomo]
+      responses:
+        "200": { description: Stopped, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoRuntimeStatus" } } } }
+        "409": { description: Mihomo is not running, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/subscriptions:
+    get:
+      operationId: listMihomoSubscriptions
+      tags: [mihomo]
+      summary: List subscriptions including their plaintext URLs
+      responses:
+        "200": { description: Subscriptions, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscriptionList" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: createMihomoSubscription
+      tags: [mihomo]
+      summary: Store a plaintext HTTPS subscription URL in the private database
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscriptionCreateRequest" } } } }
+      responses:
+        "201": { description: Created subscription, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscription" } } } }
+        "400": { description: Invalid subscription, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: Authentication required, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "403": { description: CSRF validation failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/subscriptions/{subscriptionId}:
+    parameters:
+      - { name: subscriptionId, in: path, required: true, schema: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" } }
+    put:
+      operationId: updateMihomoSubscription
+      tags: [mihomo]
+      summary: Update subscription metadata and optionally replace its secret URL
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscriptionMutation" } } } }
+      responses:
+        "200": { description: Updated subscription, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscription" } } } }
+        "400": { description: Invalid subscription, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Subscription not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    delete:
+      operationId: deleteMihomoSubscription
+      tags: [mihomo]
+      summary: Delete a subscription not referenced by an egress profile
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Subscription not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/subscriptions/{subscriptionId}/refresh:
+    parameters:
+      - { name: subscriptionId, in: path, required: true, schema: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" } }
+    post:
+      operationId: refreshMihomoSubscription
+      tags: [mihomo]
+      summary: Fetch and summarize one encrypted subscription
+      responses:
+        "200": { description: Refreshed subscription and nodes, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoSubscriptionRefresh" } } } }
+        "404": { description: Subscription not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "502": { description: Fetch or parse failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/subscriptions/{subscriptionId}/nodes:
+    parameters:
+      - { name: subscriptionId, in: path, required: true, schema: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" } }
+    get:
+      operationId: listMihomoSubscriptionNodes
+      tags: [mihomo]
+      summary: List non-secret node summaries
+      responses:
+        "200": { description: Node summaries, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoNodeList" } } } }
+        "404": { description: Subscription not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/subscriptions/{subscriptionId}/select:
+    parameters:
+      - { name: subscriptionId, in: path, required: true, schema: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" } }
+    post:
+      operationId: selectMihomoSubscription
+      tags: [mihomo]
+      summary: Revalidate and select this artifact for the next start or restart without managing the process
+      responses:
+        "200": { description: Selected configuration status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoConfigStatus" } } } }
+        "400": { description: Subscription artifact is not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Current core rejected the stored configuration, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/egress-profiles:
+    get:
+      operationId: listMihomoEgressProfiles
+      tags: [mihomo]
+      summary: List Host VoWiFi-only egress selections
+      responses:
+        "200": { description: Egress profiles, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileList" } } } }
+    post:
+      operationId: createMihomoEgressProfile
+      tags: [mihomo]
+      summary: Create an egress profile without starting Mihomo
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileMutation" } } } }
+      responses:
+        "201": { description: Created profile, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfile" } } } }
+        "400": { description: Invalid selection, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/mihomo/egress-profiles/{profileId}:
+    parameters:
+      - { name: profileId, in: path, required: true, schema: { type: string, pattern: "^egress_[A-Za-z0-9_-]{22}$" } }
+    put:
+      operationId: updateMihomoEgressProfile
+      tags: [mihomo]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileMutation" } } } }
+      responses:
+        "200": { description: Updated profile, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfile" } } } }
+        "404": { description: Profile not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    delete:
+      operationId: deleteMihomoEgressProfile
+      tags: [mihomo]
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Profile not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/line-egress-bindings:
+    get:
+      operationId: listLineEgressBindings
+      tags: [lines]
+      summary: List effective direct or Mihomo-country bindings for current Lines
+      responses:
+        "200": { description: Line egress bindings, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBindingList" } } } }
+  /api/v1/lines/{lineId}/egress:
+    parameters:
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
+    put:
+      operationId: putLineEgressBinding
+      tags: [lines]
+      summary: Persist a Line egress choice without rewriting or restarting Mihomo
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBindingMutation" } } } }
+      responses:
+        "200": { description: Updated Line egress binding, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBinding" } } } }
+        "400": { description: Invalid mode or unavailable country, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Line not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Line is not configured for Host VoWiFi, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/vowifi-lines:
+    get:
+      operationId: listVoWiFiLines
+      tags: [lines]
+      summary: List desired and observed Host VoWiFi state for current Lines
+      responses:
+        "200": { description: Host VoWiFi Line states, content: { application/json: { schema: { $ref: "#/components/schemas/VoWiFiLineStateList" } } } }
+        "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/vowifi-lines/{lineId}/activate:
+    parameters:
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^agent-line-[0-9a-f]{32}$" } }
+    post:
+      operationId: activateVoWiFiLine
+      tags: [lines]
+      summary: Persist activation intent and start the fixed Host VoWiFi runtime
+      responses:
+        "202": { description: Activation accepted, content: { application/json: { schema: { $ref: "#/components/schemas/VoWiFiLineState" } } } }
+        "404": { description: Line not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: "Line, SIM, RF or egress is not ready", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/vowifi-lines/{lineId}/deactivate:
+    parameters:
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^agent-line-[0-9a-f]{32}$" } }
+    post:
+      operationId: deactivateVoWiFiLine
+      tags: [lines]
+      summary: Persist deactivation intent and remove the Line runtime
+      responses:
+        "200": { description: Line stopped, content: { application/json: { schema: { $ref: "#/components/schemas/VoWiFiLineState" } } } }
+        "404": { description: Line not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/notification-channels:
+    get:
+      operationId: listNotificationChannels
+      tags: [notifications]
+      summary: List outbound notification channels without credentials
+      responses:
+        "200": { description: Channels, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelList" } } } }
+    post:
+      operationId: createNotificationChannel
+      tags: [notifications]
+      summary: Store an encrypted WeCom or Feishu webhook
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelMutation" } } } }
+      responses:
+        "201": { description: Created channel, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "400": { description: Invalid channel, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/notification-channels/{channelId}:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string, pattern: "^channel_[A-Za-z0-9_-]{22}$" } }
+    put:
+      operationId: updateNotificationChannel
+      tags: [notifications]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannelMutation" } } } }
+      responses:
+        "200": { description: Updated channel, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "404": { description: Channel not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    delete:
+      operationId: deleteNotificationChannel
+      tags: [notifications]
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Channel not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/notification-channels/{channelId}/test:
+    parameters:
+      - { name: channelId, in: path, required: true, schema: { type: string, pattern: "^channel_[A-Za-z0-9_-]{22}$" } }
+    post:
+      operationId: testNotificationChannel
+      tags: [notifications]
+      summary: Send one explicit test message
+      responses:
+        "200": { description: Updated delivery status, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
+        "404": { description: Channel not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "502": { description: Provider rejected or could not receive the test, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/messages:
+    get:
+      operationId: listMessages
+      summary: List the most recent durable SMS records
+      tags: [messages]
+      responses:
+        "200":
+          description: Most recent SMS records, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSMessageListResponse"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Message history could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Messaging is not configured for this runtime
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: sendMessage
+      summary: Persist and send one SMS on a selected line
+      tags: [messages]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendSMSRequest"
+      responses:
+        "200":
+          description: An idempotent replay of an existing operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSMessage"
+        "201":
+          description: The SMS operation was created and reached its current durable state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSMessage"
+        "400":
+          description: The operation id, line, destination, or body is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: CSRF validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: The selected line is not present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The line is unavailable, the instance is not ready, or the operation id conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: The selected line does not support SMS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The durable SMS state could not be saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: The SMS transport or inventory is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/access-paths:
+    get:
+      operationId: listAccessPaths
+      summary: List Simulator Host VoWiFi and egress states
+      tags: [access-paths]
+      responses:
+        "200": { description: Per-line states, content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathListResponse" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Access paths unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/access-paths/{lineId}:
+    put:
+      operationId: configureAccessPath
+      summary: Configure Simulator direct or mihomo-required egress
+      tags: [access-paths]
+      parameters:
+        - name: lineId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^simulator-line-[12]$" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathRequest" } } }
+      responses:
+        "200": { description: Persisted fail-closed state, content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathState" } } } }
+        "400": { description: Invalid state, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Access paths unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/euicc:
+    get:
+      operationId: getEUICCState
+      summary: Read Simulator removable-eUICC installed profiles
+      tags: [euicc]
+      responses:
+        "200": { description: Simulator eUICC state, content: { application/json: { schema: { $ref: "#/components/schemas/EUICCState" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: eUICC management unavailable in this runtime, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/euicc/profiles/{profileId}/activate:
+    parameters:
+      - name: profileId
+        in: path
+        required: true
+        schema: { type: string, pattern: "^simulator-euicc-profile-[ab]$" }
+    post:
+      operationId: activateEUICCProfile
+      summary: Switch active profile in Simulator and read back confirmation
+      tags: [euicc]
+      responses:
+        "200": { description: Switched and confirmed state, content: { application/json: { schema: { $ref: "#/components/schemas/EUICCState" } } } }
+        "400": { description: Invalid profile, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Profile not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: eUICC management unavailable in this runtime, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/calls:
+    get:
+      operationId: listCalls
+      summary: List Simulator call records
+      tags: [calls]
+      responses:
+        "200":
+          description: Recent call records
+          content: { application/json: { schema: { $ref: "#/components/schemas/CallListResponse" } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Calls unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/calls/dial:
+    post:
+      operationId: dialCall
+      summary: Dial in the Simulator call state machine
+      tags: [calls]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CallStartRequest" } } }
+      responses:
+        "200": { description: Idempotent replay, content: { application/json: { schema: { $ref: "#/components/schemas/Call" } } } }
+        "201": { description: Call created, content: { application/json: { schema: { $ref: "#/components/schemas/Call" } } } }
+        "400": { description: Invalid or unsafe number, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Line unavailable or replay conflict, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Call persistence failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/calls/incoming:
+    post:
+      operationId: simulateIncomingCall
+      summary: Inject a Simulator incoming call
+      tags: [calls]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CallStartRequest" } } }
+      responses:
+        "200": { description: Idempotent replay, content: { application/json: { schema: { $ref: "#/components/schemas/Call" } } } }
+        "201": { description: Incoming call created, content: { application/json: { schema: { $ref: "#/components/schemas/Call" } } } }
+        "400": { description: Invalid request, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Line unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Call persistence failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/calls/{callId}/action:
+    parameters:
+      - name: callId
+        in: path
+        required: true
+        schema: { type: string, pattern: "^call_[A-Za-z0-9_-]{16,120}$" }
+    post:
+      operationId: controlCall
+      summary: Answer, reject, hang up, or send DTMF in Simulator
+      tags: [calls]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CallActionRequest" } } }
+      responses:
+        "200": { description: Updated call, content: { application/json: { schema: { $ref: "#/components/schemas/Call" } } } }
+        "400": { description: Invalid action, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Call not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Action conflicts with call state, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Call persistence failed, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/messages/{messageId}:
+    parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,128}$"
+    delete:
+      operationId: deleteMessage
+      summary: Delete one SMS record from the application database
+      tags: [messages]
+      responses:
+        "204": { description: Message record deleted }
+        "400":
+          description: Invalid message id
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Message not found
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: The instance is not ready
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Message could not be deleted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/contacts:
+    get:
+      operationId: listContacts
+      summary: List durable contacts
+      tags: [contacts]
+      responses:
+        "200":
+          description: Contacts sorted by display name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContactListResponse" }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: The instance is not ready
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Contacts could not be read
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+    post:
+      operationId: createContact
+      summary: Create a contact
+      tags: [contacts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactMutationRequest" }
+      responses:
+        "201":
+          description: Contact created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Contact" } } }
+        "400":
+          description: Invalid contact
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: Duplicate phone number or instance not ready
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Contact could not be persisted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/contacts/{contactId}:
+    parameters:
+      - name: contactId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^contact_[A-Za-z0-9_-]{16,120}$"
+    put:
+      operationId: updateContact
+      summary: Update a contact
+      tags: [contacts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactMutationRequest" }
+      responses:
+        "200":
+          description: Contact updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/Contact" } } }
+        "400":
+          description: Invalid contact
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Contact not found
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: Duplicate phone number or instance not ready
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Contact could not be persisted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+    delete:
+      operationId: deleteContact
+      summary: Delete a contact
+      tags: [contacts]
+      responses:
+        "204": { description: Contact deleted }
+        "400":
+          description: Invalid contact id
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Contact not found
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: The instance is not ready
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Contact could not be deleted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/hardware/topology:
+    get:
+      operationId: getHardwareTopology
+      summary: Read the normalized dynamic hardware, SIM, Profile, ResourceGroup, and Line graph
+      tags: [inventory]
+      responses:
+        "200":
+          description: Current normalized hardware topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HardwareTopologyResponse"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance has not completed setup or is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not permitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The hardware topology could not be produced or failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/subscription-profiles/{profileId}/access-mode:
+    put:
+      operationId: putSubscriptionProfileAccessMode
+      summary: Persist the administrator-selected access mode for one subscription profile
+      tags: [inventory]
+      parameters:
+        - name: profileId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutAccessModeRequest"
+      responses:
+        "200":
+          description: Updated inventory snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryResponse"
+        "400":
+          description: The request body or access mode is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: The subscription profile is not present in the current inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance has not completed setup or is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The access mode could not be persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/status:
+    get:
+      operationId: getSetupStatus
+      summary: Read the first-run boundary without opening normal business APIs
+      tags: [setup]
+      responses:
+        "200":
+          description: Current first-run boundary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatusResponse"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The installation state could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/bootstrap:
+    post:
+      operationId: consumeSetupBootstrap
+      summary: Exchange a one-time root-generated bootstrap code for a restricted setup session
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumeBootstrapRequest"
+      responses:
+        "200":
+          description: Authorized setup session; the opaque session token is stored only in an HttpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: The request body is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: The bootstrap code is invalid, expired, or already consumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: First-run setup is not available in the current installation state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The bootstrap exchange could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/session:
+    get:
+      operationId: getSetupSession
+      summary: Resume the restricted first-run session from its HttpOnly cookie
+      tags: [setup]
+      responses:
+        "200":
+          description: Current restricted setup session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: First-run setup is not available in the current installation state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The setup session could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/administrator:
+    put:
+      operationId: putSetupAdministrator
+      summary: Create or replace the sole administrator while first-run setup remains uninitialized
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigureSetupAdministratorRequest"
+      responses:
+        "200":
+          description: Initial administrator configuration persisted; password material is never returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: Username, password confirmation, password policy, locale, or body is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: First-run setup is not available in the current installation state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The administrator configuration could not be persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/storage:
+    put:
+      operationId: putSetupStorage
+      summary: Validate and persist the data and recording roots for a new instance
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigureSetupStorageRequest"
+      responses:
+        "200":
+          description: Storage roots were identity-checked, write-tested, and persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: The recording root is invalid or conflicts with the live data root
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: An earlier setup prerequisite is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: A storage root failed validation or persistence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/https:
+    put:
+      operationId: putSetupHTTPS
+      summary: Configure loopback management or generate a local-CA HTTPS candidate
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigureSetupHTTPSRequest"
+      responses:
+        "200":
+          description: Management endpoint configuration persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: Listener, mode, port, or SAN configuration is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Storage is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Certificate generation, key protection, or persistence failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/https/confirm:
+    post:
+      operationId: confirmSetupHTTPS
+      summary: Confirm the displayed SHA-256 local root fingerprint
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmSetupHTTPSRequest"
+      responses:
+        "200":
+          description: The HTTPS candidate was confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: The fingerprint does not match the current candidate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Confirmation persistence failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/https/root-certificate:
+    get:
+      operationId: getSetupHTTPSRootCertificate
+      summary: Read the public local root certificate for explicit trust installation
+      tags: [setup]
+      responses:
+        "200":
+          description: Public root certificate and independently displayed fingerprint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupRootCertificateResponse"
+        "400":
+          description: The current setup mode has no local root certificate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The public root certificate could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/inventory:
+    get:
+      operationId: getSetupInventory
+      summary: Read the restricted HIL-0 inventory while the instance remains RF Off
+      tags: [setup]
+      responses:
+        "200":
+          description: Current read-only device and line snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryResponse"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: HTTPS setup is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Inventory could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/hardware/topology:
+    get:
+      operationId: getSetupHardwareTopology
+      summary: Read the RF-Off normalized hardware topology during first-run setup
+      tags: [setup, inventory]
+      responses:
+        "200":
+          description: Current normalized RF-Off hardware topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HardwareTopologyResponse"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: HTTPS confirmation is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The setup request authority is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The hardware topology could not be produced or failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/subscription-profiles/{profileId}/access-mode:
+    put:
+      operationId: putSetupSubscriptionProfileAccessMode
+      summary: Persist a setup-time access mode without enabling RF
+      tags: [setup]
+      parameters:
+        - name: profileId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutAccessModeRequest"
+      responses:
+        "200":
+          description: Updated setup inventory remains RF Off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryResponse"
+        "400":
+          description: Access mode is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Subscription profile was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: HTTPS setup is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Access mode could not be persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/hardware/confirm:
+    post:
+      operationId: confirmSetupHardware
+      summary: Confirm the current RF-Off inventory and all per-profile access modes
+      tags: [setup]
+      responses:
+        "200":
+          description: Current hardware inventory digest was persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupSessionResponse"
+        "400":
+          description: A line lacks an access mode or is not RF Off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: HTTPS setup is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Hardware review could not be persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/setup/complete:
+    post:
+      operationId: completeSetup
+      summary: Revalidate every setup prerequisite and atomically enter ready
+      tags: [setup]
+      responses:
+        "200":
+          description: The instance is ready and requires normal administrator login
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCompletionResponse"
+        "400":
+          description: Current hardware no longer matches the reviewed RF-Off snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live setup session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: A prerequisite is incomplete or setup is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Final storage, TLS, or atomic state transition failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/system/health:
+    get:
+      operationId: getSystemHealth
+      summary: Read the local control-plane health snapshot
+      tags: [system]
+      responses:
+        "200":
+          description: Current health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "421":
+          description: The HTTP authority is not a permitted loopback host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: A durable subsystem could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+components:
+  schemas:
+    SetupCompletionResponse:
+      type: object
+      additionalProperties: false
+      required: [installationState, managementUrl, loginRequired]
+      properties:
+        installationState:
+          type: string
+          enum: [ready]
+        managementUrl:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        loginRequired:
+          type: boolean
+          enum: [true]
+    HealthStatus:
+      type: string
+      enum: [ok, degraded]
+    InstallationState:
+      type: string
+      enum: [uninitialized, ready, maintenance]
+    SetupPhase:
+      type: string
+      enum: [bootstrap-required, complete, maintenance]
+    SetupFlow:
+      type: string
+      enum: [create-new]
+    ConsumeBootstrapRequest:
+      type: object
+      additionalProperties: false
+      required: [bootstrapCode]
+      properties:
+        bootstrapCode:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+    ConfigureSetupAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password, passwordConfirmation, instanceDefaultLocale]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$"
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+        passwordConfirmation:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 128
+        instanceDefaultLocale:
+          type: string
+          enum: [zh-CN, en-US]
+    ConfigureSetupStorageRequest:
+      type: object
+      additionalProperties: false
+      required: [recordingsRoot]
+      properties:
+        recordingsRoot:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          pattern: "^/"
+    SetupHTTPSMode:
+      type: string
+      enum: [loopback-only, local-ca]
+    ConfigureSetupHTTPSRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, listenHost, listenPort, subjectAlternativeNames]
+      properties:
+        mode:
+          $ref: "#/components/schemas/SetupHTTPSMode"
+        listenHost:
+          type: string
+          minLength: 1
+          maxLength: 255
+        listenPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        subjectAlternativeNames:
+          type: array
+          maxItems: 16
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+    ConfirmSetupHTTPSRequest:
+      type: object
+      additionalProperties: false
+      required: [rootFingerprintSha256]
+      properties:
+        rootFingerprintSha256:
+          type: string
+          pattern: "^[0-9A-F]{2}(:[0-9A-F]{2}){31}$"
+    SetupRootCertificateResponse:
+      type: object
+      additionalProperties: false
+      required: [pem, rootFingerprintSha256]
+      properties:
+        pem:
+          type: string
+          minLength: 1
+        rootFingerprintSha256:
+          type: string
+          pattern: "^[0-9A-F]{2}(:[0-9A-F]{2}){31}$"
+    SetupSessionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - authorized
+        - expiresAt
+        - selectedFlow
+        - supportedFlows
+        - administratorConfigured
+        - administratorUsername
+        - instanceDefaultLocale
+        - storageConfigured
+        - dataRoot
+        - recordingsRoot
+        - httpsConfigured
+        - httpsConfirmed
+        - httpsMode
+        - httpsListenUrl
+        - httpsRootFingerprint
+        - httpsLeafNotAfter
+        - hardwareReviewed
+        - hardwareDeviceCount
+        - hardwareLineCount
+        - hardwareInventoryDigest
+      properties:
+        authorized:
+          type: boolean
+          enum: [true]
+        expiresAt:
+          type: string
+          format: date-time
+        selectedFlow:
+          $ref: "#/components/schemas/SetupFlow"
+        supportedFlows:
+          type: array
+          minItems: 1
+          maxItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/SetupFlow"
+        administratorConfigured:
+          type: boolean
+        administratorUsername:
+          type: string
+          maxLength: 32
+        instanceDefaultLocale:
+          type: string
+          enum: [zh-CN, en-US]
+        storageConfigured:
+          type: boolean
+        dataRoot:
+          type: string
+          maxLength: 4096
+        recordingsRoot:
+          type: string
+          maxLength: 4096
+        httpsConfigured:
+          type: boolean
+        httpsConfirmed:
+          type: boolean
+        httpsMode:
+          type: string
+          enum: ['', loopback-only, local-ca, imported]
+        httpsListenUrl:
+          type: string
+          maxLength: 2048
+        httpsRootFingerprint:
+          type: string
+          maxLength: 95
+        httpsLeafNotAfter:
+          type: string
+          maxLength: 64
+        hardwareReviewed:
+          type: boolean
+        hardwareDeviceCount:
+          type: integer
+          minimum: 0
+        hardwareLineCount:
+          type: integer
+          minimum: 0
+        hardwareInventoryDigest:
+          type: string
+          maxLength: 64
+    RFSafetyState:
+      type: string
+      enum: [off, not-present, unknown]
+    BackendKind:
+      type: string
+      enum: [simulator, hardware, replay]
+    DeviceTransport:
+      type: string
+      enum: [simulated, usb, uart]
+    PhysicalDeviceState:
+      type: string
+      enum: [available, unavailable]
+    AccessMode:
+      type: string
+      enum: [cellular-native, host-vowifi-only, hold-rf-off]
+    LineState:
+      type: string
+      enum: [awaiting-access-mode, ready, unavailable]
+    PutAccessModeRequest:
+      type: object
+      additionalProperties: false
+      required: [accessMode]
+      properties:
+        accessMode:
+          $ref: "#/components/schemas/AccessMode"
+    PhysicalDeviceSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - displayName
+        - transport
+        - state
+        - modemFunctionCount
+        - simSlotCount
+        - resourceGroupCount
+        - generation
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        transport:
+          $ref: "#/components/schemas/DeviceTransport"
+        state:
+          $ref: "#/components/schemas/PhysicalDeviceState"
+        modemFunctionCount:
+          type: integer
+          minimum: 0
+        simSlotCount:
+          type: integer
+          minimum: 0
+        resourceGroupCount:
+          type: integer
+          minimum: 0
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+    LineSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - physicalDeviceId
+        - subscriptionProfileId
+        - displayName
+        - accessMode
+        - accessModeConfigured
+        - state
+        - rfSafety
+        - generation
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        physicalDeviceId:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        subscriptionProfileId:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        accessMode:
+          $ref: "#/components/schemas/AccessMode"
+        accessModeConfigured:
+          type: boolean
+        state:
+          $ref: "#/components/schemas/LineState"
+        rfSafety:
+          $ref: "#/components/schemas/RFSafetyState"
+        generation:
+          type: integer
+          format: int64
+          minimum: 1
+    HardwareGeneration:
+      type: integer
+      format: int64
+      minimum: 1
+    TopologyRevision:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+    HardwareBackend:
+      type: string
+      enum: [simulated, direct-at, direct-qmi, direct-mbim, modemmanager, pcsc]
+    SIMSlotPresence:
+      type: string
+      enum: [present, absent, unknown]
+    SIMMediaKind:
+      type: string
+      enum: [uicc, removable-euicc]
+    SIMIdentityState:
+      type: string
+      enum: [known, unknown]
+    SubscriptionProfileState:
+      type: string
+      enum: [active, inactive, locked]
+    ResourceKind:
+      type: string
+      enum: [radio-control, sim-access, voice-media, sms-storage, sim-apdu, host-vowifi-auth, network-selection, sim-lock, euicc-profiles]
+    HardwareCapabilities:
+      type: object
+      additionalProperties: false
+      required:
+        - simAccess
+        - sms
+        - cellularVoice
+        - digitalVoiceMedia
+        - usbUac
+        - simApdu
+        - hostVoWifiAuth
+        - rfControl
+        - networkScan
+        - manualNetworkSelection
+        - primarySimLockState
+        - pin1Verify
+        - puk1Unblock
+        - euiccProfiles
+      properties:
+        simAccess: { type: boolean }
+        sms: { type: boolean }
+        cellularVoice: { type: boolean }
+        digitalVoiceMedia: { type: boolean }
+        usbUac: { type: boolean }
+        simApdu: { type: boolean }
+        hostVoWifiAuth: { type: boolean }
+        rfControl: { type: boolean }
+        networkScan: { type: boolean }
+        manualNetworkSelection: { type: boolean }
+        primarySimLockState: { type: boolean }
+        pin1Verify: { type: boolean }
+        puk1Unblock: { type: boolean }
+        euiccProfiles: { type: boolean }
+    PhysicalDeviceDetail:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, transport, state, generation]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        displayName: { type: string, minLength: 1, maxLength: 256 }
+        transport: { $ref: "#/components/schemas/DeviceTransport" }
+        state: { $ref: "#/components/schemas/PhysicalDeviceState" }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+    ModemFunctionDetail:
+      type: object
+      additionalProperties: false
+      required: [id, physicalDeviceId, displayName, backend, generation, capabilities]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        physicalDeviceId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        displayName: { type: string, minLength: 1, maxLength: 256 }
+        backend: { $ref: "#/components/schemas/HardwareBackend" }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+    SIMSlotDetail:
+      type: object
+      additionalProperties: false
+      required: [id, physicalDeviceId, index, presence, activeMediaId, generation]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        physicalDeviceId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        index: { type: integer, minimum: 0, maximum: 255 }
+        presence: { $ref: "#/components/schemas/SIMSlotPresence" }
+        activeMediaId: { type: string, maxLength: 64 }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+    SIMMediaDetail:
+      type: object
+      additionalProperties: false
+      required: [id, simSlotId, kind, identityState, displayIdentityHint, generation]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        simSlotId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        kind: { $ref: "#/components/schemas/SIMMediaKind" }
+        identityState: { $ref: "#/components/schemas/SIMIdentityState" }
+        displayIdentityHint: { type: string, minLength: 1, maxLength: 64 }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+    SubscriptionProfileDetail:
+      type: object
+      additionalProperties: false
+      required: [id, simMediaId, displayName, state, displayIdentityHint, generation, accessMode, accessModeConfigured]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        simMediaId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        displayName: { type: string, minLength: 1, maxLength: 256 }
+        state: { $ref: "#/components/schemas/SubscriptionProfileState" }
+        displayIdentityHint: { type: string, minLength: 1, maxLength: 64 }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+        accessMode: { $ref: "#/components/schemas/AccessMode" }
+        accessModeConfigured: { type: boolean }
+    ResourceGroupDetail:
+      type: object
+      additionalProperties: false
+      required: [id, physicalDeviceId, displayName, resources, modemFunctionIds, simSlotIds, maxActiveCalls, maxConcurrentOps, generation]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        physicalDeviceId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        displayName: { type: string, minLength: 1, maxLength: 256 }
+        resources:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/ResourceKind" }
+        modemFunctionIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        simSlotIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        maxActiveCalls: { type: integer, minimum: 0, maximum: 64 }
+        maxConcurrentOps: { type: integer, minimum: 1, maximum: 64 }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+    HardwareLineDetail:
+      type: object
+      additionalProperties: false
+      required: [id, physicalDeviceId, modemFunctionId, subscriptionProfileId, resourceGroupId, displayName, generation, capabilities, accessMode, accessModeConfigured, state, rfSafety]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        physicalDeviceId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        modemFunctionId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        subscriptionProfileId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        resourceGroupId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        displayName: { type: string, minLength: 1, maxLength: 256 }
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+        accessMode: { $ref: "#/components/schemas/AccessMode" }
+        accessModeConfigured: { type: boolean }
+        state: { $ref: "#/components/schemas/LineState" }
+        rfSafety: { $ref: "#/components/schemas/RFSafetyState" }
+    HardwareTopologyResponse:
+      type: object
+      additionalProperties: false
+      required: [generation, revision, observedAt, devices, modemFunctions, simSlots, simMedia, subscriptionProfiles, resourceGroups, lines]
+      properties:
+        generation: { $ref: "#/components/schemas/HardwareGeneration" }
+        revision: { $ref: "#/components/schemas/TopologyRevision" }
+        observedAt: { type: string, format: date-time }
+        devices:
+          type: array
+          items: { $ref: "#/components/schemas/PhysicalDeviceDetail" }
+        modemFunctions:
+          type: array
+          items: { $ref: "#/components/schemas/ModemFunctionDetail" }
+        simSlots:
+          type: array
+          items: { $ref: "#/components/schemas/SIMSlotDetail" }
+        simMedia:
+          type: array
+          items: { $ref: "#/components/schemas/SIMMediaDetail" }
+        subscriptionProfiles:
+          type: array
+          items: { $ref: "#/components/schemas/SubscriptionProfileDetail" }
+        resourceGroups:
+          type: array
+          items: { $ref: "#/components/schemas/ResourceGroupDetail" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/HardwareLineDetail" }
+    InventoryResponse:
+      type: object
+      additionalProperties: false
+      required: [generation, revision, observedAt, devices, lines]
+      properties:
+        generation:
+          $ref: "#/components/schemas/HardwareGeneration"
+        revision:
+          $ref: "#/components/schemas/TopologyRevision"
+        observedAt:
+          type: string
+          format: date-time
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhysicalDeviceSummary"
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineSummary"
+    SMSDirection:
+      type: string
+      enum: [outbound, inbound]
+    Contact:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, phoneNumber, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          pattern: "^contact_[A-Za-z0-9_-]{16,120}$"
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        phoneNumber:
+          type: string
+          pattern: "^\\+?[0-9]{3,20}$"
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Call:
+      type: object
+      additionalProperties: false
+      required: [id, operationId, lineId, remoteAddress, direction, state, endReason, createdAt, updatedAt]
+      properties:
+        id: { type: string, pattern: "^call_[A-Za-z0-9_-]{16,120}$" }
+        operationId: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
+        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        remoteAddress: { type: string, pattern: "^\\+?[0-9]{3,20}$" }
+        direction: { type: string, enum: [inbound, outbound] }
+        state: { type: string, enum: [incoming, dialing, active, ended, failed] }
+        endReason: { type: string, maxLength: 64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        answeredAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+    EUICCProfile:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, displayIdentityHint, active]
+      properties:
+        id: { type: string, pattern: "^simulator-euicc-profile-[ab]$" }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        displayIdentityHint: { type: string, minLength: 1, maxLength: 80 }
+        active: { type: boolean }
+    EUICCState:
+      type: object
+      additionalProperties: false
+      required: [eidHint, profiles]
+      properties:
+        eidHint: { type: string, minLength: 1, maxLength: 80 }
+        profiles:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { $ref: "#/components/schemas/EUICCProfile" }
+    AccessPathState:
+      type: object
+      additionalProperties: false
+      required: [lineId, mode, mihomoState, lineState, authentication, epdg, ims, directFallback]
+      properties:
+        lineId: { type: string, pattern: "^simulator-line-[12]$" }
+        mode: { type: string, enum: [direct, mihomo-required] }
+        mihomoState: { type: string, enum: [running, stopped, failed] }
+        lineState: { type: string, enum: [online, offline] }
+        authentication: { type: string, enum: [simulated-aka-complete] }
+        epdg: { type: string, enum: [connected, blocked] }
+        ims: { type: string, enum: [registered, offline] }
+        directFallback: { type: boolean, enum: [false] }
+    AccessPathRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, mihomoState]
+      properties:
+        mode: { type: string, enum: [direct, mihomo-required] }
+        mihomoState: { type: string, enum: [running, stopped, failed] }
+    AccessPathListResponse:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          maxItems: 2
+          items: { $ref: "#/components/schemas/AccessPathState" }
+    CallListResponse:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/Call" }
+    CallStartRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, lineId, remoteAddress]
+      properties:
+        operationId: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
+        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        remoteAddress: { type: string, pattern: "^\\+?[0-9]{3,20}$" }
+    CallActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { type: string, enum: [answer, reject, hangup, dtmf] }
+        digits: { type: string, pattern: "^[0-9*#A-D]{1,32}$" }
+    ContactMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName, phoneNumber]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        phoneNumber:
+          type: string
+          pattern: "^\\+?[0-9]{3,20}$"
+    ContactListResponse:
+      type: object
+      additionalProperties: false
+      required: [contacts]
+      properties:
+        contacts:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/Contact" }
+    SMSStatus:
+      type: string
+      enum: [queued, sent, failed, received]
+    SMSMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - operationId
+        - direction
+        - lineId
+        - remoteAddress
+        - body
+        - status
+        - providerMessageId
+        - errorCode
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,128}$"
+        operationId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,128}$"
+        direction:
+          $ref: "#/components/schemas/SMSDirection"
+        lineId:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        remoteAddress:
+          type: string
+          pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$"
+        body:
+          type: string
+          minLength: 1
+          maxLength: 1600
+        status:
+          $ref: "#/components/schemas/SMSStatus"
+        providerMessageId:
+          type: string
+          maxLength: 128
+        errorCode:
+          type: string
+          maxLength: 64
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+    SMSMessageListResponse:
+      type: object
+      additionalProperties: false
+      required: [messages, totalCount, capacity, nearCapacity]
+      properties:
+        messages:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SMSMessage"
+        totalCount:
+          type: integer
+          format: int64
+          minimum: 0
+        capacity:
+          type: integer
+          format: int64
+          minimum: 1
+        nearCapacity:
+          type: boolean
+    SendSMSRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, lineId, destination, body]
+      properties:
+        operationId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{16,128}$"
+        lineId:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        destination:
+          type: string
+          pattern: "^\\+?[0-9]{3,20}$"
+        body:
+          type: string
+          minLength: 1
+          maxLength: 1600
+    SetupStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - installationState
+        - phase
+        - setupRequired
+        - businessApiAvailable
+        - bootstrapGenerationAvailable
+        - supportedFlows
+      properties:
+        installationState:
+          $ref: "#/components/schemas/InstallationState"
+        phase:
+          $ref: "#/components/schemas/SetupPhase"
+        setupRequired:
+          type: boolean
+        businessApiAvailable:
+          type: boolean
+        bootstrapGenerationAvailable:
+          type: boolean
+        supportedFlows:
+          type: array
+          maxItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/SetupFlow"
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - version
+        - apiVersion
+        - installationState
+        - rfSafety
+        - backend
+        - databaseCount
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        version:
+          type: string
+        apiVersion:
+          type: string
+          enum: [v1]
+        installationState:
+          $ref: "#/components/schemas/InstallationState"
+        rfSafety:
+          $ref: "#/components/schemas/RFSafetyState"
+        backend:
+          $ref: "#/components/schemas/BackendKind"
+        databaseCount:
+          type: integer
+          minimum: 0
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    ChangeAdministratorPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword, newPasswordConfirmation]
+      properties:
+        currentPassword: { type: string, minLength: 1, maxLength: 1024 }
+        newPassword: { type: string, minLength: 12, maxLength: 256 }
+        newPasswordConfirmation: { type: string, minLength: 12, maxLength: 256 }
+    MihomoCoreStatus:
+      type: object
+      additionalProperties: false
+      required: [installed, version, architecture, sha256, installedAt]
+      properties:
+        installed: { type: boolean }
+        version: { type: string, maxLength: 32 }
+        architecture: { type: string, enum: ["", amd64, arm64] }
+        sha256: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+        installedAt: { type: string, maxLength: 64 }
+    MihomoCoreCandidate:
+      type: object
+      additionalProperties: false
+      required: [version, assetName, sha256, size, architecture]
+      properties:
+        version: { type: string, pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        assetName: { type: string, minLength: 1, maxLength: 180 }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        size: { type: integer, format: int64, minimum: 1, maximum: 134217728 }
+        architecture: { type: string, enum: [amd64, arm64] }
+    MihomoSubscription:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, url, urlHint, enabled, selected, artifactReady, lastRefreshAt, lastRefreshStatus, nodeCount, lastErrorCode]
+      properties:
+        id: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        url: { type: string, minLength: 1, maxLength: 4096 }
+        urlHint: { type: string, minLength: 1, maxLength: 255 }
+        enabled: { type: boolean }
+        selected: { type: boolean, description: "Selected for the next start or restart; it may differ from the running process" }
+        artifactReady: { type: boolean, description: "A generated artifact passed core validation even if the latest refresh failed" }
+        lastRefreshAt: { type: string, maxLength: 64 }
+        lastRefreshStatus: { type: string, enum: [never, success, failed] }
+        nodeCount: { type: integer, minimum: 0, maximum: 10000 }
+        lastErrorCode: { type: string, maxLength: 64 }
+    MihomoSubscriptionMutation:
+      type: object
+      additionalProperties: false
+      required: [displayName, url, enabled]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        url: { type: string, maxLength: 4096, description: Plaintext URL; required on create and empty on update preserves it }
+        enabled: { type: boolean }
+    MihomoSubscriptionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: { type: string, minLength: 1, maxLength: 4096, description: Plaintext HTTPS URL; creation immediately downloads and validates the subscription }
+    MihomoSubscriptionList:
+      type: object
+      additionalProperties: false
+      required: [subscriptions]
+      properties:
+        subscriptions: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/MihomoSubscription" } }
+    MihomoNode:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, kind, countryCode, countryName]
+      properties:
+        id: { type: string, pattern: "^node_[A-Za-z0-9_-]{22}$" }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        kind: { type: string, minLength: 1, maxLength: 32 }
+        countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+        countryName: { type: string, maxLength: 80 }
+    MihomoNodeList:
+      type: object
+      additionalProperties: false
+      required: [nodes]
+      properties:
+        nodes: { type: array, maxItems: 10000, items: { $ref: "#/components/schemas/MihomoNode" } }
+    MihomoSubscriptionRefresh:
+      type: object
+      additionalProperties: false
+      required: [subscription, nodes]
+      properties:
+        subscription: { $ref: "#/components/schemas/MihomoSubscription" }
+        nodes: { type: array, maxItems: 10000, items: { $ref: "#/components/schemas/MihomoNode" } }
+    MihomoEgressProfile:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, subscriptionId, lineId, selectionType, selectedNodeId, selectedNodeName, selectedCountryCode, selectedCountryName, sourceCidr, enabled, ready, readinessReason]
+      properties:
+        id: { type: string, pattern: "^egress_[A-Za-z0-9_-]{22}$" }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        subscriptionId: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" }
+        lineId: { type: string, minLength: 1, maxLength: 160 }
+        selectionType: { type: string, enum: [node, country] }
+        selectedNodeId: { type: string, pattern: "^$|^node_[A-Za-z0-9_-]{22}$" }
+        selectedNodeName: { type: string, maxLength: 120 }
+        selectedCountryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+        selectedCountryName: { type: string, maxLength: 80 }
+        sourceCidr: { type: string, maxLength: 64 }
+        enabled: { type: boolean }
+        ready: { type: boolean }
+        readinessReason: { type: string, enum: [READY, PROFILE_DISABLED, CORE_NOT_INSTALLED, SUBSCRIPTION_DISABLED, SUBSCRIPTION_NOT_READY, NODE_NOT_FOUND, COUNTRY_NOT_FOUND] }
+    MihomoEgressProfileMutation:
+      type: object
+      additionalProperties: false
+      required: [displayName, subscriptionId, lineId, selectionType, selectedNodeId, selectedCountryCode, enabled]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        subscriptionId: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" }
+        lineId: { type: string, minLength: 1, maxLength: 160 }
+        selectionType: { type: string, enum: [node, country] }
+        selectedNodeId: { type: string, pattern: "^$|^node_[A-Za-z0-9_-]{22}$" }
+        selectedCountryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+        enabled: { type: boolean }
+    MihomoEgressProfileList:
+      type: object
+      additionalProperties: false
+      required: [profiles]
+      properties:
+        profiles: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/MihomoEgressProfile" } }
+    LineEgressBinding:
+      type: object
+      additionalProperties: false
+      required: [lineId, mode, countryCode, countryName, listenerPort, ready, readinessReason]
+      properties:
+        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        mode: { type: string, enum: [direct, mihomo-country] }
+        countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+        countryName: { type: string, maxLength: 80 }
+        listenerPort: { type: integer, minimum: 0, maximum: 65535 }
+        ready: { type: boolean }
+        readinessReason: { type: string, enum: [READY, LINE_NOT_HOST_VOWIFI, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
+    LineEgressBindingMutation:
+      type: object
+      additionalProperties: false
+      required: [mode, countryCode]
+      properties:
+        mode: { type: string, enum: [direct, mihomo-country] }
+        countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+    LineEgressBindingList:
+      type: object
+      additionalProperties: false
+      required: [bindings]
+      properties:
+        bindings: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/LineEgressBinding" } }
+    VoWiFiLineState:
+      type: object
+      additionalProperties: false
+      required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, attempt, lastErrorCode]
+      properties:
+        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        desiredActive: { type: boolean }
+        eligible: { type: boolean }
+        readinessCode: { type: string, enum: [READY, LINE_NOT_HOST_VOWIFI, LINE_HARDWARE_NOT_READY, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
+        state: { type: string, enum: [stopped, starting, connecting, registering, online, reconnecting, stopping, failed] }
+        stage: { type: string, maxLength: 64 }
+        online: { type: boolean }
+        egressMode: { type: string, enum: [direct, mihomo-country] }
+        countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
+        countryName: { type: string, maxLength: 80 }
+        registeredAt: { type: string, maxLength: 64 }
+        nextRefreshAt: { type: string, maxLength: 64 }
+        attempt: { type: integer, minimum: 0, maximum: 1000000 }
+        lastErrorCode: { type: string, maxLength: 64 }
+    VoWiFiLineStateList:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/VoWiFiLineState" } }
+    MihomoConfigStatus:
+      type: object
+      additionalProperties: false
+      required: [published, launchable, sha256, generatedAt, errorCode, selectedSubscriptionId, runningSubscriptionId]
+      properties:
+        published: { type: boolean }
+        launchable: { type: boolean, description: Active file passes the installed core validation; this does not mean a process is running }
+        sha256: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+        generatedAt: { type: string, maxLength: 64 }
+        errorCode: { type: string, maxLength: 64 }
+        selectedSubscriptionId: { type: string, maxLength: 64 }
+        runningSubscriptionId: { type: string, maxLength: 64 }
+    MihomoRuntimeStatus:
+      type: object
+      additionalProperties: false
+      required: [state, pid, selectedSubscriptionId, runningSubscriptionId, pendingRestart, startedAt, lastErrorCode]
+      properties:
+        state: { type: string, enum: [stopped, running, fault] }
+        pid: { type: integer, minimum: 0 }
+        selectedSubscriptionId: { type: string, maxLength: 64 }
+        runningSubscriptionId: { type: string, maxLength: 64 }
+        pendingRestart: { type: boolean }
+        startedAt: { type: string, maxLength: 64 }
+        lastErrorCode: { type: string, maxLength: 64 }
+    MihomoDashboardStatus:
+      type: object
+      additionalProperties: false
+      required: [available, version, controllerAddress, url, secret]
+      properties:
+        available: { type: boolean }
+        version: { type: string, pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        controllerAddress: { type: string, maxLength: 64 }
+        url: { type: string, maxLength: 256 }
+        secret: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+    NotificationEventKind:
+      type: string
+      enum: [sms.received, sms.failed, call.incoming, call.missed, system.degraded]
+    NotificationChannel:
+      type: object
+      additionalProperties: false
+      required: [id, provider, displayName, webhookHint, signingSecretConfigured, enabled, eventKinds, lastDeliveryAt, lastDeliveryStatus, lastErrorCode]
+      properties:
+        id: { type: string, pattern: "^channel_[A-Za-z0-9_-]{22}$" }
+        provider: { type: string, enum: [wecom, feishu] }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        webhookHint: { type: string, enum: [qyapi.weixin.qq.com, open.feishu.cn] }
+        signingSecretConfigured: { type: boolean }
+        enabled: { type: boolean }
+        eventKinds: { type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventKind" } }
+        lastDeliveryAt: { type: string, maxLength: 64 }
+        lastDeliveryStatus: { type: string, enum: [never, success, failed] }
+        lastErrorCode: { type: string, maxLength: 64 }
+    NotificationChannelMutation:
+      type: object
+      additionalProperties: false
+      required: [provider, displayName, webhookUrl, signingSecret, enabled, eventKinds]
+      properties:
+        provider: { type: string, enum: [wecom, feishu] }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+        webhookUrl: { type: string, maxLength: 4096, description: Required on create; empty on update preserves the credential }
+        signingSecret: { type: string, maxLength: 512, description: Optional Feishu signature secret; empty preserves the existing secret }
+        enabled: { type: boolean }
+        eventKinds: { type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: { $ref: "#/components/schemas/NotificationEventKind" } }
+    NotificationChannelList:
+      type: object
+      additionalProperties: false
+      required: [channels]
+      properties:
+        channels: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/NotificationChannel" } }
+    AuthSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [username, locale, expiresAt]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        locale:
+          type: string
+          enum: [zh-CN, en-US]
+        expiresAt:
+          type: string
+          format: date-time
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, retryable]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9_]+$"
+        retryable:
+          type: boolean
+        reference:
+          type: string

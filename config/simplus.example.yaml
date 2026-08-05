@@ -1,0 +1,16 @@
+server:
+  # V1 starts loopback-only. LAN/VPN listeners are enabled later through the
+  # trusted-HTTPS candidate/confirmation flow, never by changing this example.
+  listen: 127.0.0.1:8080
+
+storage:
+  # Source development keeps runtime state under the ignored .dev tree. A
+  # relative value is resolved against this configuration file's directory;
+  # SIMPLUS_DATA_ROOT overrides must be absolute.
+  data_root: ../.dev/data
+
+runtime:
+  # simulator | hardware | replay. Unknown hardware never silently falls back.
+  backend: simulator
+  # Required and absolute when backend=hardware; versioned IPC only, never a raw command shell.
+  agent_socket: /run/simplus/simplus-agent.sock

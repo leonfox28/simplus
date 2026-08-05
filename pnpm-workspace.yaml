@@ -1,0 +1,11 @@
+packages:
+  - web
+
+overrides:
+  vite: 6.4.3
+
+allowBuilds:
+  core-js: true
+  core-js-pure: true
+  es5-ext: true
+  esbuild: true

@@ -1,0 +1,77 @@
+# macOS / filesystem metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor-local state
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*.local.json
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+.local/
+.npmrc
+.netrc
+secrets/
+/private/
+/lab-notes/
+/docs/private/
+/docs/hardware/
+*.key
+*.pem
+*.p12
+*.pfx
+*.agekey
+*.pcap
+*.pcapng
+
+# Go / native build artifacts
+bin/
+build/
+dist/
+coverage/
+*.test
+*.prof
+*.coverprofile
+coverage.out
+
+# Node / Vue build and cache artifacts
+node_modules/
+.pnpm-store/
+.vite/
+/web/src/.umi/
+/web/src/.umi-production/
+.eslintcache
+*.tsbuildinfo
+
+# Simplus development runtime state and repository-external toolchains
+.dev/
+.tools/
+.tmp/
+tmp/
+*.log
+*.pid
+*.sock
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+recordings/
+*.wav.partial
+simplus-diagnostic-*/
+*.tar.zst
+
+# Vendor/reference binaries remain local unless explicitly reviewed.
+/ref/*
+!/ref/README.md
+
+# Reviewed, fixed-version MIT asset required by the release bundle.
+!/third_party/zashboard/dist/
+!/third_party/zashboard/dist/**

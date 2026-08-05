@@ -1,0 +1,1 @@
+export default { 'menu.概览': 'Dashboard', 'menu.模组配置': 'Modems', 'menu.线路配置': 'Lines', 'menu.短信': 'Messages', 'menu.语音通话': 'Calls', 'menu.Mihomo 配置': 'Mihomo', 'menu.通知渠道': 'Notifications', 'menu.系统设置': 'Settings' }

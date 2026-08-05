@@ -1,0 +1,25 @@
+* text=auto eol=lf
+
+*.md   text eol=lf
+*.go   text eol=lf
+*.mod  text eol=lf
+*.sum  text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.vue  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+
+# Preserve the reviewed upstream Zashboard release byte-for-byte.
+third_party/zashboard/dist/** -text -diff -whitespace
+
+*.pdf    binary
+*.pcbdoc binary
+*.wav    binary

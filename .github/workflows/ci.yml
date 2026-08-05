@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: .go-version
+          cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable the pinned package manager
+        run: corepack enable && corepack prepare pnpm@11.18.0 --activate
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify modules, formatting, and generated contracts
+        run: make verify-modules && make check-docs && make check-format && make verify-generated
+      - name: Test and vet
+        run: make test && make lint
+      - name: Audit reachable vulnerabilities
+        run: make security
+      - name: Build Web and host binaries
+        run: make build
+      - name: Cross-build supported Linux architectures
+        run: make build-linux

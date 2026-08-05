@@ -1,0 +1,25 @@
+html, body, #root { min-height: 100%; margin: 0; }
+html { overflow-x: hidden; }
+*, *::before, *::after { box-sizing: border-box; }
+body { min-width: 320px; overflow-x: hidden; background: #f5f7fa; }
+.login-page { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; overflow: auto; background: linear-gradient(135deg,#f0f5ff,#f5f7fa); }
+.login-content { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 32px 0; overflow-x: hidden; }
+@media (max-width: 480px) {
+  .login-content { padding: 24px 0; }
+  .login-content .ant-pro-form-login-container { padding-inline: 16px; }
+}
+.brand-subtitle { color: #8c8c8c; font-size: 10px; font-weight: 400; line-height: 1.2; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.page-grid { display: grid; gap: 16px; }
+.page-grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+/* Keep ProLayout and page containers inside the mobile viewport; wide data remains locally scrollable. */
+.ant-pro-layout, .ant-pro-layout-container, .ant-pro-layout-content, .ant-pro-page-container, .ant-pro-page-container-children-container { min-width: 0; max-width: 100%; }
+.ant-pro-page-container-children-container { overflow-x: hidden; }
+@media (max-width: 767px) {
+  .ant-pro-page-container-children-container { padding-inline: 16px !important; }
+  .ant-page-header-heading, .ant-page-header-heading-left { min-width: 0; flex-wrap: wrap; }
+  .ant-page-header-heading-sub-title { max-width: 100%; white-space: normal; }
+  .ant-pro-card .ant-pro-card-body { min-width: 0; }
+  .ant-pro-page-container .ant-form-item, .ant-pro-page-container .pro-field { width: 100% !important; max-width: 100% !important; }
+  .page-grid.two { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,107 @@
+package calls
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/leonfox28/simplus/internal/application/inventory"
+	"github.com/leonfox28/simplus/internal/domain/accessmode"
+	"github.com/leonfox28/simplus/internal/domain/call"
+	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
+)
+
+type accessGuard bool
+
+func (guard accessGuard) Available(context.Context, string) bool { return bool(guard) }
+
+func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
+	t.Helper()
+	ctx := context.Background()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.PutSubscriptionProfileAccessMode(ctx, "simulator-profile-1", accessmode.CellularNative); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(ctx, stores, inventory.NewSimulator(stores))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.random = strings.NewReader(strings.Repeat("a", 16) + strings.Repeat("b", 16) + strings.Repeat("c", 16) + strings.Repeat("d", 16))
+	clock := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { clock = clock.Add(time.Second); return clock }
+	t.Cleanup(func() { _ = stores.Close() })
+	return service, stores
+}
+
+func TestSimulatorCallLifecycleAndSafety(t *testing.T) {
+	service, _ := newCallService(t)
+	ctx := context.Background()
+	if _, _, err := service.Dial(ctx, "operation-emergency-0001", "simulator-line-1", "112"); !errors.Is(err, ErrUnsafeNumber) {
+		t.Fatalf("emergency error = %v", err)
+	}
+	outbound, replayed, err := service.Dial(ctx, "operation-call-out-0001", "simulator-line-1", "13800138000")
+	if err != nil || replayed || outbound.State != call.StateActive {
+		t.Fatalf("outbound = %#v replayed=%v err=%v", outbound, replayed, err)
+	}
+	if _, err := service.DTMF(ctx, outbound.ID, "12#"); err != nil {
+		t.Fatal(err)
+	}
+	if replay, wasReplay, err := service.Dial(ctx, "operation-call-out-0001", "simulator-line-1", "13800138000"); err != nil || !wasReplay || replay.ID != outbound.ID {
+		t.Fatalf("replay=%#v wasReplay=%v err=%v", replay, wasReplay, err)
+	}
+	if _, _, err := service.Incoming(ctx, "operation-call-busy-0001", "simulator-line-1", "13900139000"); !errors.Is(err, ErrLineBusy) {
+		t.Fatalf("busy error=%v", err)
+	}
+	ended, err := service.Hangup(ctx, outbound.ID)
+	if err != nil || ended.State != call.StateEnded {
+		t.Fatalf("ended = %#v err=%v", ended, err)
+	}
+	inbound, _, err := service.Incoming(ctx, "operation-call-in-00001", "simulator-line-1", "13900139000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answered, err := service.Answer(ctx, inbound.ID)
+	if err != nil || answered.State != call.StateActive {
+		t.Fatalf("answered = %#v err=%v", answered, err)
+	}
+}
+
+func TestRestartReconcilesUnfinishedCall(t *testing.T) {
+	service, stores := newCallService(t)
+	inbound, _, err := service.Incoming(context.Background(), "operation-call-in-00002", "simulator-line-1", "13900139000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(context.Background(), stores, inventory.NewSimulator(stores))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := restarted.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].ID != inbound.ID || values[0].State != call.StateFailed || values[0].EndReason != ErrorInterruptedByRestart {
+		t.Fatalf("reconciled = %#v", values)
+	}
+}
+
+func TestHostVoWiFiCallRequiresOnlineFailClosedAccessPath(t *testing.T) {
+	service, stores := newCallService(t)
+	if err := stores.PutSubscriptionProfileAccessMode(context.Background(), "simulator-profile-1", accessmode.HostVoWiFiOnly); err != nil {
+		t.Fatal(err)
+	}
+	service.UseAccessPathGuard(accessGuard(false))
+	if _, _, err := service.Dial(context.Background(), "operation-vowifi-call-01", "simulator-line-1", "13800138000"); !errors.Is(err, ErrLineUnavailable) {
+		t.Fatalf("offline error=%v", err)
+	}
+	service.UseAccessPathGuard(accessGuard(true))
+	if value, _, err := service.Dial(context.Background(), "operation-vowifi-call-02", "simulator-line-1", "13800138000"); err != nil || value.State != call.StateActive {
+		t.Fatalf("online=%#v err=%v", value, err)
+	}
+}
