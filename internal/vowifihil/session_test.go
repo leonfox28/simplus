@@ -2,11 +2,50 @@ package vowifihil
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestIMSRegistrationFailureCodeIsBoundedAndPreservesCause(t *testing.T) {
+	cause := errors.New("private protocol detail")
+	err := registrationFailure("IMS_PROTECTED_NO_RESPONSE", cause)
+	if got := IMSRegistrationFailureCode(err); got != "IMS_PROTECTED_NO_RESPONSE" {
+		t.Fatalf("failure code = %q", got)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("registration failure does not preserve its internal cause")
+	}
+	if got := IMSRegistrationFailureCode(cause); got != "" {
+		t.Fatalf("ordinary error exposed code %q", got)
+	}
+	if got := IMSRegistrationFailureCode(registrationFailure("PRIVATE_DETAIL", cause)); got != "" {
+		t.Fatalf("unapproved registration code escaped as %q", got)
+	}
+}
+
+func TestIMSRegistrationExchangeCodesRemainCredentialFree(t *testing.T) {
+	for err, want := range map[error]string{
+		errIMSRegisterNoResponse:    "IMS_INITIAL_NO_RESPONSE",
+		errIMSRegisterSend:          "IMS_INITIAL_SEND_FAILED",
+		errIMSRegisterRead:          "IMS_INITIAL_READ_FAILED",
+		errProtectedIMSNoResponse:   "IMS_PROTECTED_NO_RESPONSE",
+		errProtectedIMSUnmatched:    "IMS_PROTECTED_RESPONSE_UNMATCHED",
+		errProtectedIMSRegisterSend: "IMS_PROTECTED_SEND_FAILED",
+		errProtectedIMSRegisterRead: "IMS_PROTECTED_READ_FAILED",
+	} {
+		got := initialRegistrationExchangeCode(err)
+		if strings.HasPrefix(want, "IMS_PROTECTED_") {
+			got = protectedRegistrationExchangeCode(err)
+		}
+		if got != want {
+			t.Fatalf("exchange code for %v = %q, want %q", err, got, want)
+		}
+	}
+}
 
 func TestRegistrationExpiresSecondsPreservesAcceptedInterval(t *testing.T) {
 	value, ok := registrationExpiresSeconds(30 * time.Minute)

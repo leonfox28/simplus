@@ -47,6 +47,12 @@ Simplus 的代码、产品目标、架构、决策、开发进度、通用测试
 
 `.gitignore` 只能阻止未跟踪文件被普通 `git add` 选中，不能清除已提交历史，也不能替代发布前复核。
 
+容器部署的 `./data` 同样属于私有运行数据，已经同时进入 `.gitignore` 和
+`.dockerignore`。生产镜像 build context 还排除 `.dev`、`.tools`、本地 reference、
+数据库和运行工件；不得为了“方便调试”把这些目录重新 COPY 进镜像。tag workflow
+允许发布固定镜像、strongSwan 插件包及其对应源码，不得上传 Compose 数据目录、
+容器日志或现场配置。
+
 ## 自动检查范围
 
 `make check-docs` 除链接和文档地图外，还拒绝公开 Markdown 中常见的私人痕迹：

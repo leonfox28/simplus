@@ -14,7 +14,7 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 - 通过 USB 或 UART 连接的少量 4G/5G 模组；
 - 浏览器从同一局域网访问；
 
-全新 Debian 实例由安装器创建唯一管理员 `simplus_admin` 和每实例随机强密码；管理员首次登录只完成必要的本机初始化。HTTPS、模组和线路配置在后台管理页内分别维护，不再依赖 root Bootstrap URL。
+全新 Debian 实例由部署 bootstrap 创建唯一管理员 `simplus_admin` 和每实例随机强密码；管理员首次登录只完成必要的本机初始化。HTTPS、模组和线路配置在后台管理页内分别维护，不再依赖 root Bootstrap URL。
 - 不直接暴露到公网，不考虑互不信任的多租户。
 
 如果实际网络不可信，部署者应使用现成的 VPN 或反向代理提供 HTTPS；Simplus MVP 不自建 CA、证书轮换或公网访问体系。浏览器通话音频需要 secure context 时，也使用外部 HTTPS 终止。
@@ -109,7 +109,8 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 
 - 管理员登录，防止局域网中误操作；
 - production Web/API 与带实例密码的 Mihomo controller 监听所有 IPv4 接口，由部署者使用路由与主机防火墙确保它们只在可信 LAN 可达；开发模式默认只监听回环地址；
-- `simplus-agent` 以非 root 服务运行，Unix socket 限制调用者；
+- production `simplus-agent` 只在容器 entrypoint 注册白名单 USB ID，随后以非 root UID
+  运行且没有网络；Unix socket 以固定 UID 和 peer credential 限制调用者；
 - Web/API 只能调用固定类型的模组动作，不能传任意 AT/QMI 命令或设备路径；
 - 同一模组上的命令串行，超时后读取真实状态再决定结果；
 - 发送短信、拨号和可能改变 RF/模组持久状态的 HIL 操作需要明确测试授权；

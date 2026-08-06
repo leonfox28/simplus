@@ -51,8 +51,47 @@ func TestBuildIMSXFRMCleanupContainsOnlySelectorsAndSPIs(t *testing.T) {
 	cleanup := buildIMSXFRMCleanup(netip.MustParseAddr("192.0.2.42"),
 		netip.MustParseAddr("198.51.100.53"), client, server)
 	text := string(cleanup)
-	if strings.Count(text, "xfrm policy delete") != 4 || strings.Count(text, "xfrm state delete") != 4 ||
+	if strings.Count(text, "xfrm policy delete src") != 4 || strings.Count(text, "xfrm state delete src") != 4 ||
+		strings.Contains(text, "proto udp") || strings.Count(text, "proto 17") != 4 ||
+		!strings.Contains(text, "xfrm policy deleteall priority 500") ||
+		!strings.Contains(text, "xfrm state deleteall reqid 6101") ||
+		!strings.Contains(text, "xfrm state deleteall reqid 6102") ||
 		strings.Contains(text, "auth") || strings.Contains(text, "enc ") {
 		t.Fatalf("unexpected cleanup batch %q", text)
+	}
+}
+
+func TestBuildIMSXFRMInstallUsesNumericUDPProtocolForDebianIPRoute2(t *testing.T) {
+	client := IMSClientIPSecParameters{
+		ClientSPI: 1234567890, ServerSPI: 2234567890,
+		ProtectedClientPort: 42001, ProtectedServerPort: 42002,
+	}
+	server := IMSIPSecParameters{
+		ClientSPI: 3234567890, ServerSPI: 4234567890,
+		ProtectedClientPort: 43001, ProtectedServerPort: 43002,
+	}
+	material := &IMSAKAMaterial{RES: []byte("synthetic-res")}
+	for index := range material.CK {
+		material.CK[index] = byte(index + 1)
+		material.IK[index] = byte(index + 17)
+	}
+	defer material.Destroy()
+	batch := buildIMSXFRMInstall(netip.MustParseAddr("192.0.2.42"), netip.MustParseAddr("198.51.100.53"),
+		EPDGTunnelTemplate{Local: netip.MustParseAddr("169.254.248.2"), Remote: netip.MustParseAddr("198.51.100.54"), ReqID: 1},
+		client, server, material)
+	defer zeroBytes(batch)
+	text := string(batch)
+	if strings.Count(text, "xfrm policy add") != 4 || strings.Count(text, "proto 17") != 4 ||
+		strings.Contains(text, "proto udp") {
+		t.Fatalf("unexpected IMS XFRM policy encoding %q", text)
+	}
+}
+
+func TestReservedIMSXFRMCleanupUsesOnlyDedicatedPriorityAndRequestIDs(t *testing.T) {
+	cleanup := string(reservedIMSXFRMCleanupBatch())
+	if cleanup != "xfrm policy deleteall priority 500\n"+
+		"xfrm state deleteall reqid 6101\n"+
+		"xfrm state deleteall reqid 6102\n" {
+		t.Fatalf("unexpected reserved cleanup %q", cleanup)
 	}
 }

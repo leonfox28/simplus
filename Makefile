@@ -13,10 +13,15 @@ LAN_DATA_ROOT ?= $(HOME)/.simplus-dev/data
 HARDWARE_DATA_ROOT ?= $(HOME)/.simplus-hardware-dev/data
 AGENT_SOCKET ?= /run/simplus-agent-dev/simplus-agent.sock
 STRONGSWAN_PLUGIN_PACKAGE_DIR ?= $(CURDIR)/.dev/packages/strongswan-plugins
+CONTAINER_IMAGE_TAG ?= dev
+CONTAINER_IMAGE_PREFIX ?= ghcr.io/leonfox28/simplus
+CONTAINER_DEB_VERSION ?= 0.0.0+container1-1
+COMPOSE ?= docker compose
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 COMMANDS := simplusd simplus-agent simplus-netd simplusctl
 VOWIFI_HIL_COMMANDS := simplus-vowifi-hil-prepare simplus-vowifi-hil-vici simplus-vowifi-hil-pcscf simplus-vowifi-hil-ims simplus-vowifi-hil-redact simplus-vowifi-hil-stun
+GO_PACKAGES := ./cmd/... ./internal/...
 GENERATED_PATHS := internal/api/openapi/generated.go internal/storage/sqlite/generated/core/db.go internal/storage/sqlite/generated/core/models.go internal/storage/sqlite/generated/core/state.sql.go web/src/api/schema.d.ts
 SQLC_VERSION := v1.31.1
 GOVULNCHECK_VERSION := v1.6.0
@@ -37,7 +42,7 @@ endif
 
 export GOTOOLCHAIN GOFLAGS VERSION COMMIT PNPM_HOME
 
-.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs format check-format lint test test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
+.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs check-container-files format check-format lint test test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package container-build container-config dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
 
 doctor:
 	@set -eu; \
@@ -93,19 +98,23 @@ verify-modules:
 check-docs:
 	@python3 scripts/dev/check-docs.py
 
+check-container-files:
+	@sh -n containers/agent-entrypoint.sh containers/data-init.sh containers/netd-entrypoint.sh containers/netd-preflight.sh
+	@bash -n scripts/release/prepare-container-host.sh scripts/release/check-container-host.sh
+
 format:
-	$(GO) fmt ./...
+	$(GO) fmt $(GO_PACKAGES)
 
 check-format:
 	@files="$$($(GOFMT) -l cmd internal)"; \
 	if [ -n "$$files" ]; then printf '%s\n' "$$files" >&2; echo "Go files need formatting" >&2; exit 1; fi
 
 lint:
-	$(GO) vet ./...
+	$(GO) vet $(GO_PACKAGES)
 	$(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION) .github/workflows/*.yml
 
 test:
-	$(GO) test ./...
+	$(GO) test $(GO_PACKAGES)
 	$(PNPM) web:test
 	$(PNPM) --dir web typecheck
 	$(MAKE) --no-print-directory test-worktree-manifest
@@ -120,7 +129,7 @@ test-dev-sim:
 	@SIMPLUS_DEV_API_BIN="$(BIN_DIR)/simplusd-supervisor-test" scripts/dev/run-sim-test.sh
 
 security:
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(GO_PACKAGES)
 	$(PNPM) audit --audit-level moderate
 
 build: build-go
@@ -162,6 +171,22 @@ build-strongswan-plugins-deb:
 test-strongswan-plugins-package: build-strongswan-plugins-deb
 	@bash scripts/dev/test-simplus-simaka-c.sh
 	@scripts/dev/test-strongswan-plugins-package.sh "$(STRONGSWAN_PLUGIN_PACKAGE_DIR)"
+
+container-build:
+	@command -v docker >/dev/null 2>&1 || { echo 'Docker Engine is required for container-build' >&2; exit 1; }
+	@set -eu; \
+	printf '%s' "$(CONTAINER_IMAGE_TAG)" | grep -Eq '^[A-Za-z0-9._-]+$$' || { echo 'invalid CONTAINER_IMAGE_TAG' >&2; exit 2; }; \
+	printf '%s' "$(CONTAINER_DEB_VERSION)" | grep -Eq '^[A-Za-z0-9.+:~_-]+$$' || { echo 'invalid CONTAINER_DEB_VERSION' >&2; exit 2; }; \
+	for target in control agent netd; do \
+		docker build --target "$$target" \
+			--build-arg VERSION="$(VERSION)" --build-arg COMMIT="$(COMMIT)" \
+			--build-arg SIMPLUS_DEB_VERSION="$(CONTAINER_DEB_VERSION)" \
+			-t "$(CONTAINER_IMAGE_PREFIX)-$$target:$(CONTAINER_IMAGE_TAG)" .; \
+	done
+
+container-config:
+	@command -v "$(word 1,$(COMPOSE))" >/dev/null 2>&1 || { echo 'Docker Compose is required for container-config' >&2; exit 1; }
+	@SIMPLUS_IMAGE_TAG="$(CONTAINER_IMAGE_TAG)" $(COMPOSE) -f compose.yaml config --quiet
 
 dev-toolchain:
 	scripts/dev/setup-toolchain.sh

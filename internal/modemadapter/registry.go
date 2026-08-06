@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
@@ -23,6 +25,21 @@ type USBDescriptor struct {
 	ProductID    string
 	Manufacturer string
 	Product      string
+}
+
+// USBSerialID is a kernel driver binding that has been explicitly verified
+// for one model adapter. It is an internal hardware fact, not a Web/API input.
+type USBSerialID struct {
+	VendorID  string
+	ProductID string
+}
+
+// USBSerialBindingAdapter opts a model into bounded option-driver dynamic ID
+// registration. Adapters that already bind through an in-tree driver do not
+// implement this interface.
+type USBSerialBindingAdapter interface {
+	Adapter
+	USBSerialIDs() []USBSerialID
 }
 
 type IdentityPseudonymizer interface {
@@ -107,18 +124,23 @@ type EquipmentIdentityAdapter interface {
 }
 
 type Registry struct {
-	ordered   []Adapter
-	byProfile map[string]Adapter
+	ordered      []Adapter
+	byProfile    map[string]Adapter
+	usbSerialIDs []USBSerialID
 }
+
+var usbIDPattern = regexp.MustCompile(`^[0-9a-f]{4}$`)
 
 func NewRegistry(adapters ...Adapter) (*Registry, error) {
 	if len(adapters) == 0 {
 		return nil, errors.New("modem adapter registry must not be empty")
 	}
 	registry := &Registry{
-		ordered:   make([]Adapter, 0, len(adapters)),
-		byProfile: make(map[string]Adapter, len(adapters)),
+		ordered:      make([]Adapter, 0, len(adapters)),
+		byProfile:    make(map[string]Adapter, len(adapters)),
+		usbSerialIDs: make([]USBSerialID, 0, len(adapters)),
 	}
+	seenUSBSerialIDs := make(map[string]string)
 	for _, adapter := range adapters {
 		if adapter == nil {
 			return nil, errors.New("modem adapter must not be nil")
@@ -132,7 +154,32 @@ func NewRegistry(adapters ...Adapter) (*Registry, error) {
 		}
 		registry.ordered = append(registry.ordered, adapter)
 		registry.byProfile[profile] = adapter
+		bindingAdapter, ok := adapter.(USBSerialBindingAdapter)
+		if !ok {
+			continue
+		}
+		bindingIDs := bindingAdapter.USBSerialIDs()
+		if len(bindingIDs) == 0 {
+			return nil, fmt.Errorf("modem adapter profile %q declares no USB serial driver IDs", profile)
+		}
+		for _, candidate := range bindingIDs {
+			candidate.VendorID = strings.ToLower(strings.TrimSpace(candidate.VendorID))
+			candidate.ProductID = strings.ToLower(strings.TrimSpace(candidate.ProductID))
+			if !usbIDPattern.MatchString(candidate.VendorID) || !usbIDPattern.MatchString(candidate.ProductID) {
+				return nil, fmt.Errorf("modem adapter profile %q has an invalid USB serial driver ID", profile)
+			}
+			key := candidate.VendorID + ":" + candidate.ProductID
+			if existingProfile, exists := seenUSBSerialIDs[key]; exists {
+				return nil, fmt.Errorf("USB serial driver ID %q is shared by profiles %q and %q", key, existingProfile, profile)
+			}
+			seenUSBSerialIDs[key] = profile
+			registry.usbSerialIDs = append(registry.usbSerialIDs, candidate)
+		}
 	}
+	sort.Slice(registry.usbSerialIDs, func(left, right int) bool {
+		leftID, rightID := registry.usbSerialIDs[left], registry.usbSerialIDs[right]
+		return leftID.VendorID+":"+leftID.ProductID < rightID.VendorID+":"+rightID.ProductID
+	})
 	return registry, nil
 }
 
@@ -169,6 +216,15 @@ func (registry *Registry) ForProfile(profile string) (Adapter, bool) {
 	}
 	adapter, ok := registry.byProfile[profile]
 	return adapter, ok
+}
+
+// USBSerialIDs returns a copy so callers can register only reviewed registry
+// facts and cannot mutate the process-wide adapter selection boundary.
+func (registry *Registry) USBSerialIDs() []USBSerialID {
+	if registry == nil {
+		return nil
+	}
+	return append([]USBSerialID(nil), registry.usbSerialIDs...)
 }
 
 func endpoint(device agentapi.DeviceReport, kind string, interfaceNumber int) (agentapi.Endpoint, bool) {

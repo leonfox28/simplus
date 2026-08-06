@@ -29,7 +29,7 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify modules, formatting, and generated contracts
-        run: make verify-modules && make check-docs && make check-format && make verify-generated
+        run: make verify-modules && make check-docs && make check-container-files && make check-format && make verify-generated
       - name: Test and vet
         run: make test && make lint
       - name: Audit reachable vulnerabilities

@@ -37,7 +37,7 @@ jobs:
   debian-13-amd64:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    container: debian:13-slim
+    container: debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
     steps:
       - name: Install isolated package-builder prerequisites
         run: |

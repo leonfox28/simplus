@@ -20,11 +20,16 @@ var (
 	_ SIMIdentityAdapter       = ML307A{}
 	_ RFControlAdapter         = ML307A{}
 	_ EquipmentIdentityAdapter = ML307A{}
+	_ USBSerialBindingAdapter  = ML307A{}
 )
 
 func (ML307A) Profile() string { return agentapi.ProfileML307A }
 
 func (ML307A) DisplayName() string { return "China Mobile IoT ML307A" }
+
+func (ML307A) USBSerialIDs() []USBSerialID {
+	return []USBSerialID{{VendorID: "2ecc", ProductID: "3012"}}
+}
 
 func (ML307A) Matches(descriptor USBDescriptor) bool {
 	if normalizedUSBIdentity(descriptor) != "2ecc:3012" {

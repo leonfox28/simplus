@@ -17,6 +17,7 @@ import (
 const (
 	imsRANDLength = 16
 	imsAUTNLength = 16
+	imsAUTSLength = 14
 	imsCKLength   = 16
 	imsIKLength   = 16
 )
@@ -57,6 +58,41 @@ type IMSAKAMaterial struct {
 	IK  [imsIKLength]byte
 }
 
+// imsAKASynchronizationFailure carries AUTS only within the root-only
+// registration process. Its Error value is intentionally credential-free;
+// callers must consume and erase the token before crossing any process or
+// logging boundary.
+type imsAKASynchronizationFailure struct {
+	auts [imsAUTSLength]byte
+}
+
+func (*imsAKASynchronizationFailure) Error() string {
+	return "IMS AKA synchronization required"
+}
+
+func (failure *imsAKASynchronizationFailure) consumeAUTS() [imsAUTSLength]byte {
+	var auts [imsAUTSLength]byte
+	if failure == nil {
+		return auts
+	}
+	copy(auts[:], failure.auts[:])
+	zeroBytes(failure.auts[:])
+	return auts
+}
+
+// DiscardIMSAKASynchronizationFailure erases an AUTS token when a diagnostic
+// caller does not implement the resynchronization exchange. It never exposes
+// the token itself.
+func DiscardIMSAKASynchronizationFailure(err error) bool {
+	var failure *imsAKASynchronizationFailure
+	if !errors.As(err, &failure) {
+		return false
+	}
+	auts := failure.consumeAUTS()
+	zeroBytes(auts[:])
+	return true
+}
+
 func (material *IMSAKAMaterial) Destroy() {
 	if material == nil {
 		return
@@ -67,8 +103,12 @@ func (material *IMSAKAMaterial) Destroy() {
 }
 
 func ExtractIMSRegistrationChallenge(packet []byte, expectedCallID, expectedHomeDomain string) (IMSRegistrationChallenge, error) {
+	return extractIMSRegistrationChallengeSequence(packet, expectedCallID, expectedHomeDomain, 1)
+}
+
+func extractIMSRegistrationChallengeSequence(packet []byte, expectedCallID, expectedHomeDomain string, sequence uint64) (IMSRegistrationChallenge, error) {
 	status, headers, err := parseSIPResponse(packet)
-	if err != nil || status != 401 || !matchingRegisterTransaction(headers, expectedCallID, 1) ||
+	if err != nil || status != 401 || !matchingRegisterTransaction(headers, expectedCallID, sequence) ||
 		!agentapi.IsValidIMSHomeDomain(expectedHomeDomain) {
 		return IMSRegistrationChallenge{}, errors.New("invalid IMS AKA challenge")
 	}
@@ -205,6 +245,18 @@ func AuthenticateIMSChallenge(ctx context.Context, target agentapi.SIMAKATarget,
 	if err != nil {
 		return IMSAKAMaterial{}, "unavailable", err
 	}
+	if response.Result.State == agentapi.SIMAKAStateSynchronizationFailure {
+		auts, decodeErr := hex.DecodeString(response.Result.AUTS)
+		response.Result.AUTS = ""
+		if decodeErr != nil || len(auts) != imsAUTSLength {
+			zeroBytes(auts)
+			return IMSAKAMaterial{}, "unavailable", errors.New("invalid IMS AKA synchronization material")
+		}
+		failure := &imsAKASynchronizationFailure{}
+		copy(failure.auts[:], auts)
+		zeroBytes(auts)
+		return IMSAKAMaterial{}, agentapi.SIMAKAStateSynchronizationFailure, failure
+	}
 	if response.Result.State != agentapi.SIMAKAStateSuccess {
 		return IMSAKAMaterial{}, response.Result.State, errors.New("IMS AKA did not produce session keys")
 	}
@@ -279,6 +331,53 @@ func BuildIMSAuthenticatedRegisterSequence(input IMSInitialRegisterInput, challe
 	return []byte(message.String()), nil
 }
 
+func buildIMSSynchronizationRegisterSequence(input IMSInitialRegisterInput, challenge IMSRegistrationChallenge,
+	auts [imsAUTSLength]byte, securityClient, branch, cnonce string, sequence, nonceCount uint64, expires uint32) ([]byte, error) {
+	if err := validateIMSInitialRegisterInput(input); err != nil ||
+		challenge.Algorithm != "AKAv1-MD5" || challenge.Realm != input.HomeDomain || challenge.Nonce == "" ||
+		!validIMSToken(branch, 16, 64) || challenge.QOP != "" && !validIMSToken(cnonce, 16, 64) ||
+		securityClient == "" || len(securityClient) > 2048 || !validDigestValue(securityClient, 2048) ||
+		sequence < 2 || sequence > 1<<31-1 || nonceCount == 0 || nonceCount > 0xffffffff || expires < 60 || expires > 86400 {
+		return nil, errors.New("invalid IMS synchronization REGISTER input")
+	}
+	requestURI := "sip:" + input.HomeDomain
+	nonceCountValue := fmt.Sprintf("%08x", nonceCount)
+	response := digestAKAResponseWithPassword(input.PrivateIdentity, challenge.Realm, nil, true, challenge.Nonce,
+		nonceCountValue, cnonce, challenge.QOP, "REGISTER", requestURI, nil)
+	if response == "" {
+		return nil, errors.New("build IMS synchronization digest response")
+	}
+	autsValue := base64.StdEncoding.EncodeToString(auts[:])
+	var authorization strings.Builder
+	fmt.Fprintf(&authorization, "Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"%s\", response=\"%s\", algorithm=%s, auts=\"%s\"",
+		input.PrivateIdentity, challenge.Realm, challenge.Nonce, requestURI, response, challenge.Algorithm, autsValue)
+	if challenge.QOP != "" {
+		fmt.Fprintf(&authorization, ", qop=%s, nc=%s, cnonce=\"%s\"", challenge.QOP, nonceCountValue, cnonce)
+	}
+	if challenge.Opaque != "" {
+		fmt.Fprintf(&authorization, ", opaque=\"%s\"", challenge.Opaque)
+	}
+
+	source := input.Source.String()
+	var message strings.Builder
+	fmt.Fprintf(&message, "REGISTER %s SIP/2.0\r\n", requestURI)
+	fmt.Fprintf(&message, "Via: SIP/2.0/UDP %s:%d;branch=z9hG4bK%s;rport\r\n", source, input.UnprotectedPort, branch)
+	message.WriteString("Max-Forwards: 70\r\n")
+	fmt.Fprintf(&message, "From: <%s>;tag=%s\r\n", input.PublicIdentity, input.FromTag)
+	fmt.Fprintf(&message, "To: <%s>\r\n", input.PublicIdentity)
+	fmt.Fprintf(&message, "Call-ID: %s\r\n", input.CallID)
+	fmt.Fprintf(&message, "CSeq: %d REGISTER\r\n", sequence)
+	fmt.Fprintf(&message, "Contact: <sip:%s:%d>;expires=%d%s\r\n", source, input.UnprotectedPort, expires, smsCapabilityParameter(input.SMSCapable))
+	fmt.Fprintf(&message, "Authorization: %s\r\n", authorization.String())
+	fmt.Fprintf(&message, "Security-Client: %s\r\n", securityClient)
+	message.WriteString("Require: sec-agree\r\n")
+	message.WriteString("Proxy-Require: sec-agree\r\n")
+	message.WriteString("Supported: path\r\n")
+	fmt.Fprintf(&message, "P-Access-Network-Info: IEEE-802.11;i-wlan-node-id=%s\r\n", input.WLANNodeID)
+	message.WriteString("Content-Length: 0\r\n\r\n")
+	return []byte(message.String()), nil
+}
+
 func ParseIMSAuthenticatedResponse(packet []byte, expectedCallID string) (int, error) {
 	return ParseIMSAuthenticatedResponseSequence(packet, expectedCallID, 2)
 }
@@ -309,7 +408,12 @@ func matchingRegisterTransaction(headers map[string][]string, expectedCallID str
 
 func digestAKAResponse(username, realm string, password []byte, nonce, nonceCount, cnonce, qop,
 	method, uri string, entity []byte) string {
-	if username == "" || realm == "" || len(password) == 0 || nonce == "" || method == "" || uri == "" ||
+	return digestAKAResponseWithPassword(username, realm, password, false, nonce, nonceCount, cnonce, qop, method, uri, entity)
+}
+
+func digestAKAResponseWithPassword(username, realm string, password []byte, allowEmptyPassword bool,
+	nonce, nonceCount, cnonce, qop, method, uri string, entity []byte) string {
+	if username == "" || realm == "" || len(password) == 0 && !allowEmptyPassword || nonce == "" || method == "" || uri == "" ||
 		qop != "" && qop != "auth" && qop != "auth-int" ||
 		qop != "" && (nonceCount == "" || cnonce == "") {
 		return ""

@@ -12,7 +12,7 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 - QDC507 与 ML307A 的类型化硬件识别、固定端点角色和只读状态探测；
 - Mihomo core、订阅、国家分组、共享 DoH、TPROXY 生命周期和 Zashboard 管理；
 - ML307A Host VoWiFi 的 SIM AKA、ePDG、Gm IPsec、IMS 注册、保活、提前刷新和服务恢复；
-- Debian bundle、三个受限 systemd 服务和局域网 Web 入口。
+- 三镜像 Docker Compose production 候选、受限原生开发 Agent 和局域网 Web 入口。
 
 真实硬件的普通短信、电话、数字音频和 eUICC 切换仍未开放。默认 Agent 不提供任意 AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独立实现、验证和明确授权。
 
@@ -32,7 +32,13 @@ make dev-sim
 make dev-sim-lan
 ```
 
-然后打开 `http://<host-lan-ip>:5173`。真实硬件和本机 systemd Agent 的说明见[开发工作流](docs/development.md)；`make dev-agent-deploy` 会请求 root 权限并重启本机开发 Agent，不属于普通构建步骤。
+然后打开 `http://<host-lan-ip>:5173`。日常开发与验证继续直接使用本机 Go/Node/pnpm，
+不需要开发容器。真实硬件和本机 systemd Agent 的说明见[开发工作流](docs/development.md)；
+`make dev-agent-deploy` 会请求 root 权限并重启本机开发 Agent，不属于普通构建步骤。
+
+生产 Compose、一次性宿主 `option` 准备和当前容器验收边界见
+[安装与卸载](docs/installation.md)。容器 HIL 完成前，现有原生 production 安装只作为
+过渡回退，不能和容器同时占用模组或端口。
 
 ## 文档
 
@@ -49,7 +55,5 @@ make dev-sim-lan
 ## 许可证
 
 除另行标注的材料外，Simplus 原创部分按照 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供：允许非商业使用、修改和分发，不授予商业使用权，也不要求用户仅因修改而公开源码。该模式属于“非商业源码可用”，不是 OSI 定义的开源软件。第三方和单独许可材料见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-项目正在准备首次公开源码发布。公开仓库将从经过脱敏和扫描的全新 Git 历史创建，不直接公开现有私人开发历史。
 
 > 当前首要目标平台是 Debian `linux/amd64`。其他发行版和 ARM64 在核心硬件业务路径完成后再决定支持级别。

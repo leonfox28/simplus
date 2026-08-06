@@ -23,6 +23,15 @@ type smsTestAdapter struct {
 
 type matchingAdapter struct{ smsTestAdapter }
 
+type bindingTestAdapter struct {
+	smsTestAdapter
+	ids []USBSerialID
+}
+
+func (adapter *bindingTestAdapter) USBSerialIDs() []USBSerialID {
+	return append([]USBSerialID(nil), adapter.ids...)
+}
+
 func (*matchingAdapter) Matches(USBDescriptor) bool { return true }
 
 func (adapter *smsTestAdapter) Profile() string { return adapter.profile }
@@ -123,6 +132,44 @@ func TestRegistryRejectsAmbiguousDescriptorMatches(t *testing.T) {
 	}
 	if adapter, matched := registry.Match(USBDescriptor{VendorID: "ffff", ProductID: "ffff"}); matched || adapter != nil {
 		t.Fatalf("ambiguous descriptor resolved to (%#v, %t)", adapter, matched)
+	}
+}
+
+func TestDefaultRegistryExposesOnlyVerifiedDynamicUSBSerialIDs(t *testing.T) {
+	registry := DefaultRegistry()
+	ids := registry.USBSerialIDs()
+	if len(ids) != 1 || ids[0] != (USBSerialID{VendorID: "2ecc", ProductID: "3012"}) {
+		t.Fatalf("dynamic USB serial IDs = %#v", ids)
+	}
+	ids[0].VendorID = "ffff"
+	if got := registry.USBSerialIDs(); got[0].VendorID != "2ecc" {
+		t.Fatalf("registry USB serial IDs were mutable: %#v", got)
+	}
+}
+
+func TestRegistryRejectsInvalidOrSharedDynamicUSBSerialIDs(t *testing.T) {
+	invalid := &bindingTestAdapter{
+		smsTestAdapter: smsTestAdapter{profile: "invalid"},
+		ids:            []USBSerialID{{VendorID: "2ecc;echo", ProductID: "3012"}},
+	}
+	if _, err := NewRegistry(invalid); err == nil {
+		t.Fatal("registry accepted an invalid dynamic USB serial ID")
+	}
+	empty := &bindingTestAdapter{smsTestAdapter: smsTestAdapter{profile: "empty"}}
+	if _, err := NewRegistry(empty); err == nil {
+		t.Fatal("registry accepted an empty dynamic USB serial ID declaration")
+	}
+
+	first := &bindingTestAdapter{
+		smsTestAdapter: smsTestAdapter{profile: "first"},
+		ids:            []USBSerialID{{VendorID: "2ECC", ProductID: "3012"}},
+	}
+	second := &bindingTestAdapter{
+		smsTestAdapter: smsTestAdapter{profile: "second"},
+		ids:            []USBSerialID{{VendorID: "2ecc", ProductID: "3012"}},
+	}
+	if _, err := NewRegistry(first, second); err == nil {
+		t.Fatal("registry accepted a shared dynamic USB serial ID")
 	}
 }
 

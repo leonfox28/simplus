@@ -34,6 +34,7 @@
 | 23：持久线路层 | 管理员显式创建稳定 Line，运行时解析硬件目标，业务消费者不再依赖自动 Line |
 | 24：线路与通信路径解耦 | Line 只表达稳定身份；RF、VoWiFi、出口和 transport 独立配置，新 Line 出口默认未配置 |
 | 25：strongSwan 插件发布边界 | 同仓库独立 GPL 组件、锁定 Debian 输入、独立 `.deb`、对应源码和隔离 CI |
+| 26：容器化生产部署 | 三镜像权限边界、Compose 生命周期、精确 USB/sysfs 映射、bridge 内 netd 和本地开发不容器化 |
 
 ## Milestone 22：已添加模组与能力适配层
 
@@ -79,6 +80,36 @@
 - [x] 增加独立 CI 与包级验证，检查导出构造符、动态依赖、固定 runpath、文件权限、ABI 元数据、manifest 和对应源码完整性；
 - [ ] 在新的 Debian 13/amd64 clean VM 上补充 `dpkg` 安装、升级、卸载与完整 bundle smoke；ARM64 和其他发行版仍需各自锁、原生构建及安装证据。
 
+## Milestone 26：容器化生产部署
+
+- [x] 使用一个多阶段 Dockerfile 生成 `simplus-control`、`simplus-agent` 和
+  `simplus-netd` 三个 production target；固定 Go/Node/Debian 基础镜像 digest，
+  netd 镜像安装独立 strongSwan 插件包、对应 Debian runtime 和双摘要固定的 Mihomo
+  core，tag release 附带校验过的 Mihomo GPL 源码；
+- [x] 增加 `data-init / agent / netd / app / bootstrap` Compose 生命周期，持久数据
+  固定在 `./data/core` 与 `./data/agent`，首次管理员密码只由幂等 bootstrap 输出；
+- [x] 将 ML307A option 动态 ID 收入 Adapter registry。Agent 只有一个可写
+  `option1/new_id`，没有容器网络，root entrypoint 注册后降到 UID 10002 并清空
+  capability；app 固定 UID 10001 且没有 capability；
+- [x] 让 netd 使用普通 Docker bridge，并以临时 netns/veth/nft TPROXY/XFRM probe
+  验证容器 capability；per-Line 网络对象不进入宿主根 network namespace；
+- [x] 增加 typed app/Agent/netd healthcheck、Compose 静态 contract、宿主准备/检查脚本
+  和 GHCR amd64 tag workflow，并以校验过摘要的 standalone Compose 完成 config render；
+  release 同时发布 strongSwan `.deb` 与对应源码；
+- [x] 保持日常开发、Simulator、Go/Web 测试和 CI 使用本机/runner 工具，不提供 dev
+  image；保留受限 `simplus-agent-dev` 供本机 HIL；
+- [x] 在当前 Debian 13/amd64 开发 VM 构建三个 production target，并以隔离空
+  USB/sysfs 完成全栈 Compose smoke：typed health、固定 UID/capability、netd 临时
+  netns/veth/nft TPROXY/XFRM preflight 与清理、首次登录、幂等 bootstrap 和保留数据
+  重建均通过；该项不计为 clean-VM 或真实硬件 HIL；
+- [ ] 在安装 Docker 的 clean Debian 13/amd64 VM 运行 `docker compose config`、三个
+  镜像构建、全新初始化、升级、停止、卸载和权限/namespace smoke；
+- [x] 在正式 Compose 切换后完成真实设备映射与预期模组候选的只读 HIL-0，不修改 RF
+  或触发业务动作；
+- [x] 经逐次授权完成当前开发 VM 容器中的 Mihomo 国家出口、Host VoWiFi 注册与
+  单段自号码短信回环 HIL；过程没有请求 RF 写入，并独立于既有 systemd Runtime
+  证据。原生 production 安装器继续保留到 clean-VM 生命周期验收完成。
+
 ## Milestone 20：公开源码准备
 
 - [x] 定义公开产品文档与私有实验记录的边界；
@@ -122,6 +153,9 @@
 6. ARM64、其他发行版、签名包和供应链发布材料。
 7. QDC507 的稳定设备身份读取与 `ManagedModem` 添加，以及与真实 `RFControlAdapter` 实现一致的能力证据；在专项只读/写入 HIL 前不得复制 ML307A 命令或降低稳定身份要求。
 8. 将 ePDG FQDN、IKE responder identity 和远端选择从当前已验证运营商接入 profile 中解耦，并分别完成其他运营商 HIL；动态 IMS Home Domain 本身不能作为多运营商兼容证据。
+9. 完成 Milestone 26 的 clean-VM 生命周期验收，再从默认发布中移除原生 production
+   安装路径；ARM64、rootless/userns、Podman、Docker Desktop 与 SELinux 发行版仍需
+   独立设计和证据。
 
 每项真实副作用都需要独立设计、最小实现、明确授权和与风险相称的 HIL；Web/API 不得暴露任意 AT/QMI、设备路径、网络命令或配置路径。
 

@@ -1,0 +1,212 @@
+name: simplus
+
+services:
+  data-init:
+    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    user: "0:0"
+    entrypoint: ["/usr/local/libexec/simplus/data-init"]
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+    restart: "no"
+
+  agent:
+    image: ghcr.io/leonfox28/simplus-agent:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    init: true
+    user: "0:10001"
+    network_mode: none
+    environment:
+      SIMPLUS_DEVICE_GID: ${SIMPLUS_DEVICE_GID:-20}
+      SIMPLUS_AGENT_SOCKET: /run/simplus-agent/simplus-agent.sock
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETPCAP, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    device_cgroup_rules:
+      - "c 188:* rw"
+    volumes:
+      - type: bind
+        source: ./data/agent
+        target: /var/lib/simplus-agent
+      - type: volume
+        source: agent-runtime
+        target: /run/simplus-agent
+      - type: bind
+        source: /sys/bus/usb/devices
+        target: /host/sys/bus/usb/devices
+        read_only: true
+        bind:
+          create_host_path: false
+      # /sys/bus/usb/devices contains relative links into /sys/devices. Keep
+      # their target tree read-only so hotplug discovery works in the container.
+      - type: bind
+        source: /sys/devices
+        target: /host/sys/devices
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /dev
+        target: /host/dev
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /sys/bus/usb-serial/drivers/option1/new_id
+        target: /host/sys/bus/usb-serial/drivers/option1/new_id
+        bind:
+          create_host_path: false
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/simplusctl", "health", "agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    pids_limit: 128
+
+  netd:
+    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    init: true
+    user: "0:10001"
+    group_add: ["10001"]
+    cap_drop: [ALL]
+    cap_add:
+      - DAC_OVERRIDE
+      - KILL
+      - SETGID
+      - SETUID
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BIND_SERVICE
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=unconfined
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    read_only: true
+    tmpfs:
+      - /run/netns:rw,noexec,nosuid,nodev,mode=0755,size=4m
+    volumes:
+      - type: bind
+        source: ./data/core
+        target: /var/lib/simplus
+      - type: volume
+        source: agent-runtime
+        target: /run/simplus-agent
+        read_only: true
+      - type: volume
+        source: netd-runtime
+        target: /run/simplus-netd
+    ports:
+      - "0.0.0.0:${SIMPLUS_CONTROLLER_PORT:-19090}:19090"
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/simplusctl", "health", "netd"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 20s
+    pids_limit: 512
+    networks: [runtime]
+
+  app:
+    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    init: true
+    user: "10001:10001"
+    environment:
+      SIMPLUS_BACKEND: hardware
+      SIMPLUS_AGENT_SOCKET: /run/simplus-agent/simplus-agent.sock
+      SIMPLUS_DATA_ROOT: /var/lib/simplus
+      SIMPLUS_LISTEN_ADDR: 0.0.0.0:8080
+      SIMPLUS_WEB_ROOT: /usr/share/simplus/web
+      SIMPLUS_MIHOMO_SUPERVISOR_SOCKET: /run/simplus-netd/mihomo.sock
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m
+    volumes:
+      - type: bind
+        source: ./data/core
+        target: /var/lib/simplus
+      - type: volume
+        source: agent-runtime
+        target: /run/simplus-agent
+        read_only: true
+      - type: volume
+        source: netd-runtime
+        target: /run/simplus-netd
+        read_only: true
+    ports:
+      - "0.0.0.0:${SIMPLUS_HTTP_PORT:-8080}:8080"
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+      agent:
+        condition: service_healthy
+      netd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/simplusctl", "health", "app"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    stop_grace_period: 20s
+    pids_limit: 256
+    networks: [runtime]
+
+  bootstrap:
+    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/simplusctl"]
+    command:
+      - provision-admin
+      - --socket
+      - /var/lib/simplus/run/simplusd-control.sock
+      - --username
+      - simplus_admin
+      - --locale
+      - zh-CN
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    volumes:
+      - type: bind
+        source: ./data/core
+        target: /var/lib/simplus
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: "no"
+
+networks:
+  runtime:
+    driver: bridge
+
+volumes:
+  agent-runtime:
+  netd-runtime:

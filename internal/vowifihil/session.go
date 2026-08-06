@@ -22,7 +22,79 @@ var (
 	ErrIMSRefreshResponseUnmatched = errors.New("IMS refresh response did not match the transaction")
 	errProtectedIMSNoResponse      = errors.New("protected IMS request received no response")
 	errProtectedIMSUnmatched       = errors.New("protected IMS response did not match the transaction")
+	errIMSRegisterSend             = errors.New("send IMS REGISTER")
+	errIMSRegisterRead             = errors.New("read IMS response")
+	errIMSRegisterNoResponse       = errors.New("IMS REGISTER timed out")
+	errProtectedIMSRegisterSend    = errors.New("send protected IMS REGISTER")
+	errProtectedIMSRegisterRead    = errors.New("read protected IMS response")
 )
+
+const maxIMSResynchronizationAttempts = 2
+
+type imsRegistrationFailure struct {
+	code  string
+	cause error
+}
+
+func (failure *imsRegistrationFailure) Error() string { return failure.code }
+func (failure *imsRegistrationFailure) Unwrap() error { return failure.cause }
+
+func registrationFailure(code string, cause error) error {
+	return &imsRegistrationFailure{code: code, cause: cause}
+}
+
+// IMSRegistrationFailureCode returns a bounded credential-free phase code for
+// failures produced by EstablishIMSSession. The underlying protocol error is
+// deliberately not exposed across the supervisor boundary.
+func IMSRegistrationFailureCode(err error) string {
+	var failure *imsRegistrationFailure
+	if errors.As(err, &failure) && validIMSRegistrationFailureCode(failure.code) {
+		return failure.code
+	}
+	return ""
+}
+
+func validIMSRegistrationFailureCode(code string) bool {
+	switch code {
+	case "IMS_SESSION_INPUT_INVALID", "IMS_SOCKET_BIND_FAILED", "IMS_REQUEST_BUILD_FAILED",
+		"IMS_INITIAL_NO_RESPONSE", "IMS_INITIAL_SEND_FAILED", "IMS_INITIAL_READ_FAILED", "IMS_INITIAL_EXCHANGE_FAILED",
+		"IMS_INITIAL_RESPONSE_INVALID", "IMS_INITIAL_NOT_CHALLENGED", "IMS_CHALLENGE_INVALID", "IMS_AKA_FAILED",
+		"IMS_TUNNEL_DISCOVERY_FAILED", "IMS_XFRM_INSTALL_FAILED", "IMS_PROTECTED_NO_RESPONSE",
+		"IMS_PROTECTED_RESPONSE_UNMATCHED", "IMS_PROTECTED_SEND_FAILED", "IMS_PROTECTED_READ_FAILED",
+		"IMS_PROTECTED_EXCHANGE_FAILED", "IMS_REGISTER_REJECTED":
+		return true
+	default:
+		return false
+	}
+}
+
+func initialRegistrationExchangeCode(err error) string {
+	switch {
+	case errors.Is(err, errIMSRegisterNoResponse):
+		return "IMS_INITIAL_NO_RESPONSE"
+	case errors.Is(err, errIMSRegisterSend):
+		return "IMS_INITIAL_SEND_FAILED"
+	case errors.Is(err, errIMSRegisterRead):
+		return "IMS_INITIAL_READ_FAILED"
+	default:
+		return "IMS_INITIAL_EXCHANGE_FAILED"
+	}
+}
+
+func protectedRegistrationExchangeCode(err error) string {
+	switch {
+	case errors.Is(err, errProtectedIMSNoResponse):
+		return "IMS_PROTECTED_NO_RESPONSE"
+	case errors.Is(err, errProtectedIMSUnmatched):
+		return "IMS_PROTECTED_RESPONSE_UNMATCHED"
+	case errors.Is(err, errProtectedIMSRegisterSend):
+		return "IMS_PROTECTED_SEND_FAILED"
+	case errors.Is(err, errProtectedIMSRegisterRead):
+		return "IMS_PROTECTED_READ_FAILED"
+	default:
+		return "IMS_PROTECTED_EXCHANGE_FAILED"
+	}
+}
 
 type IMSRegistrationResult struct {
 	RegisteredAt time.Time
@@ -75,7 +147,7 @@ type IMSSession struct {
 func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspection Inspection) (*IMSSession, IMSRegistrationResult, error) {
 	if !validIMSPrivateIPv4(source) || !validIMSPrivateIPv4(pcscf) || source == pcscf ||
 		len(inspection.IMSIdentity.PublicIdentities) != 1 {
-		return nil, IMSRegistrationResult{}, errors.New("invalid IMS session input")
+		return nil, IMSRegistrationResult{}, registrationFailure("IMS_SESSION_INPUT_INVALID", errors.New("invalid IMS session input"))
 	}
 	session := &IMSSession{
 		pcscf: pcscf, smsSequence: 1,
@@ -92,39 +164,39 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 	var err error
 	session.unprotected, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice()), Port: IMSSIPPort})
 	if err != nil {
-		return fail(errors.New("bind IMS unprotected flow"))
+		return fail(registrationFailure("IMS_SOCKET_BIND_FAILED", errors.New("bind IMS unprotected flow")))
 	}
 	session.client, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice())})
 	if err != nil {
-		return fail(errors.New("bind IMS protected client flow"))
+		return fail(registrationFailure("IMS_SOCKET_BIND_FAILED", errors.New("bind IMS protected client flow")))
 	}
 	session.server, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice())})
 	if err != nil {
-		return fail(errors.New("bind IMS protected server flow"))
+		return fail(registrationFailure("IMS_SOCKET_BIND_FAILED", errors.New("bind IMS protected server flow")))
 	}
 	clientSPI, serverSPI, err := randomSPIPair()
 	if err != nil {
-		return fail(errors.New("generate IMS security parameters"))
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", errors.New("generate IMS security parameters")))
 	}
 	branch, err := randomHexToken(8)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	fromTag, err := randomHexToken(8)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	callID, err := randomHexToken(8)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	contactUser, err := randomHexToken(8)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	wlanNodeID, err := randomFixedHex(6)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	session.input = IMSInitialRegisterInput{
 		Source: source, UnprotectedPort: uint16(session.unprotected.LocalAddr().(*net.UDPAddr).Port),
@@ -146,53 +218,105 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 	requestedExpires := DefaultIMSRegistrationExpires
 	initial, securityClient, err := BuildIMSInitialRegisterSequence(session.input, initialSequence, requestedExpires)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	defer zeroBytes(initial)
 	response, err := exchangeSIP(ctx, session.unprotected, pcscf, IMSSIPPort, initial, session.input.CallID, initialSequence, 12*time.Second)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure(initialRegistrationExchangeCode(err), err))
 	}
 	defer zeroBytes(response)
 	initialSummary, err := ParseIMSInitialResponse(response, session.input.CallID, session.input.HomeDomain)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_INITIAL_RESPONSE_INVALID", err))
 	}
 	if initialSummary.Status == 423 {
 		initialSequence++
 		requestedExpires = initialSummary.MinExpires
 		retryBranch, randomErr := randomHexToken(8)
 		if randomErr != nil {
-			return fail(randomErr)
+			return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", randomErr))
 		}
 		session.input.Branch = retryBranch
 		retry, _, buildErr := BuildIMSInitialRegisterSequence(session.input, initialSequence, requestedExpires)
 		if buildErr != nil {
-			return fail(buildErr)
+			return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", buildErr))
 		}
 		defer zeroBytes(retry)
 		response, err = exchangeSIP(ctx, session.unprotected, pcscf, IMSSIPPort, retry, session.input.CallID, initialSequence, 12*time.Second)
 		if err != nil {
-			return fail(err)
+			return fail(registrationFailure(initialRegistrationExchangeCode(err), err))
 		}
 		defer zeroBytes(response)
 		initialSummary, err = ParseIMSInitialResponse(response, session.input.CallID, session.input.HomeDomain)
 		if err != nil {
-			return fail(err)
+			return fail(registrationFailure("IMS_INITIAL_RESPONSE_INVALID", err))
 		}
 	}
 	if initialSummary.Status != 401 {
-		return fail(errors.New("IMS initial registration was not challenged"))
+		return fail(registrationFailure("IMS_INITIAL_NOT_CHALLENGED", errors.New("IMS initial registration was not challenged")))
 	}
-	challenge, err := ExtractIMSRegistrationChallenge(response, session.input.CallID, session.input.HomeDomain)
+	challenge, err := extractIMSRegistrationChallengeSequence(response, session.input.CallID, session.input.HomeDomain, initialSequence)
 	if err != nil {
-		return fail(err)
+		return fail(registrationFailure("IMS_CHALLENGE_INVALID", err))
 	}
-	defer zeroBytes(challenge.RAND[:])
-	defer zeroBytes(challenge.AUTN[:])
-	material, _, err := AuthenticateIMSChallenge(ctx, inspection.Target, challenge)
-	if err != nil {
-		return fail(err)
+	defer func() {
+		zeroBytes(challenge.RAND[:])
+		zeroBytes(challenge.AUTN[:])
+	}()
+	challengeSequence := initialSequence
+	var material IMSAKAMaterial
+	for synchronizationAttempts := 0; ; {
+		material, _, err = AuthenticateIMSChallenge(ctx, inspection.Target, challenge)
+		if err == nil {
+			break
+		}
+		var synchronizationFailure *imsAKASynchronizationFailure
+		if !errors.As(err, &synchronizationFailure) {
+			return fail(registrationFailure("IMS_AKA_FAILED", err))
+		}
+		if synchronizationAttempts >= maxIMSResynchronizationAttempts {
+			DiscardIMSAKASynchronizationFailure(err)
+			return fail(registrationFailure("IMS_AKA_FAILED", err))
+		}
+		synchronizationAttempts++
+		auts := synchronizationFailure.consumeAUTS()
+		synchronizationBranch, randomErr := randomHexToken(8)
+		if randomErr != nil {
+			zeroBytes(auts[:])
+			return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", randomErr))
+		}
+		synchronizationCNonce, randomErr := randomHexToken(8)
+		if randomErr != nil {
+			zeroBytes(auts[:])
+			return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", randomErr))
+		}
+		challengeSequence++
+		synchronizationRequest, buildErr := buildIMSSynchronizationRegisterSequence(session.input, challenge, auts,
+			securityClient, synchronizationBranch, synchronizationCNonce, challengeSequence, 1, requestedExpires)
+		zeroBytes(auts[:])
+		if buildErr != nil {
+			return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", buildErr))
+		}
+		synchronizationResponse, exchangeErr := exchangeSIP(ctx, session.unprotected, pcscf, IMSSIPPort,
+			synchronizationRequest, session.input.CallID, challengeSequence, 12*time.Second)
+		zeroBytes(synchronizationRequest)
+		if exchangeErr != nil {
+			zeroBytes(synchronizationResponse)
+			return fail(registrationFailure(initialRegistrationExchangeCode(exchangeErr), exchangeErr))
+		}
+		previousNonce := challenge.Nonce
+		zeroBytes(challenge.RAND[:])
+		zeroBytes(challenge.AUTN[:])
+		challenge, err = extractIMSRegistrationChallengeSequence(synchronizationResponse, session.input.CallID,
+			session.input.HomeDomain, challengeSequence)
+		zeroBytes(synchronizationResponse)
+		if err != nil {
+			return fail(registrationFailure("IMS_CHALLENGE_INVALID", err))
+		}
+		if challenge.Nonce == previousNonce {
+			return fail(registrationFailure("IMS_CHALLENGE_INVALID", errors.New("IMS synchronization challenge was not refreshed")))
+		}
 	}
 	defer func() {
 		zeroBytes(material.CK[:])
@@ -201,7 +325,7 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 	tunnel, err := DiscoverEPDGTunnel(ctx, source)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_TUNNEL_DISCOVERY_FAILED", err))
 	}
 	clientSecurity := IMSClientIPSecParameters{
 		ClientSPI: session.input.ClientSPI, ServerSPI: session.input.ServerSPI,
@@ -210,37 +334,37 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 	session.xfrm, err = InstallIMSXFRM(ctx, source, pcscf, tunnel, clientSecurity, challenge.SecurityServer, &material)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_XFRM_INSTALL_FAILED", err))
 	}
 	branch, err = randomHexToken(8)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	cnonce, err := randomHexToken(8)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
-	authenticatedSequence := initialSequence + 1
+	authenticatedSequence := challengeSequence + 1
 	authenticated, err := BuildIMSAuthenticatedRegisterSequence(session.input, challenge, material.RES,
 		securityClient, branch, cnonce, authenticatedSequence, 1, requestedExpires)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_REQUEST_BUILD_FAILED", err))
 	}
 	defer zeroBytes(authenticated)
 	protectedResponse, err := exchangeProtectedSIP(ctx, session.client, session.server, pcscf,
 		challenge.SecurityServer, authenticated, session.input.CallID, authenticatedSequence, 15*time.Second)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure(protectedRegistrationExchangeCode(err), err))
 	}
 	defer zeroBytes(protectedResponse)
 	expires, nextNonce, err := parseSuccessfulRegistration(protectedResponse, session.input.CallID, authenticatedSequence)
 	if err != nil {
 		material.Destroy()
-		return fail(err)
+		return fail(registrationFailure("IMS_REGISTER_REJECTED", err))
 	}
 	session.challenge = challenge
 	zeroBytes(session.challenge.RAND[:])
@@ -594,7 +718,7 @@ func exchangeSIP(ctx context.Context, connection *net.UDPConn, pcscf netip.Addr,
 	backoff := 500 * time.Millisecond
 	for time.Now().Before(deadline) {
 		if _, err := connection.WriteToUDP(packet, target); err != nil {
-			return nil, errors.New("send IMS REGISTER")
+			return nil, errIMSRegisterSend
 		}
 		readUntil := time.Now().Add(backoff)
 		if readUntil.After(deadline) {
@@ -607,7 +731,7 @@ func exchangeSIP(ctx context.Context, connection *net.UDPConn, pcscf netip.Addr,
 				break
 			}
 			if err != nil {
-				return nil, errors.New("read IMS response")
+				return nil, errIMSRegisterRead
 			}
 			if !sender.IP.Equal(target.IP) || count == 0 {
 				continue
@@ -620,7 +744,7 @@ func exchangeSIP(ctx context.Context, connection *net.UDPConn, pcscf netip.Addr,
 			backoff *= 2
 		}
 	}
-	return nil, errors.New("IMS REGISTER timed out")
+	return nil, errIMSRegisterNoResponse
 }
 
 func exchangeProtectedSIP(ctx context.Context, client, server *net.UDPConn, pcscf netip.Addr,
@@ -637,7 +761,7 @@ func exchangeProtectedSIP(ctx context.Context, client, server *net.UDPConn, pcsc
 	for time.Now().Before(deadline) {
 		if !time.Now().Before(nextSend) {
 			if _, err := client.WriteToUDP(packet, target); err != nil {
-				return nil, errors.New("send protected IMS REGISTER")
+				return nil, errProtectedIMSRegisterSend
 			}
 			nextSend = time.Now().Add(backoff)
 			if backoff < 4*time.Second {
@@ -658,7 +782,7 @@ func exchangeProtectedSIP(ctx context.Context, client, server *net.UDPConn, pcsc
 				continue
 			}
 			if err != nil {
-				return nil, errors.New("read protected IMS response")
+				return nil, errProtectedIMSRegisterRead
 			}
 			validPort := sender.Port == int(security.ProtectedServerPort) || sender.Port == int(security.ProtectedClientPort)
 			if !sender.IP.Equal(target.IP) || !validPort || count == 0 {

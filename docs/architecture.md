@@ -10,15 +10,24 @@
 LAN Browser
     │ HTTP / optional external HTTPS
     ▼
-Umi Max dev server or embedded static Web assets
+Umi Max dev server or control container static Web assets
     │ /api
     ▼
-simplusd ───── SQLite
-    ├── typed Unix-socket API ──► simplus-agent ──► 4G/5G modem(s)
-    └── fixed lifecycle API ────► simplus-netd
-                                      ├── Mihomo
-                                      └── per-Line netns/strongSwan/IMS worker
+control container: simplusd ───── ./data/core/SQLite
+    ├── shared Unix socket ──► agent container (network none)
+    │                              └── bounded host /sys + /dev ──► modem(s)
+    └── shared Unix socket ──► netd container (Docker bridge)
+                                   ├── Mihomo + Zashboard
+                                   └── per-Line netns/strongSwan/IMS worker
 ```
+
+production 以 Docker Compose 保留三个进程/镜像的权限分离；它不是 privileged 单体，
+也不使用 host network。固定 UID 10001/10002 和共享 runtime volume 让现有 Unix
+`SO_PEERCRED` 鉴权跨容器成立。持久数据只通过 `./data/core` 与 `./data/agent` 映射；
+首次容器部署是新实例，不猜测迁移原生 `/var/lib`。宿主只持有 Docker、内核与开机
+加载的 USB serial `option` 模块，边界见 [`0021`](decisions/0021-container-production-deployment.md)。
+当前开发 VM 的真实容器 HIL 已覆盖 Mihomo、Host VoWiFi 和单段自号码短信回环；
+clean-VM 生命周期验收完成前，原生 systemd production 路径仍作为过渡回退保留。
 
 ### `simplusd`（目标职责）
 
@@ -37,11 +46,13 @@ simplusd ───── SQLite
 - 独占必要的 tty/QMI/MBIM/音频端点；
 - 暴露固定类型的探测、短信、电话和 eUICC 动作；
 - 不接受来自 Web 的任意命令字符串；
-- 以非 root systemd 用户运行，只有必要设备组权限。
+- production 容器启动时只由 root entrypoint 把 Adapter registry 中的白名单 USB ID
+  写入精确映射的 `option1/new_id`，随后清空 capability 并以 UID 10002 运行；本地
+  HIL 开发仍可使用无 capability 的 `simplus-agent-dev` systemd 用户。
 
 当前 Agent 保留经过 Client/Unix socket 集成测试的 typed SMS fixture contract，但 production `simplus-agent` 不注入 SMS/Call/eUICC backend，也不注册旧的 `radio.ensure-off`。正式硬件入口只包含只读探测、独立 root-only SIM 鉴权，以及使用布尔目标状态、固定型号命令和读回确认的 ML307A 运行时 RF 控制；它仍不接受任意 AT/QMI、设备路径或命令字符串。
 
-Agent 是宿主机上的单一硬件边界，不为每种模组或每个 USB 设备启动一套不同协议的 Agent。模型差异由进程内 adapter 隔离：
+Agent 是映射宿主设备后的单一硬件边界，不为每种模组或每个 USB 设备启动一套不同协议的 Agent。模型差异由进程内 adapter 隔离：
 
 ```text
 simplusd typed SMS/Call/eUICC API
@@ -61,6 +72,10 @@ simplusd typed SMS/Call/eUICC API
 Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。射频、Host VoWiFi 意图、`direct`/Mihomo 国家出口及短信/电话 transport 都不是 Line 身份的一部分，各自通过独立配置与类型化能力工作。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md) 与 [`0019`](decisions/0019-line-identity-and-communication-paths.md)。
 
 能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。当前只有 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`：六者分别声明型号支持的只读综合探测、读取 IMEI、读取主卡槽插入状态、读取用于稳定 Line 绑定的 ICCID 脱敏身份及活动 Profile 的有界归属运营商元数据、提供统一 SIM/IMS 身份与 AKA challenge-response，以及把布尔 RF 目标映射为固定动作并要求新鲜读回。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务，后续只在接入真实 transport 时增加最小接口；现有 QDC507 `SMSAdapter` 只是未装配到 production 的候选 transport。端点路径与 AT/QMI 命令始终留在 Agent 内部。
+
+`USBSerialBindingAdapter` 不是业务能力；它只让容器 entrypoint 在扫描前取得经过型号
+审查的 option driver 动态 ID。Registry 会拒绝非法或跨型号重复 ID，Web、Compose
+和上层业务都不能提供或修改这组值。
 
 `SIMAuthAdapter` 返回的 IMS Home Domain 必须来自当前 SIM，而不是型号或运营商常量。ML307A 先使用完整、内部一致的 ISIM 身份；ISIM 不可用时，按 [3GPP TS 23.003](https://www.etsi.org/deliver/etsi_ts/123000_123099/123003/15.10.00_60/ts_123003v151000p.pdf) 的 IMSI 派生格式，并读取 [3GPP TS 31.102](https://www.etsi.org/deliver/etsi_ts/131100_131199/131102/19.04.00_60/ts_131102v190400p.pdf) EF_AD 给出的两位或三位 MNC 长度，构造 private/public identity 与 Home Domain。不得维护运营商映射表、根据 IMSI 前缀猜 MNC 长度，或在读取失败时退回某个已知运营商；缺失、为零或非法的 MNC 长度一律 fail closed。派生结果沿类型化边界进入 SIP REGISTER 与 challenge realm 校验。
 
@@ -115,20 +130,26 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 
 - `simplus-netd` 同时实现 Mihomo 生命周期和固定的 per-Line Host VoWiFi `start/stop/status`；启动协议只接受稳定 Line ID、由 Line 层解析的当前不透明硬件目标、`direct`/`mihomo-country` 和国家码，不接受 shell、设备路径、网络命令或任意配置参数；
 - production 只有 root `simplus-netd` 拥有创建 namespace、veth、策略路由、nftables 和 XFRM 所需权限；`simplusd` 与 Web 始终没有网络管理 capability；
+- 容器 production 中，root `simplus-netd` 位于普通 Docker bridge；上述网络对象都
+  创建在它自己的 network namespace，启动时由临时 netns/veth/nft/XFRM probe
+  验证并清理，不能改用 host network 或 privileged 模式绕过失败；
 - Mihomo supervisor 只接受已安装 core 和每订阅不可变生成配置的固定路径形状，并把 listener bind error 视为启动失败；
 - 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；REGISTER `P-Associated-URI` 中明确的 `tel:+...` 或 `sip:+...@...` 可以规范化为运行态手机号，其他 IMS 身份不得猜测转换，状态失效时号码随之清空；
 - 同一 worker 还独占 SMS over IMS 的受保护 SIP socket、Service-Route、RP reference、异步出站提交事务与待确认入站消息；root-only worker socket 只提供固定的发送、入站 list/read/acknowledge、出站报告 list/acknowledge 操作，管理进程无法提交 SIP、RPDU、APDU、设备路径或网络参数；提交报告优先按 `In-Reply-To` 并始终按仍占用的 RP reference 关联原 SIP transaction；
 - Line 应用层先把稳定业务 Line 唯一解析到当前硬件目标；worker 再用该不透明目标检查具备 `sim-auth` 的就绪 SIM、identity fence、无活动呼叫与出口，并维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连。它不检查或修改 RF，停用、进程退出及服务重启都清理其临时网络对象；
 - core SQLite 只保存管理员的 `desired_active` 意图，实时 online 状态只来自 `simplus-netd`；`simplusd` 启动和每十秒协调二者；
 - 权限与协议决策见 [`0008`](decisions/0008-mihomo-tproxy-privilege-separation.md)、[`0012`](decisions/0012-web-managed-vowifi-runtime.md) 和 [`0016`](decisions/0016-vowifi-sms-over-ims.md)。
-- Zashboard `v3.6.0` 是安装到 Mihomo working directory 的固定摘要、MIT 许可静态产物，没有独立进程或 systemd unit，由运行中的 core 通过 `external-ui` 直接托管；controller 的监听范围跟随管理后台，production 为 `0.0.0.0:19090`，并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md) 与 [`0015`](decisions/0015-zashboard-wildcard-controller.md)。
+- netd 镜像携带固定版本和压缩/展开双摘要的官方 Mihomo amd64 core；data-init 只在
+  全新且没有版本歧义的数据目录中安装默认 core，已有 manifest 或升级版本不被覆盖。
+  对应 GPL-3.0 源码在 tag workflow 中独立校验并作为 Release 附件发布；
+- Zashboard `v3.6.0` 是随 netd 镜像发布、由 data-init 安装到 Mihomo working directory 的固定摘要、MIT 许可静态产物，没有独立进程或服务，由运行中的 core 通过 `external-ui` 直接托管；controller 的监听范围跟随管理后台，production 为 `0.0.0.0:19090`，并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md) 与 [`0015`](decisions/0015-zashboard-wildcard-controller.md)。
 - 订阅节点的内部稳定 ID 只用于订阅节点持久化和 API 展示；Line 不绑定节点 ID，只保存显式直连或国家选择。生成 Mihomo 配置时必须保留上游 `name`，重名节点应拒绝转换而不是暗中改名。
 - 订阅本身使用随机 128-bit `subscription_...` ID 作为稳定唯一身份；显示名称只供用户识别，可重复且可编辑，新建时默认为由内部随机 ID 派生的 6 位易读标识。
 - 当前订阅按实际国家预生成固定 localhost TPROXY listener。新 Line 的出口固定从 `unconfigured` 开始，只有管理员显式选择后才保存 `direct` 或一个国家 listener；该绑定不进入订阅 YAML，因此增删改 Line 不触发 Mihomo 配置重写或重启。`unconfigured` 只会出现在读取响应中，不能作为写入模式，也不能激活 Host VoWiFi。
 
 #### strongSwan 插件构建边界
 
-Host VoWiFi 运行时继续依赖发行版提供的 `charon-systemd`、`libcharon`、
+Host VoWiFi 运行时继续依赖 netd 的 Debian 13 镜像提供的 `charon-systemd`、`libcharon`、
 `libsimaka` 与 `eap-aka`。Simplus 自有的 SIM AKA bridge 是同仓库内独立的
 GPL-2.0-or-later 组件；它与 strongSwan 上游 `p-cscf` 插件只在发布流水线中
 编译成 `simplus-strongswan-plugins` Debian 包。普通 Go/Web 开发、bundle 安装

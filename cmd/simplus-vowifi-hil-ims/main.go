@@ -175,6 +175,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 	cancelAuth()
 	output.AKAState = akaState
 	if err != nil {
+		vowifihil.DiscardIMSAKASynchronizationFailure(err)
 		output.Stage = "ims-aka"
 		return output, false
 	}

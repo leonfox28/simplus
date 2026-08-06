@@ -2,7 +2,7 @@
 
 > 更新：2026-08-06
 >
-> 状态：V1 管理面、持久模组/线路层、线路与通信路径解耦及 Host VoWiFi 常驻运行纵切已完成；SMS over IMS 真实入站、Web/API 异步 `sent` 提升、单段与两段 UCS-2 自回环，以及自动重连后再次收发均已完成。
+> 状态：V1 管理面、持久模组/线路层、Host VoWiFi 与 SMS over IMS 纵切已完成；生产 Docker Compose 已在 Debian 13 开发 VM 完成三镜像构建、隔离 smoke、真实模组发现、Mihomo/Host VoWiFi 和单段自号码短信回环 HIL，clean-VM 生命周期验收尚待完成。
 
 本文只记录可以公开的代码状态、验证等级和下一步；现场与个人环境材料遵循 [`privacy-and-publication.md`](privacy-and-publication.md) 留在仓库外。产品范围以 [`product.md`](product.md) 为准，进程与安全不变量以 [`architecture.md`](architecture.md) 为准，任务状态以 [`plans/active/mvp.md`](plans/active/mvp.md) 为准。
 
@@ -13,8 +13,31 @@
 - 单管理员 setup、登录、CSRF、会话撤销和修改密码；
 - React、Ant Design Pro、Pro Components 与 Umi Max 后台；
 - 概览、模组、线路、短信、语音、Mihomo、通知和系统设置页面；
-- Debian bundle、安装/卸载脚本，以及 `simplus-agent`、`simplus-netd`、`simplusd` 三个受限 systemd 服务；Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布，不再要求用户或普通开发者提供 strongSwan 源码树；
-- 全新实例由安装器生成随机管理员密码，升级不覆盖凭据。
+- production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / bootstrap` 编排全新实例；原生 Debian bundle 和三个 systemd 服务在 clean-VM 生命周期验收前保留为回退，二者不共享数据也不能同时运行；
+- Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布；netd 镜像安装该包和 Debian runtime，不要求用户或普通开发者提供 strongSwan 源码树；
+- 全新容器实例由 bootstrap 生成随机管理员密码；原生安装器保持相同语义，升级不覆盖凭据。
+
+### 容器部署候选
+
+- 首版只面向 Debian 13/amd64、Compose 2.24+ 和 rootful、无 userns-remap 的 Docker；
+  日常 Go/Node/pnpm 开发与 CI 不进入开发容器；
+- 宿主只持有 Docker、内核及开机加载的 `option`。Agent 容器精确映射 USB sysfs、
+  `/dev` 与单个 `option1/new_id`，动态 ID 只来自 Adapter registry；root entrypoint
+  完成注册后降到 UID 10002，Agent 没有网络；
+- app 固定 UID 10001 且无 capability；netd 使用普通 Docker bridge 和现有受限网络
+  capability，临时 netns/veth/nft/XFRM probe 失败即不健康，不使用 privileged 或
+  host network；
+- bind-mounted 数据固定为 `./data/core` 与 `./data/agent`。data-init 固定所有权并
+  安装 Zashboard 和固定摘要的 Mihomo core，已有 core 不覆盖；bootstrap 首次创建
+  `simplus_admin`，密码只写首次容器日志；tag release 同时附带 Mihomo GPL 源码；
+- app/Agent/netd 的 typed health、Compose YAML 权限 contract、Shell 语法、workflow
+  actionlint、目标 Go 测试和 Compose `config --quiet` 已通过；当前 Debian 13/amd64
+  开发 VM 还完成了三个 production target 构建，以及使用隔离空 USB/sysfs 的全栈
+  Compose smoke：netd 临时 network namespace/veth/nft/XFRM preflight、固定 UID 与
+  capability、首次管理员创建、Web 登录、幂等 bootstrap 和保留数据重建均通过；
+  正式切换后还完成真实模组发现、Mihomo 国家出口、ePDG、Digest AKA AUTS 重同步、
+  Gm XFRM、IMS 注册和单段自号码短信回环 HIL，全程没有请求 RF 写入；这仍不能替代
+  clean-VM 生命周期验收或其他收件人的短信互通证据。
 
 ### Simulator 业务纵切
 
@@ -66,16 +89,18 @@
 - Mihomo 配置中的协议字段、URL-Test 或普通 UDP 成功不能替代目标业务的真实 UDP/ePDG 探针；
 - 项目只面向可信 LAN，不应直接暴露到公网。
 - 新 strongSwan 插件包已经通过静态包内容与可复现输入验证；切换到 `dpkg` 管理后的 clean-VM 安装、升级、卸载和完整 bundle smoke 尚待补充，不能沿用旧裸 `.so` 安装证据代替。
+- 容器的 network namespace、固定 UID/socket peer credential 和 capability 边界已有
+  隔离 Fixture smoke，真实设备映射、Mihomo、Host VoWiFi 和单段自号码短信回环已有
+  独立容器 HIL；仍没有 clean-VM 生命周期证据，也不能把自回环外推为其他收件人互通。
 
 更细的能力等级见 [`compatibility.md`](compatibility.md)，运行故障按 [`troubleshooting.md`](troubleshooting.md) 处理。原始硬件日志、订阅节点、真实拓扑和逐次排错记录不属于公开仓库。
 
 ## 当前下一步
 
-1. 基于稳定 Line 接入第一个真实模组原生蜂窝短信 transport，保持短信业务与具体型号驱动分离；
-2. Host VoWiFi 短信纵切已达到当前可用测试条件；在具备合适测试号码时补充其他收件人互通；
-3. 在 clean Debian 13/amd64 VM 验证新的 `simplus-strongswan-plugins` 包随完整 bundle 安装、升级与卸载；继续跟踪 Umi 传递依赖审计告警和发布材料许可证；
-4. ML307A 运行时 RF 控制已有类型化实现与 fixture；真正执行 HIL 仍需明确授权。电话、媒体或 eUICC 写能力继续分别设计。
-5. QDC507 专项工作开始时，先完成稳定设备身份 HIL，再统一其能力证据与实际 adapter 实现；在此之前保持候选不可添加。
+1. 在安装 Docker 的 clean Debian 13/amd64 VM 验证 Compose render、三个镜像、全新初始化、升级、停止、卸载、固定 UID/socket 和 netd namespace 隔离；
+2. 基于稳定 Line 接入第一个真实模组原生蜂窝短信 transport，保持短信业务与具体型号驱动分离；
+3. 在具备合适测试号码时补充 Host VoWiFi 短信其他收件人互通，并继续跟踪 Umi 传递依赖审计告警和发布材料许可证；
+4. ML307A RF、电话、媒体、eUICC 写能力以及 QDC507 稳定身份/adapter HIL 继续分别授权和设计。
 
 ## 验证入口
 

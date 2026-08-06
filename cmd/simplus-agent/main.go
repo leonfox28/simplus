@@ -20,8 +20,16 @@ import (
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/hardwareprobe"
+	"github.com/leonfox28/simplus/internal/modemadapter"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
 )
+
+const (
+	registerOptionDriverCommand = "register-option-driver"
+	containerOptionNewIDPath    = "/host/sys/bus/usb-serial/drivers/option1/new_id"
+)
+
+type optionIDWriter func(string, modemadapter.USBSerialID) error
 
 type uidList []uint32
 
@@ -60,6 +68,9 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	_ = syscall.Umask(0o077)
+	if len(args) == 1 && args[0] == registerOptionDriverCommand {
+		return runRegisterOptionDriver(stdout, stderr, os.Geteuid(), modemadapter.DefaultRegistry(), writeOptionID)
+	}
 	flags := flag.NewFlagSet("simplus-agent", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	versionOnly := flags.Bool("version", false, "print version and exit")
@@ -218,6 +229,64 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logger.Info("hardware agent stopped")
 	}
 	return exitCode
+}
+
+func runRegisterOptionDriver(stdout, stderr io.Writer, effectiveUID int, registry *modemadapter.Registry, writer optionIDWriter) int {
+	if runtime.GOOS != "linux" {
+		fmt.Fprintln(stderr, "option driver registration is supported only on Linux")
+		return 2
+	}
+	if effectiveUID != 0 {
+		fmt.Fprintln(stderr, "option driver registration must be run as root")
+		return 1
+	}
+	if registry == nil || writer == nil {
+		fmt.Fprintln(stderr, "option driver registration is unavailable")
+		return 1
+	}
+	ids := registry.USBSerialIDs()
+	if len(ids) == 0 {
+		fmt.Fprintln(stderr, "no verified option driver USB IDs are registered")
+		return 1
+	}
+	for _, id := range ids {
+		if err := writer(containerOptionNewIDPath, id); err != nil && !errors.Is(err, syscall.EEXIST) {
+			fmt.Fprintf(stderr, "register verified option driver USB ID: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprintf(stdout, "registered %d verified option driver USB ID(s)\n", len(ids))
+	return 0
+}
+
+func writeOptionID(path string, id modemadapter.USBSerialID) error {
+	if path != containerOptionNewIDPath {
+		return errors.New("option driver new_id path is not the fixed container mount")
+	}
+	return writeOptionIDFile(path, id)
+}
+
+func writeOptionIDFile(path string, id modemadapter.USBSerialID) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect option driver new_id: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return errors.New("option driver new_id must be a real sysfs attribute")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open option driver new_id: %w", err)
+	}
+	_, writeErr := io.WriteString(file, id.VendorID+" "+id.ProductID+"\n")
+	closeErr := file.Close()
+	if errors.Is(writeErr, syscall.EEXIST) {
+		writeErr = nil
+	}
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fmt.Errorf("write option driver new_id: %w", err)
+	}
+	return nil
 }
 
 func envOrDefault(name, fallback string) string {

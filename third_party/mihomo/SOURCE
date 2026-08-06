@@ -1,0 +1,10 @@
+project=https://github.com/MetaCubeX/mihomo
+version=v1.19.29
+binary=https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-linux-amd64-compatible-v1.19.29.gz
+binary_archive_sha256=5612e698e96c8b8ad15abc4c0a4f098eba9234354b4f248cb97f2528e215b094
+binary_expanded_sha256=bd2a08ae155b7dffc12a1bdf610ff5f17c45058414a1d2c562e28eb9309abff6
+source_commit=e26714a181ac0e2fa803453c0a8e9a9ce94e31cb
+source_commit_url=https://github.com/MetaCubeX/mihomo/tree/e26714a181ac0e2fa803453c0a8e9a9ce94e31cb
+corresponding_source_archive=mihomo-v1.19.29-source.tar.gz
+corresponding_source_sha256=2b0a69526ad551887591386c7934badd1f87d75c4e6a3a399170fcc9613acde5
+license=GPL-3.0

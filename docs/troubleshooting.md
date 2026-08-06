@@ -20,6 +20,12 @@
 | `STRONGSWAN_CONNECTION_LOAD_FAILED` | 固定连接配置没有被接受 | 生成配置与当前 strongSwan 版本 |
 | `STRONGSWAN_CONNECTION_VERIFY_FAILED` | 加载后的连接与预期不一致 | 固定 connection name 和安全参数 |
 | `EPDG_CONNECT_FAILED` | ePDG IKE/CHILD 建链失败 | DNS、目标 UDP、证书/身份、SIM AKA 和出口 |
+| `IMS_INITIAL_NO_RESPONSE` / `IMS_INITIAL_SEND_FAILED` / `IMS_INITIAL_READ_FAILED` | 初始 IMS REGISTER 未形成可用响应 | ePDG 内层路由、P-CSCF UDP 5060、socket 与事务超时 |
+| `IMS_INITIAL_RESPONSE_INVALID` / `IMS_INITIAL_NOT_CHALLENGED` / `IMS_CHALLENGE_INVALID` | 初始或 AUTS 重同步后的 challenge 不完整、不匹配或未刷新 | Call-ID/CSeq、AKA nonce、Security-Server 和服务器拒绝类别 |
+| `IMS_AKA_FAILED` | SIM AKA 未生成会话密钥，或最多两次 AUTS 重同步后仍失败 | SIM 返回状态、AUTS 重同步能力和新 challenge；不得输出 AKA 材料 |
+| `IMS_XFRM_INSTALL_FAILED` | Gm transport-mode state/policy 未完整安装 | 容器 capability、数值 UDP selector、Line netns 中保留 priority/reqid 的幂等清理 |
+| `IMS_PROTECTED_NO_RESPONSE` / `IMS_PROTECTED_RESPONSE_UNMATCHED` | 受保护 REGISTER 没有匹配响应 | Gm 两条 flow、嵌套 XFRM policy 和 SIP transaction |
+| `IMS_REGISTER_REJECTED` | 受保护 REGISTER 收到非成功响应或成功响应不完整 | 脱敏 SIP 状态类别、注册周期和关联身份 |
 | `IPSEC_STATE_LOST` | 运行所需 XFRM state 不完整 | ePDG/Gm 生命周期、DPD/rekey 和网络 owner |
 | `IMS_KEEPALIVE_FAILED` | 已注册 session 的 keepalive 失败 | Gm flow、socket 状态和受保护路径 |
 | `IMS_REAUTH_REQUIRED` | 刷新需要重新鉴权 | 观察 worker 是否按有界退避重新注册 |
@@ -70,7 +76,13 @@
 
 - `simplusd` 保存用户意图，不伪造网络运行事实；
 - `simplus-netd` 启动时先清理自己的 stale manifest，再允许协调器恢复明确激活的 Line；
-- 服务绑定特定 LAN 地址时，应保证网络就绪顺序；地址未出现导致的 bind failure 不应被归因于 Mihomo、ePDG 或 SIM；
+- Compose `agent`、`netd` 和 `app` 使用 typed health dependency。先区分 data-init、
+  option/sysfs、Agent socket、netd kernel preflight 和 app HTTP 哪一层不健康，不要直接
+  把 app 未启动归因于 Mihomo、ePDG 或 SIM；
+- netd preflight 失败时检查 rootful/userns、AppArmor、network namespace、veth、nft
+  TPROXY 与 XFRM；不得改成 privileged 或 host network 掩盖内核/权限缺口；
+- Agent 看不到 tty 时检查宿主 `option` 自动加载、精确 `new_id` 映射、ttyUSB 数字 GID
+  和 ModemManager 争用；不要扩大为整个 sysfs 可写或暴露任意设备 major；
 - 不要在正式 worker 运行时并行启动一次性 HIL runner，也不要手工删除其网络对象。
 
 ## 公开问题所需材料

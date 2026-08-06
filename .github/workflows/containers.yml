@@ -1,0 +1,178 @@
+name: containers
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/containers.yml
+      - Dockerfile
+      - compose.yaml
+      - .dockerignore
+      - LICENSE
+      - THIRD_PARTY_NOTICES.md
+      - containers/**
+      - third_party/mihomo/**
+      - third_party/zashboard/**
+      - cmd/**
+      - internal/**
+      - api/**
+      - web/**
+      - go.mod
+      - go.sum
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - components/strongswan-simplus-simaka/**
+      - packaging/strongswan-plugins/**
+      - scripts/dev/build-simplus-simaka-plugin.sh
+      - scripts/dev/build-strongswan-p-cscf-plugin.sh
+      - scripts/dev/test-simplus-simaka-c.sh
+      - scripts/dev/test-strongswan-plugins-package.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  compose-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Render the production Compose contract
+        env:
+          SIMPLUS_IMAGE_TAG: ci
+        run: docker compose -f compose.yaml config --quiet
+
+  images:
+    needs: [compose-contract, publish-release-sources]
+    if: >-
+      always() &&
+      needs.compose-contract.result == 'success' &&
+      (!startsWith(github.ref, 'refs/tags/v') || needs.publish-release-sources.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [control, agent, netd]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Derive immutable build metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha=${GITHUB_SHA:0:12}
+          source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            image_tag=$GITHUB_REF_NAME
+            version=$GITHUB_REF_NAME
+            deb_version=${GITHUB_REF_NAME#v}-1
+          else
+            image_tag=ci-$short_sha
+            version=0.0.0+git$short_sha
+            deb_version=0.0.0+git$short_sha-1
+          fi
+          printf 'image_tag=%s\nversion=%s\ndeb_version=%s\nsource_date_epoch=%s\n' \
+            "$image_tag" "$version" "$deb_version" "$source_date_epoch" >>"$GITHUB_OUTPUT"
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build the ${{ matrix.target }} image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ghcr.io/${{ github.repository_owner }}/simplus-${{ matrix.target }}:${{ steps.metadata.outputs.image_tag }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            SIMPLUS_DEB_VERSION=${{ steps.metadata.outputs.deb_version }}
+            SOURCE_DATE_EPOCH=${{ steps.metadata.outputs.source_date_epoch }}
+          cache-from: type=gha,scope=simplus-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=simplus-${{ matrix.target }}
+          provenance: mode=max
+          sbom: true
+
+  release-sources:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container: debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+    steps:
+      - name: Install isolated package-builder prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            bash binutils build-essential bzip2 ca-certificates curl \
+            dpkg-dev git gzip make patch sed tar xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build the release package and corresponding source
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SIMPLUS_DEB_VERSION="${GITHUB_REF_NAME#v}-1"
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          make test-strongswan-plugins-package
+          install -d -m 0755 .dev/release-assets
+          cp .dev/packages/strongswan-plugins/* .dev/release-assets/
+      - name: Fetch the corresponding Mihomo source
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=.dev/release-assets/mihomo-v1.19.29-source.tar.gz
+          source_tree=$(mktemp -d)
+          source_commit=e26714a181ac0e2fa803453c0a8e9a9ce94e31cb
+          git -C "$source_tree" init --quiet
+          git -C "$source_tree" remote add origin https://github.com/MetaCubeX/mihomo.git
+          git -C "$source_tree" fetch --quiet --depth=1 origin "$source_commit"
+          test "$(git -C "$source_tree" rev-parse FETCH_HEAD)" = "$source_commit"
+          git -C "$source_tree" archive --format=tar \
+            --prefix=mihomo-v1.19.29/ "$source_commit" | gzip -n >"$archive"
+          printf '%s  %s\n' \
+            2b0a69526ad551887591386c7934badd1f87d75c4e6a3a399170fcc9613acde5 \
+            "$archive" | sha256sum -c -
+          tar -tzf "$archive" >"$source_tree/archive-files"
+          grep -Fx 'mihomo-v1.19.29/LICENSE' "$source_tree/archive-files"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simplus-release-sources
+          path: .dev/release-assets/*
+          if-no-files-found: error
+
+  publish-release-sources:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-sources]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: simplus-release-sources
+          path: release-assets
+      - name: Publish packages and corresponding sources
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "Simplus $GITHUB_REF_NAME" --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber

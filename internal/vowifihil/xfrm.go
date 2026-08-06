@@ -16,6 +16,7 @@ const (
 	imsXFRMClientReqID = 6101
 	imsXFRMServerReqID = 6102
 	imsXFRMPriority    = 500
+	imsUDPProtocol     = 17
 )
 
 type EPDGTunnelTemplate struct {
@@ -162,7 +163,24 @@ func InstallIMSXFRM(ctx context.Context, source, pcscf netip.Addr, tunnel EPDGTu
 		!uniqueSPIs(client.ClientSPI, client.ServerSPI, server.ClientSPI, server.ServerSPI) {
 		return nil, errors.New("invalid IMS XFRM input")
 	}
+	if err := cleanupReservedIMSXFRM(ctx); err != nil {
+		return nil, err
+	}
 
+	batch := buildIMSXFRMInstall(source, pcscf, tunnel, client, server, material)
+	cleanup := buildIMSXFRMCleanup(source, pcscf, client, server)
+	installation := &IMSXFRMInstallation{cleanup: cleanup}
+	if err := runIPBatch(ctx, batch, false); err != nil {
+		zeroBytes(batch)
+		installation.Cleanup()
+		return nil, err
+	}
+	zeroBytes(batch)
+	return installation, nil
+}
+
+func buildIMSXFRMInstall(source, pcscf netip.Addr, tunnel EPDGTunnelTemplate,
+	client IMSClientIPSecParameters, server IMSIPSecParameters, material *IMSAKAMaterial) []byte {
 	var install bytes.Buffer
 	writeIMSState := func(from, to netip.Addr, spi, reqID uint32) {
 		fmt.Fprintf(&install, "xfrm state add src %s dst %s proto esp spi 0x%08x reqid %d mode transport replay-window 32 auth-trunc hmac(sha1) 0x%x00000000 96 enc cbc(aes) 0x%x\n",
@@ -174,16 +192,16 @@ func InstallIMSXFRM(ctx context.Context, source, pcscf netip.Addr, tunnel EPDGTu
 	writeIMSState(pcscf, source, client.ServerSPI, imsXFRMServerReqID)
 
 	writeIMSOutPolicy := func(sourcePort, destinationPort uint16, spi, reqID uint32) {
-		fmt.Fprintf(&install, "xfrm policy add src %s/32 dst %s/32 proto udp sport %d dport %d dir out priority %d ",
-			source, pcscf, sourcePort, destinationPort, imsXFRMPriority)
+		fmt.Fprintf(&install, "xfrm policy add src %s/32 dst %s/32 proto %d sport %d dport %d dir out priority %d ",
+			source, pcscf, imsUDPProtocol, sourcePort, destinationPort, imsXFRMPriority)
 		fmt.Fprintf(&install, "tmpl src %s dst %s proto esp spi 0x%08x reqid %d mode transport level required ",
 			source, pcscf, spi, reqID)
 		fmt.Fprintf(&install, "tmpl src %s dst %s proto esp reqid %d mode tunnel level required\n",
 			tunnel.Local, tunnel.Remote, tunnel.ReqID)
 	}
 	writeIMSInPolicy := func(sourcePort, destinationPort uint16, spi, reqID uint32) {
-		fmt.Fprintf(&install, "xfrm policy add src %s/32 dst %s/32 proto udp sport %d dport %d dir in priority %d ",
-			pcscf, source, sourcePort, destinationPort, imsXFRMPriority)
+		fmt.Fprintf(&install, "xfrm policy add src %s/32 dst %s/32 proto %d sport %d dport %d dir in priority %d ",
+			pcscf, source, imsUDPProtocol, sourcePort, destinationPort, imsXFRMPriority)
 		fmt.Fprintf(&install, "tmpl src %s dst %s proto esp spi 0x%08x reqid %d mode transport level required ",
 			pcscf, source, spi, reqID)
 		fmt.Fprintf(&install, "tmpl src %s dst %s proto esp reqid %d mode tunnel level required\n",
@@ -193,24 +211,14 @@ func InstallIMSXFRM(ctx context.Context, source, pcscf netip.Addr, tunnel EPDGTu
 	writeIMSInPolicy(server.ProtectedServerPort, client.ProtectedClientPort, client.ClientSPI, imsXFRMClientReqID)
 	writeIMSOutPolicy(client.ProtectedServerPort, server.ProtectedClientPort, server.ClientSPI, imsXFRMServerReqID)
 	writeIMSInPolicy(server.ProtectedClientPort, client.ProtectedServerPort, client.ServerSPI, imsXFRMServerReqID)
-
-	cleanup := buildIMSXFRMCleanup(source, pcscf, client, server)
-	installation := &IMSXFRMInstallation{cleanup: cleanup}
-	batch := install.Bytes()
-	if err := runIPBatch(ctx, batch, false); err != nil {
-		zeroBytes(batch)
-		installation.Cleanup()
-		return nil, err
-	}
-	zeroBytes(batch)
-	return installation, nil
+	return append([]byte(nil), install.Bytes()...)
 }
 
 func buildIMSXFRMCleanup(source, pcscf netip.Addr, client IMSClientIPSecParameters, server IMSIPSecParameters) []byte {
 	var cleanup bytes.Buffer
 	writePolicy := func(from, to netip.Addr, sourcePort, destinationPort uint16, direction string) {
-		fmt.Fprintf(&cleanup, "xfrm policy delete src %s/32 dst %s/32 proto udp sport %d dport %d dir %s\n",
-			from, to, sourcePort, destinationPort, direction)
+		fmt.Fprintf(&cleanup, "xfrm policy delete src %s/32 dst %s/32 proto %d sport %d dport %d dir %s\n",
+			from, to, imsUDPProtocol, sourcePort, destinationPort, direction)
 	}
 	writePolicy(source, pcscf, client.ProtectedClientPort, server.ProtectedServerPort, "out")
 	writePolicy(pcscf, source, server.ProtectedServerPort, client.ProtectedClientPort, "in")
@@ -225,7 +233,17 @@ func buildIMSXFRMCleanup(source, pcscf netip.Addr, client IMSClientIPSecParamete
 	} {
 		fmt.Fprintf(&cleanup, "xfrm state delete src %s dst %s proto esp spi 0x%08x\n", state.from, state.to, state.spi)
 	}
+	cleanup.Write(reservedIMSXFRMCleanupBatch())
 	return append([]byte(nil), cleanup.Bytes()...)
+}
+
+func cleanupReservedIMSXFRM(ctx context.Context) error {
+	return runIPBatch(ctx, reservedIMSXFRMCleanupBatch(), true)
+}
+
+func reservedIMSXFRMCleanupBatch() []byte {
+	return []byte(fmt.Sprintf("xfrm policy deleteall priority %d\nxfrm state deleteall reqid %d\nxfrm state deleteall reqid %d\n",
+		imsXFRMPriority, imsXFRMClientReqID, imsXFRMServerReqID))
 }
 
 func runIPBatch(ctx context.Context, batch []byte, force bool) error {

@@ -55,6 +55,7 @@ node_modules/
 .tools/
 .tmp/
 tmp/
+/data/
 *.log
 *.pid
 *.sock

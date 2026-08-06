@@ -179,7 +179,11 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 		}
 	}
 	if session == nil || err != nil {
-		return attemptFailure{"IMS_REGISTER_FAILED"}
+		code := vowifihil.IMSRegistrationFailureCode(err)
+		if code == "" {
+			code = "IMS_REGISTER_FAILED"
+		}
+		return attemptFailure{code}
 	}
 	defer session.Close()
 	smsService := &workerSMSService{session: session}

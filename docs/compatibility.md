@@ -44,6 +44,7 @@ Agent 已移除 IMS 身份中的运营商常量：完整 ISIM 身份优先；没
 
 - 所有现有真实证据均在 SIM READY、RF Off 条件下取得；当前产品已将 RF 与 Host VoWiFi 生命周期解耦，但这不构成 RF On 场景的兼容性结论；
 - SIM AKA、IKEv2/ePDG、IMS APN、P-CSCF、Gm transport-mode IPsec 与受保护 REGISTER；
+- Digest AKA 的 AUTS/SQN 重同步、服务器重新 challenge、SIM 生成新会话密钥和后续受保护 REGISTER；
 - 定期 keepalive、服务器注册周期、提前刷新、有界重连和 XFRM 健康检查；
 - ePDG 暂时不可用时按有界退避自动恢复注册，并在恢复后再次完成 SMS over IMS 收发；
 - `simplusd` 重启不破坏现有 session；网络 owner 重启后按持久激活意图清理并重建；
@@ -68,6 +69,21 @@ SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信�
 - Debian `linux/amd64` bundle、全新初始化、升级、默认保留数据卸载和显式 purge 已有自动化或 smoke 证据；
 - Debian 13/amd64 的 `simplus-strongswan-plugins` 已从锁定 source/runtime ABI 输入完成普通用户构建，并自动验证 Debian 包身份、依赖范围、导出构造符、动态依赖、固定 runpath、权限、ABI 元数据、SHA-256 manifest 与对应源码完整性；这是包级 Fixture 证据，不是 ePDG/IMS 运行证据；
 - 新的 `dpkg` 插件安装路径尚未在 clean VM 完成完整 bundle 安装、升级和卸载 smoke；旧版手工复制插件的 smoke 不能替代该项；
+- Docker Compose production 已有三镜像构建定义、固定 UID/Unix socket、Agent 无网络与
+  单一 sysfs 写点、netd bridge/capability/preflight、bind-mounted 私有数据、幂等管理员
+  bootstrap、固定摘要 Mihomo seed 及其对应源码 release workflow；YAML 权限 contract、
+  Shell 语法、typed health 和 Go 测试属于 Fixture 证据；
+- Compose 文件还通过了 Compose `config --quiet`。三个 production target 已在一台
+  Debian 13/amd64 开发 VM 本地构建，并以隔离空 USB/sysfs 启动完整 Compose：
+  Agent/app/netd typed health、Agent 降权、netd 临时 netns/veth/nft TPROXY/XFRM
+  preflight 及清理、首次登录、bootstrap 幂等性和保留数据重建均通过；这是无真实设备
+  的 Fixture smoke，不是 clean-VM Runtime 证据；
+- clean Debian VM 生命周期仍未完成；当前开发 VM 的
+  Compose 实例已完成真实 ML307A 只读发现、Mihomo 国家出口、ePDG、Digest AKA AUTS
+  重同步、Gm XFRM 与 IMS 注册纵切。Debian 13 的 `iproute2` XFRM selector 使用数值
+  UDP 协议号，并在每条 Line 的独立 netns 中以保留 priority/reqid 做幂等清理；随后
+  又从公开 Web 完成单段自号码短信回环。该轮容器 HIL 没有请求 RF 写入，自回环不能
+  外推为其他收件人互通，也不能替代尚未完成的 clean-VM 生命周期证据；
 - ARM64、其他发行版和签名发布链仍不是已承诺支持面。
 
 新的兼容性声明必须写清证据等级。原始证据进入私有记录系统，公开仓库只保留可以由代码、测试或脱敏结论支撑的摘要。

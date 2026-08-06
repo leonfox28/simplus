@@ -2,6 +2,10 @@
 
 Simplus 直接在 Linux Git checkout 中开发、构建和测试。Mac 或其他电脑可以作为浏览器、SSH 终端或 Git 客户端，但仓库不依赖 rsync 镜像或自定义 SSH wrapper。
 
+生产部署迁移到 Docker Compose 不改变这一点：日常 Go/Web 编译、生成校验、测试、
+Simulator 和前端热更新都直接使用开发机工具链，不构建或进入开发容器。Docker 只在
+生产镜像打包、Compose contract、clean-VM smoke 和最终容器 HIL 时使用。
+
 ## 1. 初始化工具链
 
 进入仓库根目录：
@@ -100,7 +104,34 @@ root，也不读取主机已安装库作为链接输入。首次构建需要网�
 `.dev/packages/strongswan-plugins`，包含 Debian 包、对应源码归档、摘要和 manifest。
 不要提交这些生成物，也不要把任意 source/build 路径重新引入 release 接口。
 
-## 5. 受控 Host VoWiFi HIL
+## 5. 生产容器构建
+
+容器文件的本地静态检查不要求 Docker：
+
+```bash
+make check-container-files
+go test ./internal/containercontract
+```
+
+开发机安装 Docker 后，可以构建三个生产目标并渲染 Compose：
+
+```bash
+make container-build CONTAINER_IMAGE_TAG=dev
+make container-config CONTAINER_IMAGE_TAG=dev
+```
+
+该过程生成 `simplus-control`、`simplus-agent` 和 `simplus-netd`，不会生成 dev image。
+Compose 真实启动会访问 host USB/sysfs 并为 netd 创建网络对象，必须先按
+[`installation.md`](installation.md) 完成宿主准备，并停止本机 `simplus-agent-dev`
+及原生 production 服务。单纯构建或 `docker compose config` 不执行 RF、SIM AKA、
+VoWiFi、短信或电话动作。
+
+基础镜像使用仓库固定的 Go/Node/Debian tag 与 manifest digest。正式 tag workflow
+只发布 `linux/amd64` GHCR 镜像，并把 strongSwan 插件 Debian 包、对应源码及镜像内
+固定 Mihomo 的校验后 GPL 源码附加到同一 GitHub Release；普通 CI 仍由 runner 上的
+原生 Go/Node 工具执行。
+
+## 6. 受控 Host VoWiFi HIL
 
 Host VoWiFi HIL 使用真实 SIM AKA 和网络连接，不是日常测试。现有 runner 只按已经验收的 RF Off 基线运行：要求唯一目标模组、SIM READY、RF Off、无活动呼叫且已经取得明确授权。RF On 共存验证必须另行设计和授权，不能从产品解耦直接推断兼容。
 
@@ -119,7 +150,7 @@ bash scripts/dev/test-simplus-simaka-c.sh
 
 出现连接、注册或刷新故障时按 [`troubleshooting.md`](troubleshooting.md) 的稳定错误码和复查顺序定位。公开问题中只能提供脱敏状态，不能附加真实订阅、节点、内网拓扑、SIM 身份、SIP 鉴权头或原始日志。
 
-## 6. 数据与发布边界
+## 7. 数据与发布边界
 
 - `.dev/`、`.tools/`、数据库、日志、录音、抓包和本机配置都不得提交；
 - 原始 HIL 与逐次排错记录应进入仓库外的私有记录系统；

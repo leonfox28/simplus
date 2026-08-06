@@ -9,10 +9,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,11 +23,13 @@ import (
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/config"
 	"github.com/leonfox28/simplus/internal/control"
+	"github.com/leonfox28/simplus/internal/mihomosupervisor"
 )
 
 type bootstrapGenerator func(context.Context, string) (control.BootstrapResponse, error)
 type administratorProvisioner func(context.Context, string, control.ProvisionAdministratorRequest) (control.ProvisionAdministratorResponse, error)
 type hardwareProber func(context.Context, string) (hardwareProbeOutput, error)
+type serviceHealthChecker func(context.Context, string) error
 
 type hardwareProbeOutput struct {
 	Hello    agentapi.Hello         `json:"hello"`
@@ -37,6 +42,9 @@ type dependencies struct {
 	generateBootstrap bootstrapGenerator
 	provisionAdmin    administratorProvisioner
 	probeHardware     hardwareProber
+	checkAgentHealth  serviceHealthChecker
+	checkNetdHealth   serviceHealthChecker
+	checkAppHealth    serviceHealthChecker
 }
 
 func main() {
@@ -49,6 +57,9 @@ func run(args []string) int {
 		generateBootstrap: control.GenerateBootstrap,
 		provisionAdmin:    control.ProvisionAdministrator,
 		probeHardware:     probeHardwareAgent,
+		checkAgentHealth:  checkAgentHealth,
+		checkNetdHealth:   checkNetdHealth,
+		checkAppHealth:    checkAppHealth,
 	})
 }
 
@@ -84,9 +95,118 @@ func runWithDependencies(args []string, stdout, stderr io.Writer, deps dependenc
 	if len(args) >= 2 && args[0] == "hardware" && args[1] == "probe" {
 		return runHardwareProbe(args[2:], stdout, stderr, deps)
 	}
+	if len(args) >= 1 && args[0] == "health" {
+		return runHealth(args[1:], stdout, stderr, deps)
+	}
 
-	fmt.Fprintln(stderr, "usage: simplusctl version [--json] | doctor | provision-admin [options] | hardware probe [options]")
+	fmt.Fprintln(stderr, "usage: simplusctl version [--json] | doctor | provision-admin [options] | hardware probe [options] | health app|agent|netd [options]")
 	return 2
+}
+
+func runHealth(args []string, stdout, stderr io.Writer, deps dependencies) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "health requires app, agent, or netd")
+		return 2
+	}
+	kind := args[0]
+	flags := flag.NewFlagSet("health "+kind, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var target string
+	var checker serviceHealthChecker
+	switch kind {
+	case "app":
+		flags.StringVar(&target, "url", "http://127.0.0.1:8080", "loopback Simplus HTTP origin")
+		checker = deps.checkAppHealth
+	case "agent":
+		flags.StringVar(&target, "socket", envOrDefault("SIMPLUS_AGENT_SOCKET", "/run/simplus-agent/simplus-agent.sock"), "absolute Agent Unix socket")
+		checker = deps.checkAgentHealth
+	case "netd":
+		flags.StringVar(&target, "socket", envOrDefault("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET", "/run/simplus-netd/mihomo.sock"), "absolute netd Unix socket")
+		checker = deps.checkNetdHealth
+	default:
+		fmt.Fprintln(stderr, "health requires app, agent, or netd")
+		return 2
+	}
+	if err := flags.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "health %s accepts no positional arguments\n", kind)
+		return 2
+	}
+	if checker == nil {
+		fmt.Fprintf(stderr, "%s health check is unavailable\n", kind)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := checker(ctx, strings.TrimSpace(target)); err != nil {
+		fmt.Fprintf(stderr, "%s is unhealthy: %v\n", kind, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "%s healthy\n", kind)
+	return 0
+}
+
+func checkAgentHealth(ctx context.Context, socketPath string) error {
+	client, err := agentapi.NewClient(socketPath)
+	if err != nil {
+		return err
+	}
+	_, err = client.Hello(ctx)
+	return err
+}
+
+func checkNetdHealth(ctx context.Context, socketPath string) error {
+	client, err := mihomosupervisor.NewClient(socketPath)
+	if err != nil {
+		return err
+	}
+	_, err = client.Status(ctx)
+	return err
+}
+
+func checkAppHealth(ctx context.Context, origin string) error {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" ||
+		parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("app health URL must be a plain loopback HTTP origin")
+	}
+	host := parsed.Hostname()
+	ip := net.ParseIP(host)
+	port, portErr := strconv.Atoi(parsed.Port())
+	if ip == nil || !ip.IsLoopback() || portErr != nil || port < 1 || port > 65535 {
+		return errors.New("app health URL must use a numeric loopback address and explicit port")
+	}
+	parsed.Path = "/api/v1/system/health"
+	client := &http.Client{
+		Transport: &http.Transport{DisableCompression: true, DisableKeepAlives: true},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("health endpoint returned HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		Status     string `json:"status"`
+		APIVersion string `json:"apiVersion"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 64<<10))
+	if err := decoder.Decode(&result); err != nil || result.Status != "ok" || result.APIVersion != "v1" {
+		return errors.New("health endpoint returned an invalid response")
+	}
+	return nil
 }
 
 func runProvisionAdministrator(args []string, stdout, stderr io.Writer, deps dependencies) int {

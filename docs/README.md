@@ -11,7 +11,7 @@
 | [`plans/active/mvp.md`](plans/active/mvp.md) | 唯一活跃执行计划和下一步 | 规范性 |
 | [`handoff.zh-CN.md`](handoff.zh-CN.md) | 脱敏后的当前实现进度和接手提示 | 现场摘要 |
 | [`development.md`](development.md) | 通用 Linux 本地开发、测试和受控 HIL 命令 | 操作指南 |
-| [`installation.md`](installation.md) | Debian bundle、systemd 安装、卸载和恢复 | 操作指南 |
+| [`installation.md`](installation.md) | Docker Compose 部署、宿主准备和原生过渡 | 操作指南 |
 | [`compatibility.md`](compatibility.md) | 公开兼容性结论和证据等级 | 参考证据 |
 | [`troubleshooting.md`](troubleshooting.md) | 不包含私人现场信息的稳定错误码和复查顺序 | 操作指南 |
 | [`privacy-and-publication.md`](privacy-and-publication.md) | 公开/私有记录边界和发布前检查 | 规范性 |
