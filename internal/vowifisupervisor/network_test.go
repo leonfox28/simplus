@@ -2,6 +2,7 @@ package vowifisupervisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -29,7 +30,7 @@ func (runner *recordingRunner) Run(_ context.Context, input []byte, name string,
 }
 
 func TestNetworkPlanIsStableAndCountryPortIsDerived(t *testing.T) {
-	request := StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressMihomoCountry, CountryCode: "JP"}
+	request := StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressMihomoCountry, CountryCode: "JP"}
 	first, err := buildNetworkPlan(request)
 	if err != nil {
 		t.Fatal(err)
@@ -41,13 +42,13 @@ func TestNetworkPlanIsStableAndCountryPortIsDerived(t *testing.T) {
 	if first != second || !first.valid() || first.ListenerPort != 20249 || first.Namespace == "" || len(first.HostInterface) > 15 || !strings.HasPrefix(first.Prefix, "169.254.") {
 		t.Fatalf("unexpected plan: %#v", first)
 	}
-	if _, err := buildNetworkPlan(StartRequest{LineID: request.LineID, EgressMode: EgressMihomoCountry, CountryCode: "jp"}); !errors.Is(err, ErrRequestInvalid) {
+	if _, err := buildNetworkPlan(StartRequest{LineID: request.LineID, HardwareLineID: request.HardwareLineID, EgressMode: EgressMihomoCountry, CountryCode: "jp"}); !errors.Is(err, ErrRequestInvalid) {
 		t.Fatalf("lowercase country error = %v", err)
 	}
 }
 
 func TestCountryNetworkSetupUsesOnlyDerivedObjectsAndTPROXY(t *testing.T) {
-	request := StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressMihomoCountry, CountryCode: "JP"}
+	request := StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressMihomoCountry, CountryCode: "JP"}
 	plan, _ := buildNetworkPlan(request)
 	runner := &recordingRunner{}
 	manager := newNetworkManager()
@@ -71,7 +72,7 @@ func TestCountryNetworkSetupUsesOnlyDerivedObjectsAndTPROXY(t *testing.T) {
 }
 
 func TestDirectNetworkFailsClosedWhenForwardingIsDisabled(t *testing.T) {
-	request := StartRequest{LineID: "agent-line-fedcba9876543210fedcba9876543210", EgressMode: EgressDirect}
+	request := StartRequest{LineID: testManagedLineID2, HardwareLineID: testHardwareLineID, EgressMode: EgressDirect}
 	plan, _ := buildNetworkPlan(request)
 	runner := &recordingRunner{}
 	manager := newNetworkManager()
@@ -87,7 +88,7 @@ func TestDirectNetworkFailsClosedWhenForwardingIsDisabled(t *testing.T) {
 }
 
 func TestNetworkManifestRejectsMutation(t *testing.T) {
-	request := StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressDirect}
+	request := StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressDirect}
 	plan, _ := buildNetworkPlan(request)
 	path := filepath.Join(t.TempDir(), "network.json")
 	if err := writeNetworkManifest(path, plan); err != nil {
@@ -107,8 +108,47 @@ func TestNetworkManifestRejectsMutation(t *testing.T) {
 	}
 }
 
+func TestLegacyNetworkManifestIsAcceptedOnlyForCleanup(t *testing.T) {
+	legacy := deriveNetworkPlan(testHardwareLineID, EgressMihomoCountry, "GB")
+	legacy.Version = 1
+	legacy.LineID = testHardwareLineID
+	if !legacy.valid() || legacy.current() {
+		t.Fatalf("unexpected legacy validation: valid=%v current=%v", legacy.valid(), legacy.current())
+	}
+
+	path := filepath.Join(t.TempDir(), "network.json")
+	body, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := readNetworkManifest(path)
+	if err != nil || loaded != legacy {
+		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+
+	runner := &recordingRunner{}
+	manager := newNetworkManager()
+	manager.runner = runner
+	manager.netnsRoot = t.TempDir()
+	if err := manager.Setup(context.Background(), loaded); !errors.Is(err, ErrRequestInvalid) {
+		t.Fatalf("legacy setup error = %v", err)
+	}
+	if err := writeNetworkManifest(filepath.Join(t.TempDir(), "new.json"), loaded); !errors.Is(err, ErrRequestInvalid) {
+		t.Fatalf("legacy write error = %v", err)
+	}
+	if err := manager.Cleanup(context.Background(), loaded); err != nil {
+		t.Fatalf("legacy cleanup error = %v", err)
+	}
+	if len(runner.commands) != 5 {
+		t.Fatalf("cleanup commands = %d", len(runner.commands))
+	}
+}
+
 func TestCleanupIgnoresOnlyConfirmedMissingObjects(t *testing.T) {
-	plan, _ := buildNetworkPlan(StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressMihomoCountry, CountryCode: "GB"})
+	plan, _ := buildNetworkPlan(StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressMihomoCountry, CountryCode: "GB"})
 	runner := &recordingRunner{failAt: 1}
 	manager := newNetworkManager()
 	manager.runner = runner

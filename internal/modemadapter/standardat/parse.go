@@ -1,44 +1,21 @@
-package hardwareprobe
+package standardat
 
 import (
 	"encoding/csv"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 )
 
 var (
-	longDigitRun       = regexp.MustCompile(`[0-9]{14,22}`)
-	plmnPattern        = regexp.MustCompile(`^[0-9]{5,6}$`)
-	iccidPattern       = regexp.MustCompile(`^[0-9]{18,22}$`)
-	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	longDigitRun = regexp.MustCompile(`[0-9]{14,22}`)
+	plmnPattern  = regexp.MustCompile(`^[0-9]{5,6}$`)
 )
 
-func pseudonymizedML307AICCID(lines []string, pseudonymizer IdentityPseudonymizer) (string, string) {
-	if pseudonymizer == nil {
-		return "", ""
-	}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "+MCCID:") {
-			continue
-		}
-		value := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "+MCCID:")), `"`)
-		if !iccidPattern.MatchString(value) {
-			return "", ""
-		}
-		fingerprint, err := pseudonymizer.Pseudonym("sim-iccid-v1", []byte(value))
-		if err != nil || !fingerprintPattern.MatchString(fingerprint) {
-			return "", ""
-		}
-		return fingerprint, "ICCID •••• " + value[len(value)-4:]
-	}
-	return "", ""
-}
-
-func firstPayload(lines []string, prefixes ...string) string {
+func FirstPayload(lines []string, prefixes ...string) string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || line == "OK" || line == "ERROR" || strings.HasPrefix(line, "+CME ERROR:") || strings.HasPrefix(line, "+CMS ERROR:") {
@@ -58,16 +35,16 @@ func firstPayload(lines []string, prefixes ...string) string {
 	return ""
 }
 
-func identityPayload(lines []string) string {
-	value := firstPayload(lines)
+func IdentityPayload(lines []string) string {
+	value := FirstPayload(lines)
 	if longDigitRun.MatchString(value) {
 		return ""
 	}
 	return safeProbeText(value, 128)
 }
 
-func rfObservation(lines []string) agentapi.RFObservation {
-	raw := firstPayload(lines, "+CFUN:")
+func RFObservation(lines []string) agentapi.RFObservation {
+	raw := FirstPayload(lines, "+CFUN:")
 	observation := agentapi.RFObservation{State: agentapi.RFStateUnknown, FunctionalMode: raw}
 	fields := csvPayload(raw)
 	if len(fields) == 0 {
@@ -89,7 +66,7 @@ func rfObservation(lines []string) agentapi.RFObservation {
 	return observation
 }
 
-func simObservation(cpin, simStatus []string) agentapi.SIMObservation {
+func SIMObservation(cpin, simStatus []string) agentapi.SIMObservation {
 	combined := strings.ToUpper(strings.Join(append(append([]string{}, cpin...), simStatus...), "\n"))
 	observation := agentapi.SIMObservation{State: agentapi.SIMStateUnknown, PrimaryLockState: agentapi.PrimaryLockUnknown}
 	switch {
@@ -130,7 +107,7 @@ func registrationObservations(creg, cgreg, cereg []string) []agentapi.Registrati
 
 func registrationObservation(lines []string, prefix, domain, source string) agentapi.RegistrationObservation {
 	observation := agentapi.RegistrationObservation{Domain: domain, State: agentapi.RegistrationUnknown, Source: source}
-	fields := csvPayload(firstPayload(lines, prefix))
+	fields := csvPayload(FirstPayload(lines, prefix))
 	if len(fields) == 0 {
 		return observation
 	}
@@ -169,7 +146,7 @@ func registrationObservation(lines []string, prefix, domain, source string) agen
 
 func signalObservation(lines []string) agentapi.SignalObservation {
 	observation := agentapi.SignalObservation{State: agentapi.SignalStateUnknown}
-	fields := csvPayload(firstPayload(lines, "+CSQ:"))
+	fields := csvPayload(FirstPayload(lines, "+CSQ:"))
 	if len(fields) < 2 {
 		return observation
 	}
@@ -194,7 +171,7 @@ func signalObservation(lines []string) agentapi.SignalObservation {
 
 func networkObservation(cops, qnwinfo []string) agentapi.NetworkObservation {
 	observation := agentapi.NetworkObservation{SelectionMode: agentapi.NetworkSelectionUnknown}
-	fields := csvPayload(firstPayload(cops, "+COPS:"))
+	fields := csvPayload(FirstPayload(cops, "+COPS:"))
 	if len(fields) != 0 {
 		if mode, err := strconv.Atoi(strings.TrimSpace(fields[0])); err == nil {
 			switch mode {
@@ -218,7 +195,7 @@ func networkObservation(cops, qnwinfo []string) agentapi.NetworkObservation {
 		}
 	}
 
-	qnwFields := csvPayload(firstPayload(qnwinfo, "+QNWINFO:"))
+	qnwFields := csvPayload(FirstPayload(qnwinfo, "+QNWINFO:"))
 	if len(qnwFields) != 0 && !strings.Contains(strings.ToUpper(qnwFields[0]), "NO SERVICE") {
 		if observation.RAT == "" {
 			observation.RAT = textualRAT(qnwFields[0])
@@ -328,7 +305,7 @@ func csvPayload(value string) []string {
 	return fields
 }
 
-func activeCallCount(lines []string) int {
+func ActiveCallCount(lines []string) int {
 	count := 0
 	for _, line := range lines {
 		if strings.HasPrefix(strings.TrimSpace(line), "+CLCC:") {
@@ -338,15 +315,6 @@ func activeCallCount(lines []string) int {
 	return count
 }
 
-func hasTerminalOK(lines []string) bool {
-	for _, line := range lines {
-		if line == "OK" {
-			return true
-		}
-	}
-	return false
-}
-
 func intPointer(value int) *int {
 	return &value
 }
@@ -354,4 +322,18 @@ func intPointer(value int) *int {
 func safeProbeText(value string, limit int) string {
 	value = safeText(strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " "), limit)
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func safeText(value string, limit int) string {
+	value = strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return -1
+		}
+		return character
+	}, value)
+	value = strings.TrimSpace(value)
+	if len(value) > limit {
+		value = value[:limit]
+	}
+	return value
 }

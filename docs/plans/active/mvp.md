@@ -9,7 +9,7 @@
 
 在 Debian Linux 主机上提供单管理员 Web 后台，以统一类型化接口管理 4G/5G 模组、线路、短信、电话、可拔插 eUICC 已安装 Profile，以及 Host VoWiFi 的专用 Mihomo 出口。
 
-完整业务交互先在 Simulator 验证。真实硬件默认保持只读；已经单独决策并验证的 Host VoWiFi 路径仅在 RF Off 下使用固定 SIM AKA、ePDG/IMS 和专用网络生命周期，不扩大为通用硬件写平台。
+完整业务交互先在 Simulator 验证。真实硬件默认不开放业务写入；单独决策的 ML307A 运行时 RF 开关和 Host VoWiFi 使用各自的窄化类型化边界，不扩大为通用硬件写平台。现有 Host VoWiFi 真实证据均在 RF Off 下取得。
 
 ## 已完成里程碑
 
@@ -30,6 +30,31 @@
 | 18：真实 Host VoWiFi 纵切 | ML307A 类型化 SIM AKA、ePDG、Gm IPsec 和最小 IMS 注册 |
 | 19：Web 管理的持续运行态 | per-Line 生命周期、keepalive、提前刷新、有界重连、恢复和脱敏 Web 状态 |
 | 21：Host VoWiFi 短信 | 真实单段与 multipart 入站、Web/API 异步提交结果、单段与两段 UCS-2 自回环，以及自动重连后再次收发 |
+| 22：已添加模组与能力适配层 | 动态发现与持久模组分离、IMEI 指纹稳定绑定，以及 ML307A 最小鉴权/RF 能力边界 |
+| 23：持久线路层 | 管理员显式创建稳定 Line，运行时解析硬件目标，业务消费者不再依赖自动 Line |
+
+## Milestone 22：已添加模组与能力适配层
+
+- [x] 持久化 `ManagedModem`，将动态发现候选和管理员配置分成两个真相源；
+- [x] 提供只读候选扫描、已添加模组列表和显式添加 API；
+- [x] 重做模组页，只展示已添加模组，并以“添加模组”对话框展示未添加候选的型号、系统支持状态和能力；
+- [x] 以 ML307A IMEI 的每实例 HMAC 指纹稳定绑定 `ManagedModem`，USB Serial 指纹作为辅助，sysfs 拓扑仅作运行时定位，并兼容一次性提升旧端口绑定；
+- [x] 将 Host VoWiFi 的产品就绪条件与 RF 状态解耦，同时保留“真实证据仅覆盖 RF Off”的兼容性说明；
+- [x] 只建立 ML307A `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`；设备身份、SIM 插入状态和 Line 绑定身份独立探测，插卡状态保持只读，上电 RF 策略在命令语义、读回和获准 HIL 前保持不可操作；
+- [x] 将 Linux AT tty 生命周期与型号命令彻底分离：通用 transport 只做有界 I/O，标准只读计划由型号显式选择，ML307A 身份、SIM/IMS/APDU 与 RF 命令归属 adapter；
+- [x] 移除 SIM/IMS 身份里的运营商 Home Domain 常量：完整 ISIM 优先，否则按 IMSI 与 EF_AD 的明确 MNC 长度派生并贯穿 SIP realm 校验；长度未知时 fail closed；一张无可用 ISIM 应用的真实 SIM 已完成该 fallback 的只读 HIL-0；
+- [x] 下一纵切新增持久 Line，并把现有自动 Line 与业务绑定迁移过去。
+
+## Milestone 23：持久线路层
+
+- [x] 以随机业务 ID 持久化 `ManagedModem + SIM/Profile 身份 + 卡槽` 绑定、显示名称和接入方式；
+- [x] 提供已添加线路列表、当前可添加候选、显式创建和不改绑编辑 API；
+- [x] 重做线路页，只有“添加模组 → 添加线路”后才出现可操作 Line；
+- [x] 将短信、通话、Mihomo 国家出口和 Host VoWiFi 全部迁移到稳定 Line 目录；
+- [x] 移除 Simulator access-path 的固定线路编号，使同一稳定 Line 契约覆盖模拟与真实后端；
+- [x] 将临时 Agent Line 限制在运行时解析与 SIM preflight，Web/API 不公开硬件目标和身份指纹；
+- [x] 验证 USB 端口变化保持绑定，模组离线、SIM 更换和身份冲突 fail closed；
+- [x] 允许升级时只清理旧版 Host VoWiFi 网络清单，禁止旧清单重新启动。
 
 ## Milestone 20：公开源码准备
 
@@ -72,6 +97,8 @@
 4. SMS over IMS 的其他收件人互通、VoWiFi 通话和 RTP/RTCP；
 5. 显式 IMS de-registration、IKE/CHILD rekey 与多日稳定性；
 6. ARM64、其他发行版、签名包和供应链发布材料。
+7. QDC507 的稳定设备身份读取与 `ManagedModem` 添加，以及与真实 `RFControlAdapter` 实现一致的能力证据；在专项只读/写入 HIL 前不得复制 ML307A 命令或降低稳定身份要求。
+8. 将 ePDG FQDN、IKE responder identity 和远端选择从当前已验证运营商接入 profile 中解耦，并分别完成其他运营商 HIL；动态 IMS Home Domain 本身不能作为多运营商兼容证据。
 
 每项真实副作用都需要独立设计、最小实现、明确授权和与风险相称的 HIL；Web/API 不得暴露任意 AT/QMI、设备路径、网络命令或配置路径。
 

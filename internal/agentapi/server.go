@@ -33,16 +33,23 @@ func (response *ErrorResponse) Is(target error) bool {
 }
 
 func NewHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
-	return newHandler(monitor, commands, logger, false, smsBackends...)
+	return newHandler(monitor, commands, nil, logger, false, smsBackends...)
 }
 
 // NewReadOnlyHardwareHandler is the production V1 hardware boundary. Its
 // signature deliberately provides no way to inject command or SMS backends.
 func NewReadOnlyHardwareHandler(monitor *Monitor, logger *slog.Logger) http.Handler {
-	return newHandler(monitor, nil, logger, true)
+	return newHandler(monitor, nil, nil, logger, true)
 }
 
-func newHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
+// NewManagedHardwareHandler exposes read-only discovery plus the narrowly
+// typed RF state setter. It still has no route for arbitrary commands, paths,
+// SMS, calls, or eUICC mutations.
+func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, logger *slog.Logger) http.Handler {
+	return newHandler(monitor, nil, rf, logger, false)
+}
+
+func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
@@ -58,6 +65,9 @@ func newHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger,
 		}
 		if commands != nil {
 			features = append(features, "durable-command-outcomes", CommandRadioEnsureOff)
+		}
+		if rf != nil {
+			features = append(features, FeatureRFControl)
 		}
 		if smsBackend != nil {
 			features = append(features, FeatureSMS)
@@ -175,10 +185,63 @@ func newHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger,
 			writeJSON(w, http.StatusOK, response)
 		})
 	}
+	if rf != nil {
+		mux.HandleFunc("POST /v1/radio/state", func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+			decoder.DisallowUnknownFields()
+			var request RFSetRequest
+			if err := decoder.Decode(&request); err != nil {
+				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid RF state request"})
+				return
+			}
+			if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "request must contain one JSON object"})
+				return
+			}
+			response, err := rf.Set(r.Context(), request)
+			if err != nil {
+				status, apiError := classifyRFError(err)
+				logger.Warn("RF state request rejected", "device_id", request.DeviceID, "code", apiError.Code)
+				writeJSON(w, status, apiError)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		})
+	}
 	if smsBackend != nil {
 		registerSMSHandlers(mux, monitor, smsBackend, logger)
 	}
 	return mux
+}
+
+func classifyRFError(err error) (int, ErrorResponse) {
+	status := http.StatusServiceUnavailable
+	response := ErrorResponse{Code: "RF_CONTROL_UNAVAILABLE", Detail: "RF control is unavailable", Retryable: true}
+	switch {
+	case errors.Is(err, ErrRFRequestInvalid):
+		status = http.StatusBadRequest
+		response = ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid RF state request"}
+	case errors.Is(err, ErrRFAgentStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "AGENT_INSTANCE_STALE", Detail: "Agent instance changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrRFSnapshotStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SNAPSHOT_STALE", Detail: "hardware snapshot changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrRFDeviceStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "DEVICE_GENERATION_STALE", Detail: "device generation changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrRFUnsupported):
+		status = http.StatusUnprocessableEntity
+		response = ErrorResponse{Code: "RF_CONTROL_UNSUPPORTED", Detail: "RF control is unsupported for this device"}
+	case errors.Is(err, ErrRFActiveCall):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "RF_ACTIVE_CALL", Detail: "RF state cannot change during an active call", Retryable: true}
+	case errors.Is(err, ErrRFNotConfirmed):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "RF_STATE_NOT_CONFIRMED", Detail: "RF state change was not confirmed", Retryable: true}
+	}
+	return status, response
 }
 
 func classifyCommandError(err error) (int, ErrorResponse) {

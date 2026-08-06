@@ -353,7 +353,7 @@ paths:
         "200": { description: Line egress bindings, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBindingList" } } } }
   /api/v1/lines/{lineId}/egress:
     parameters:
-      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" } }
     put:
       operationId: putLineEgressBinding
       tags: [lines]
@@ -374,7 +374,7 @@ paths:
         "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/vowifi-lines/{lineId}/activate:
     parameters:
-      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^agent-line-[0-9a-f]{32}$" } }
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" } }
     post:
       operationId: activateVoWiFiLine
       tags: [lines]
@@ -386,7 +386,7 @@ paths:
         "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/vowifi-lines/{lineId}/deactivate:
     parameters:
-      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^agent-line-[0-9a-f]{32}$" } }
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" } }
     post:
       operationId: deactivateVoWiFiLine
       tags: [lines]
@@ -587,7 +587,7 @@ paths:
         - name: lineId
           in: path
           required: true
-          schema: { type: string, pattern: "^simulator-line-[12]$" }
+          schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathRequest" } } }
@@ -859,6 +859,163 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /api/v1/modems:
+    get:
+      operationId: listManagedModems
+      summary: List administrator-added modems and their current observed state
+      tags: [inventory]
+      responses:
+        "200":
+          description: Managed modem list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagedModemList" }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: The instance is not ready for business APIs
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Managed modems could not be read
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+    post:
+      operationId: addManagedModem
+      summary: Add one currently discovered modem without changing hardware state
+      tags: [inventory]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddManagedModemRequest" }
+      responses:
+        "201":
+          description: Modem added
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagedModem" }
+        "400":
+          description: Candidate selection is invalid
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Candidate is no longer present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: Candidate is already managed, not ready, or has a conflicting equipment identity
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Managed modem could not be persisted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/modem-candidates:
+    get:
+      operationId: listModemCandidates
+      summary: Scan and list currently discovered modems that have not been added
+      tags: [inventory]
+      responses:
+        "200":
+          description: Current unadded modem candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModemCandidateList" }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: The instance is not ready for business APIs
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: Current hardware candidates could not be scanned
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/lines:
+    get:
+      operationId: listManagedLines
+      summary: List administrator-created Lines and their resolved runtime state
+      tags: [lines]
+      responses:
+        "200": { description: Managed Line list, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedLineList" } } } }
+        "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: The instance is not ready for business APIs, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Managed Lines could not be read, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: addManagedLine
+      summary: Create a stable Line from one current managed-modem SIM/Profile candidate
+      tags: [lines]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AddManagedLineRequest" } } }
+      responses:
+        "201": { description: Line created, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedLine" } } } }
+        "400": { description: "Candidate, name, or access mode is invalid", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Candidate is no longer present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Candidate is already represented by a Line, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Managed Line could not be persisted, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/line-candidates:
+    get:
+      operationId: listLineCandidates
+      summary: List current SIM/Profile candidates on administrator-added modems
+      tags: [lines]
+      responses:
+        "200": { description: Current unadded Line candidates, content: { application/json: { schema: { $ref: "#/components/schemas/LineCandidateList" } } } }
+        "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: The instance is not ready for business APIs, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Current Line candidates could not be resolved, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/lines/{lineId}:
+    parameters:
+      - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" } }
+    put:
+      operationId: updateManagedLine
+      summary: Update a Line display name and access mode without rebinding hardware
+      tags: [lines]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateManagedLineRequest" } } }
+      responses:
+        "200": { description: Line updated, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedLine" } } } }
+        "400": { description: Name or access mode is invalid, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "404": { description: Managed Line was not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Managed Line could not be updated, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/modems/{modemId}/rf-state:
+    put:
+      operationId: setManagedModemRFState
+      summary: Set one managed modem's runtime RF state through its typed adapter
+      tags: [inventory]
+      parameters:
+        - name: modemId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetManagedModemRFStateRequest" }
+      responses:
+        "200":
+          description: RF state read back and confirmed
+          content: { application/json: { schema: { $ref: "#/components/schemas/ManagedModem" } } }
+        "400":
+          description: RF request is invalid
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Managed modem was not found
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: RF state cannot currently be changed or confirmed
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "422":
+          description: RF control is unsupported for this modem
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "500":
+          description: RF operation failed
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
   /api/v1/subscription-profiles/{profileId}/access-mode:
     put:
       operationId: putSubscriptionProfileAccessMode
@@ -1938,6 +2095,133 @@ components:
         pin1Verify: { type: boolean }
         puk1Unblock: { type: boolean }
         euiccProfiles: { type: boolean }
+    ManagedModemState:
+      type: string
+      enum: [online, offline]
+    ManagedModemRFState:
+      type: string
+      enum: [on, off, unknown]
+    ManagedModemSIMPresence:
+      type: string
+      enum: [present, absent, unknown]
+    ModemSupportStatus:
+      type: string
+      enum: [supported, not-ready]
+    ModemCandidateReadinessReason:
+      type: string
+      enum: [READY, CONTROL_UNAVAILABLE, SIM_ACCESS_UNAVAILABLE, EQUIPMENT_IDENTITY_UNAVAILABLE, IDENTITY_CONFLICT]
+    ManagedModem:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, model, transport, state, capabilities, rfState, simPresence, addedAt]
+      properties:
+        id: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        model: { type: string, minLength: 1, maxLength: 120 }
+        transport: { $ref: "#/components/schemas/DeviceTransport" }
+        state: { $ref: "#/components/schemas/ManagedModemState" }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+        rfState: { $ref: "#/components/schemas/ManagedModemRFState" }
+        simPresence: { $ref: "#/components/schemas/ManagedModemSIMPresence" }
+        addedAt: { type: string, format: date-time }
+    ManagedModemList:
+      type: object
+      additionalProperties: false
+      required: [modems]
+      properties:
+        modems:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/ManagedModem" }
+    ManagedLineState:
+      type: string
+      enum: [ready, modem-offline, sim-unavailable]
+    ManagedLine:
+      type: object
+      additionalProperties: false
+      required: [id, displayName, managedModemId, managedModemDisplayName, subscriptionDisplayHint, accessMode, state, capabilities, createdAt]
+      properties:
+        id: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
+        managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
+        subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
+        accessMode: { $ref: "#/components/schemas/AccessMode" }
+        state: { $ref: "#/components/schemas/ManagedLineState" }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+        createdAt: { type: string, format: date-time }
+    ManagedLineList:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/ManagedLine" } }
+    LineCandidate:
+      type: object
+      additionalProperties: false
+      required: [candidateId, managedModemId, managedModemDisplayName, subscriptionDisplayHint, capabilities, addable]
+      properties:
+        candidateId: { type: string, pattern: "^line-candidate-[0-9a-f]{32}$" }
+        managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
+        managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
+        subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+        addable: { type: boolean }
+    LineCandidateList:
+      type: object
+      additionalProperties: false
+      required: [candidates]
+      properties:
+        candidates: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/LineCandidate" } }
+    AddManagedLineRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateId, displayName, accessMode]
+      properties:
+        candidateId: { type: string, pattern: "^line-candidate-[0-9a-f]{32}$" }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        accessMode: { $ref: "#/components/schemas/AccessMode" }
+    UpdateManagedLineRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName, accessMode]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        accessMode: { $ref: "#/components/schemas/AccessMode" }
+    ModemCandidate:
+      type: object
+      additionalProperties: false
+      required: [candidateId, model, transport, supportStatus, addable, readinessReason, capabilities, simPresence]
+      properties:
+        candidateId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        model: { type: string, minLength: 1, maxLength: 120 }
+        transport: { $ref: "#/components/schemas/DeviceTransport" }
+        supportStatus: { $ref: "#/components/schemas/ModemSupportStatus" }
+        addable: { type: boolean }
+        readinessReason: { $ref: "#/components/schemas/ModemCandidateReadinessReason" }
+        capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
+        simPresence: { $ref: "#/components/schemas/ManagedModemSIMPresence" }
+    ModemCandidateList:
+      type: object
+      additionalProperties: false
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/ModemCandidate" }
+    AddManagedModemRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateId]
+      properties:
+        candidateId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+    SetManagedModemRFStateRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
     PhysicalDeviceDetail:
       type: object
       additionalProperties: false
@@ -2113,7 +2397,7 @@ components:
       properties:
         id: { type: string, pattern: "^call_[A-Za-z0-9_-]{16,120}$" }
         operationId: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
-        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        lineId: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
         remoteAddress: { type: string, pattern: "^\\+?[0-9]{3,20}$" }
         direction: { type: string, enum: [inbound, outbound] }
         state: { type: string, enum: [incoming, dialing, active, ended, failed] }
@@ -2147,7 +2431,7 @@ components:
       additionalProperties: false
       required: [lineId, mode, mihomoState, lineState, authentication, epdg, ims, directFallback]
       properties:
-        lineId: { type: string, pattern: "^simulator-line-[12]$" }
+        lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         mode: { type: string, enum: [direct, mihomo-required] }
         mihomoState: { type: string, enum: [running, stopped, failed] }
         lineState: { type: string, enum: [online, offline] }
@@ -2169,7 +2453,7 @@ components:
       properties:
         lines:
           type: array
-          maxItems: 2
+          maxItems: 1024
           items: { $ref: "#/components/schemas/AccessPathState" }
     CallListResponse:
       type: object
@@ -2186,7 +2470,7 @@ components:
       required: [operationId, lineId, remoteAddress]
       properties:
         operationId: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
-        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         remoteAddress: { type: string, pattern: "^\\+?[0-9]{3,20}$" }
     CallActionRequest:
       type: object
@@ -2245,7 +2529,7 @@ components:
           $ref: "#/components/schemas/SMSDirection"
         lineId:
           type: string
-          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
         remoteAddress:
           type: string
           pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$"
@@ -2300,7 +2584,7 @@ components:
           pattern: "^[A-Za-z0-9_-]{16,128}$"
         lineId:
           type: string
-          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+          pattern: "^line_[A-Za-z0-9_-]{22}$"
         destination:
           type: string
           pattern: "^\\+?[0-9]{3,20}$"
@@ -2504,7 +2788,7 @@ components:
       additionalProperties: false
       required: [lineId, mode, countryCode, countryName, listenerPort, ready, readinessReason]
       properties:
-        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         mode: { type: string, enum: [direct, mihomo-country] }
         countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
         countryName: { type: string, maxLength: 80 }
@@ -2529,7 +2813,7 @@ components:
       additionalProperties: false
       required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, attempt, lastErrorCode]
       properties:
-        lineId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
+        lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         desiredActive: { type: boolean }
         eligible: { type: boolean }
         readinessCode: { type: string, enum: [READY, LINE_NOT_HOST_VOWIFI, LINE_HARDWARE_NOT_READY, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }

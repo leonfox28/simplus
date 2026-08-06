@@ -177,14 +177,15 @@ type Hello struct {
 }
 
 type USBIdentity struct {
-	VendorID       string `json:"vendorId"`
-	ProductID      string `json:"productId"`
-	BCDDevice      string `json:"bcdDevice,omitempty"`
-	Manufacturer   string `json:"manufacturer,omitempty"`
-	Product        string `json:"product,omitempty"`
-	SerialPresent  bool   `json:"serialPresent"`
-	Configuration  int    `json:"configuration,omitempty"`
-	InterfaceCount int    `json:"interfaceCount"`
+	VendorID          string `json:"vendorId"`
+	ProductID         string `json:"productId"`
+	BCDDevice         string `json:"bcdDevice,omitempty"`
+	Manufacturer      string `json:"manufacturer,omitempty"`
+	Product           string `json:"product,omitempty"`
+	SerialPresent     bool   `json:"serialPresent"`
+	SerialFingerprint string `json:"serialFingerprint,omitempty"`
+	Configuration     int    `json:"configuration,omitempty"`
+	InterfaceCount    int    `json:"interfaceCount"`
 }
 
 type Endpoint struct {
@@ -239,9 +240,10 @@ type ProbeRequest struct {
 }
 
 type ModemIdentity struct {
-	Manufacturer string `json:"manufacturer,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Revision     string `json:"revision,omitempty"`
+	Manufacturer                 string `json:"manufacturer,omitempty"`
+	Model                        string `json:"model,omitempty"`
+	Revision                     string `json:"revision,omitempty"`
+	EquipmentIdentityFingerprint string `json:"equipmentIdentityFingerprint,omitempty"`
 }
 
 type RFObservation struct {

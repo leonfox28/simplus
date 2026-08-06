@@ -24,13 +24,14 @@ import (
 var pcscfLogPattern = regexp.MustCompile(`received P-CSCF server IP ([0-9]{1,3}(?:\.[0-9]{1,3}){3})`)
 
 type WorkerConfig struct {
-	LineID      string
-	RuntimeDir  string
-	LinkAddress string
-	EgressMode  string
-	CountryCode string
-	CharonPath  string
-	IPPath      string
+	LineID         string
+	HardwareLineID string
+	RuntimeDir     string
+	LinkAddress    string
+	EgressMode     string
+	CountryCode    string
+	CharonPath     string
+	IPPath         string
 }
 
 type attemptFailure struct{ code string }
@@ -92,14 +93,10 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 	defer os.RemoveAll(attemptDir)
 
 	preflightCtx, cancelPreflight := context.WithTimeout(ctx, 35*time.Second)
-	inspection, err := vowifihil.InspectML307AVOXI(preflightCtx)
+	inspection, err := vowifihil.InspectHostVoWiFiLine(preflightCtx, config.HardwareLineID)
 	cancelPreflight()
 	if err != nil {
 		return attemptFailure{"SIM_PREFLIGHT_FAILED"}
-	}
-	expectedLineID := "agent-line-" + inspection.Target.IdentityFingerprint[:32]
-	if config.LineID != expectedLineID {
-		return attemptFailure{"SIM_IDENTITY_CHANGED"}
 	}
 	paths, err := vowifihil.PathsFor(attemptDir)
 	if err != nil {
@@ -280,7 +277,7 @@ func initiateErrorCode(err error) string {
 }
 
 func validateWorkerConfig(config WorkerConfig) error {
-	request := StartRequest{LineID: config.LineID, EgressMode: config.EgressMode, CountryCode: config.CountryCode}
+	request := StartRequest{LineID: config.LineID, HardwareLineID: config.HardwareLineID, EgressMode: config.EgressMode, CountryCode: config.CountryCode}
 	link, linkErr := netip.ParseAddr(config.LinkAddress)
 	if !validStartRequest(request) || !filepath.IsAbs(config.RuntimeDir) || !strings.HasPrefix(filepath.Clean(config.RuntimeDir), "/run/simplus-netd/vowifi/") ||
 		!filepath.IsAbs(config.CharonPath) || !filepath.IsAbs(config.IPPath) || linkErr != nil || !link.Is4() || !link.IsLinkLocalUnicast() {

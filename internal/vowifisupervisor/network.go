@@ -21,12 +21,15 @@ import (
 )
 
 var (
+	managedLinePattern      = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
 	hardwareLinePattern     = regexp.MustCompile(`^agent-line-[0-9a-f]{32}$`)
 	countryPattern          = regexp.MustCompile(`^[A-Z]{2}$`)
 	networkTokenPattern     = regexp.MustCompile(`^[0-9a-f]{12}$`)
 	errNetworkObjectMissing = errors.New("Host VoWiFi network object is absent")
 	errNetworkCleanupFailed = errors.New("Host VoWiFi network cleanup failed")
 )
+
+const currentNetworkPlanVersion = 2
 
 type commandRunner interface {
 	Run(context.Context, []byte, string, ...string) error
@@ -68,29 +71,41 @@ func networkObjectMissing(output string) bool {
 }
 
 type networkPlan struct {
-	Version       int    `json:"version"`
-	LineID        string `json:"lineId"`
-	Token         string `json:"token"`
-	Namespace     string `json:"namespace"`
-	HostInterface string `json:"hostInterface"`
-	PeerInterface string `json:"peerInterface"`
-	HostAddress   string `json:"hostAddress"`
-	PeerAddress   string `json:"peerAddress"`
-	Prefix        string `json:"prefix"`
-	TableName     string `json:"tableName"`
-	RouteTable    int    `json:"routeTable"`
-	RulePriority  int    `json:"rulePriority"`
-	Mark          int    `json:"mark"`
-	EgressMode    string `json:"egressMode"`
-	CountryCode   string `json:"countryCode"`
-	ListenerPort  int    `json:"listenerPort"`
+	Version        int    `json:"version"`
+	LineID         string `json:"lineId"`
+	HardwareLineID string `json:"hardwareLineId"`
+	Token          string `json:"token"`
+	Namespace      string `json:"namespace"`
+	HostInterface  string `json:"hostInterface"`
+	PeerInterface  string `json:"peerInterface"`
+	HostAddress    string `json:"hostAddress"`
+	PeerAddress    string `json:"peerAddress"`
+	Prefix         string `json:"prefix"`
+	TableName      string `json:"tableName"`
+	RouteTable     int    `json:"routeTable"`
+	RulePriority   int    `json:"rulePriority"`
+	Mark           int    `json:"mark"`
+	EgressMode     string `json:"egressMode"`
+	CountryCode    string `json:"countryCode"`
+	ListenerPort   int    `json:"listenerPort"`
 }
 
 func buildNetworkPlan(request StartRequest) (networkPlan, error) {
 	if !validStartRequest(request) {
 		return networkPlan{}, ErrRequestInvalid
 	}
-	digest := sha256.Sum256([]byte(request.LineID))
+	plan := deriveNetworkPlan(request.LineID, request.EgressMode, request.CountryCode)
+	plan.Version = currentNetworkPlanVersion
+	plan.LineID = request.LineID
+	plan.HardwareLineID = request.HardwareLineID
+	return plan, nil
+}
+
+// deriveNetworkPlan deterministically derives only kernel-facing objects from
+// a business or legacy Line identity. It performs no validation and carries no
+// hardware target; callers own those policy decisions.
+func deriveNetworkPlan(lineID, egressMode, countryCode string) networkPlan {
+	digest := sha256.Sum256([]byte(lineID))
 	token := hex.EncodeToString(digest[:6])
 	short := token[:8]
 	// Keep the private veth transit identical in kind to the accepted HIL
@@ -105,29 +120,47 @@ func buildNetworkPlan(request StartRequest) (networkPlan, error) {
 	routeSlot := int(binary.BigEndian.Uint16(digest[8:10])) % 1000
 	mark := 0x6000 + int(binary.BigEndian.Uint16(digest[10:12])&0x0fff)
 	port := 0
-	if request.EgressMode == EgressMihomoCountry {
-		port = lineegress.CountryListenerPort(request.CountryCode)
+	if egressMode == EgressMihomoCountry {
+		port = lineegress.CountryListenerPort(countryCode)
 	}
 	return networkPlan{
-		Version: 1, LineID: request.LineID, Token: token,
+		Token:     token,
 		Namespace: "svw-" + token, HostInterface: "svh" + short, PeerInterface: "svn" + short,
 		HostAddress: host.String(), PeerAddress: peer.String(), Prefix: prefix.String(),
 		TableName: "svw_" + short, RouteTable: 16000 + routeSlot, RulePriority: 16000 + routeSlot,
-		Mark: mark, EgressMode: request.EgressMode, CountryCode: request.CountryCode, ListenerPort: port,
-	}, nil
+		Mark: mark, EgressMode: egressMode, CountryCode: countryCode, ListenerPort: port,
+	}
 }
 
 func validStartRequest(request StartRequest) bool {
-	if !hardwareLinePattern.MatchString(request.LineID) {
+	if !managedLinePattern.MatchString(request.LineID) || !hardwareLinePattern.MatchString(request.HardwareLineID) {
 		return false
 	}
-	return request.EgressMode == EgressDirect && request.CountryCode == "" ||
-		request.EgressMode == EgressMihomoCountry && countryPattern.MatchString(request.CountryCode) &&
-			lineegress.CountryListenerPort(request.CountryCode) != 0
+	return validEgress(request.EgressMode, request.CountryCode)
+}
+
+func validEgress(mode, countryCode string) bool {
+	return mode == EgressDirect && countryCode == "" ||
+		mode == EgressMihomoCountry && countryPattern.MatchString(countryCode) &&
+			lineegress.CountryListenerPort(countryCode) != 0
+}
+
+func (plan networkPlan) current() bool {
+	return plan.Version == currentNetworkPlanVersion &&
+		validStartRequest(StartRequest{LineID: plan.LineID, HardwareLineID: plan.HardwareLineID, EgressMode: plan.EgressMode, CountryCode: plan.CountryCode}) &&
+		plan.validDerivedObjects()
 }
 
 func (plan networkPlan) valid() bool {
-	if plan.Version != 1 || !validStartRequest(StartRequest{LineID: plan.LineID, EgressMode: plan.EgressMode, CountryCode: plan.CountryCode}) ||
+	identitiesValid := plan.current()
+	// Version 1 manifests used the transient Agent Line as LineID and did not
+	// carry HardwareLineID. They are accepted only by read/cleanup paths so an
+	// upgrade can remove stale kernel objects safely.
+	if plan.Version == 1 {
+		identitiesValid = hardwareLinePattern.MatchString(plan.LineID) && plan.HardwareLineID == "" &&
+			validEgress(plan.EgressMode, plan.CountryCode) && plan.validDerivedObjects()
+	}
+	if !identitiesValid ||
 		!networkTokenPattern.MatchString(plan.Token) || plan.Namespace != "svw-"+plan.Token ||
 		plan.HostInterface != "svh"+plan.Token[:8] || plan.PeerInterface != "svn"+plan.Token[:8] ||
 		plan.TableName != "svw_"+plan.Token[:8] || plan.RouteTable < 16000 || plan.RouteTable > 16999 ||
@@ -147,6 +180,16 @@ func (plan networkPlan) valid() bool {
 	return plan.ListenerPort == 0
 }
 
+func (plan networkPlan) validDerivedObjects() bool {
+	expected := deriveNetworkPlan(plan.LineID, plan.EgressMode, plan.CountryCode)
+	return plan.Token == expected.Token && plan.Namespace == expected.Namespace &&
+		plan.HostInterface == expected.HostInterface && plan.PeerInterface == expected.PeerInterface &&
+		plan.HostAddress == expected.HostAddress && plan.PeerAddress == expected.PeerAddress &&
+		plan.Prefix == expected.Prefix && plan.TableName == expected.TableName &&
+		plan.RouteTable == expected.RouteTable && plan.RulePriority == expected.RulePriority &&
+		plan.Mark == expected.Mark && plan.ListenerPort == expected.ListenerPort
+}
+
 type networkManager struct {
 	runner    commandRunner
 	readFile  func(string) ([]byte, error)
@@ -160,7 +203,7 @@ func newNetworkManager() *networkManager {
 }
 
 func (manager *networkManager) Setup(ctx context.Context, plan networkPlan) (err error) {
-	if manager == nil || manager.runner == nil || manager.readFile == nil || !plan.valid() {
+	if manager == nil || manager.runner == nil || manager.readFile == nil || !plan.current() {
 		return ErrRequestInvalid
 	}
 	if plan.EgressMode == EgressDirect {
@@ -262,7 +305,7 @@ func (manager *networkManager) Cleanup(ctx context.Context, plan networkPlan) er
 }
 
 func writeNetworkManifest(path string, plan networkPlan) error {
-	if !plan.valid() {
+	if !plan.current() {
 		return ErrRequestInvalid
 	}
 	body, err := json.Marshal(plan)

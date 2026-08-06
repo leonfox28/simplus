@@ -39,7 +39,7 @@ simplusd ───── SQLite
 - 不接受来自 Web 的任意命令字符串；
 - 以非 root systemd 用户运行，只有必要设备组权限。
 
-当前 Agent 保留经过 Client/Unix socket 集成测试的 typed SMS fixture contract，但 production `simplus-agent` 使用不可配置的 read-only handler，不注入 SMS/Call/eUICC backend，不注册 `radio.ensure-off`，并声明 `hardware-read-only-policy-v1`。候选写驱动只用于 Simulator/fixture，不会随配置开关进入真实硬件运行态。
+当前 Agent 保留经过 Client/Unix socket 集成测试的 typed SMS fixture contract，但 production `simplus-agent` 不注入 SMS/Call/eUICC backend，也不注册旧的 `radio.ensure-off`。正式硬件入口只包含只读探测、独立 root-only SIM 鉴权，以及使用布尔目标状态、固定型号命令和读回确认的 ML307A 运行时 RF 控制；它仍不接受任意 AT/QMI、设备路径或命令字符串。
 
 Agent 是宿主机上的单一硬件边界，不为每种模组或每个 USB 设备启动一套不同协议的 Agent。模型差异由进程内 adapter 隔离：
 
@@ -54,9 +54,34 @@ simplusd typed SMS/Call/eUICC API
           └── ML307A adapter
 ```
 
-`internal/modemadapter` 当前负责 USB identity、显示名称、固定端点角色与证据化能力；`hardwareprobe.Scanner` 只通过 registry 选择模型。QDC507 只解析已验证的 `primary-at` interface 2 和 QMI interface 4；ML307A 根据官方 V1.0.1 拨号手册与本机 HIL 固定解析 `2ecc:3012` 的 interface 2 为 primary AT。看到 tty、QMI 或 UAC 只构成硬件证据，不自动注册 SMS、Call 或数字音频业务能力。
+`internal/modemadapter` 当前负责 USB identity、显示名称、固定端点角色、型号 AT 探测计划、SIM/设备身份、SIM AKA/IMS、RF 控制及证据化能力；`hardwareprobe.Scanner` 只通过 registry 选择模型和编排类型化能力，重叠的匹配规则 fail closed。QDC507 只解析已验证的 `primary-at` interface 2 和 QMI interface 4；ML307A 根据官方 V1.0.1 拨号手册与本机 HIL 固定解析 `2ecc:3012` 的 interface 2 为 primary AT。这里固定的是 USB interface 的功能角色，不是 `/dev/ttyUSB*` 或 `N-P` 物理端口；设备节点和 sysfs 拓扑都在每次扫描时重新解析。看到 tty、QMI 或 UAC 只构成硬件证据，不自动注册 SMS、Call 或数字音频业务能力。
 
-业务驱动继续采用小型能力接口，而不是要求所有模组实现一个巨型通用接口。当前 `SMSAdapter` 由统一 router 按 snapshot 中的 device/profile 分发，并在 Agent 内再次按 device 串行；只有 registry 中至少一个型号实现该接口时，`simplus-agent` 才注入 SMS backend 并声明 `sms-v1`。默认 QDC507/ML307A adapter 都还没有实现它，因此真实部署行为保持只读。不支持的能力不注册或明确返回 unsupported，端点路径和 AT/QMI 命令始终留在 Agent 内部。
+动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。Agent 将原始 USB Serial 和 IMEI 留在进程边界内，只向内部 inventory 传递每实例 HMAC 指纹；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹，USB Serial 指纹只作辅助。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
+
+Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称、接入方式及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md)。
+
+能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。当前只有 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`：六者分别声明型号支持的只读综合探测、读取 IMEI、读取主卡槽插入状态、读取用于稳定 Line 绑定的 ICCID 脱敏身份、提供统一 SIM/IMS 身份与 AKA challenge-response，以及把布尔 RF 目标映射为固定动作并要求新鲜读回。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务，后续只在接入真实 transport 时增加最小接口；现有 QDC507 `SMSAdapter` 只是未装配到 production 的候选 transport。端点路径与 AT/QMI 命令始终留在 Agent 内部。
+
+`SIMAuthAdapter` 返回的 IMS Home Domain 必须来自当前 SIM，而不是型号或运营商常量。ML307A 先使用完整、内部一致的 ISIM 身份；ISIM 不可用时，按 [3GPP TS 23.003](https://www.etsi.org/deliver/etsi_ts/123000_123099/123003/15.10.00_60/ts_123003v151000p.pdf) 的 IMSI 派生格式，并读取 [3GPP TS 31.102](https://www.etsi.org/deliver/etsi_ts/131100_131199/131102/19.04.00_60/ts_131102v190400p.pdf) EF_AD 给出的两位或三位 MNC 长度，构造 private/public identity 与 Home Domain。不得维护运营商映射表、根据 IMSI 前缀猜 MNC 长度，或在读取失败时退回某个已知运营商；缺失、为零或非法的 MNC 长度一律 fail closed。派生结果沿类型化边界进入 SIP REGISTER 与 challenge realm 校验。
+
+AT 实现进一步分成三层：`internal/attransport` 只负责 Linux tty 的打开、独占锁、termios、有限长度读写、超时、终止响应识别和关闭，不包含任何型号命令或厂商解析；`internal/modemadapter/standardat` 提供只有型号 adapter 明确选择后才执行的标准 3GPP 只读计划与类型化解析；具体型号 adapter 拥有命令选择、厂商响应、身份查询、SIM/APDU/IMS 和 RF 动作。`hardwareprobe` 只打开一个有界 session 并把 `Query` 委托给对应能力，不能构造 AT 命令。需要 prompt/PDU 等不同交互语义的业务 driver 可以拥有专用 transport，但同样由 driver 决定命令，transport 只处理帧与 I/O。
+
+#### 分层控制与型号解耦
+
+每个控制层只能依赖下一级公开的类型化能力契约，不能依赖其具体型号或实现。依赖方向固定为：
+
+```text
+Web/API -> application/Line -> typed service port -> Agent capability -> model adapter -> device protocol
+```
+
+- 上层表达业务意图，例如“读取 SIM 插入状态”“启用射频”“发送短信”；下层返回统一的类型化状态、结果和错误。型号 adapter 才负责把这些意图映射为该型号的固定 AT/QMI/其他协议动作；
+- `profile`、型号名、USB VID/PID、interface number、sysfs 或 `/dev` 路径只能出现在发现、registry、adapter 或运行时硬件边界；AT/QMI 命令和厂商响应格式只能由型号 adapter/业务 driver 持有，通用 transport 不选择命令。应用层、Line、短信、电话、Host VoWiFi、Web 和公开 API 不得据此分支；
+- 业务层只持有稳定业务 ID 和能力结果。把稳定 `ManagedModem`/Line 解析到本次扫描的物理设备、端点与 adapter，只能发生在运行时硬件边界；设备移动或实现替换不能迫使业务对象改绑；
+- 同一能力在不同型号上的实现差异必须收敛到该能力的小接口。若现有契约不足，先依据当前真实纵切扩展或新增最小类型化能力，不能在上层增加 `if model == ...`、传递任意命令或建立巨型“万能模组”接口；
+- 不支持、尚未验证和当前不可用必须作为能力证据或类型化状态显式返回，不能由上层猜测，也不能静默回退另一型号或另一 transport；
+- 接入一个已经具备现有能力的新型号，原则上只应新增或注册型号 adapter、对应 transport 及其 fixture/HIL 证据，不应修改 Line、短信、电话、Host VoWiFi 或 Web 的业务控制流程。若必须修改上层，说明能力契约仍泄漏了具体实现，代码评审时必须先修正边界或记录明确例外。
+
+这条约束不要求提前抽象尚不存在的能力。接口随经过验证的纵切逐步出现；抽象的是已经存在的共同业务语义，而不是厂商命令的表面相似性。
 
 ### QDC507 SMS 候选传输
 
@@ -81,18 +106,19 @@ simplusd typed SMS/Call/eUICC API
 
 - React 19 + Ant Design Pro 单页应用，使用 Umi Max 路由和 ProLayout；
 - 登录、基础初始化以及左侧导航的模组、线路、短信、语音、Mihomo、通知和系统设置页面均使用同一套管理后台组件；
-- 线路页组合维护接入方式、`direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，并轮询脱敏运行状态；
+- 模组页只展示管理员已添加的模组；“添加模组”对话框展示未添加候选的型号、支持状态、类型化不可添加原因和能力；
+- 线路页只展示管理员创建的持久 Line；“添加线路”从已添加模组的当前 SIM/Profile 候选创建绑定，并组合维护接入方式、`direct`/Mihomo 国家出口和 Host VoWiFi 激活意图；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
 - 不把 Agent 协议、AT 指令或内部 fencing 模型泄漏到 UI。
 
 ### `simplus-netd`、Mihomo 与 Host VoWiFi
 
-- `simplus-netd` 同时实现 Mihomo 生命周期和固定的 per-Line Host VoWiFi `start/stop/status`；协议只接受 Line ID、`direct`/`mihomo-country` 和国家码，不接受 shell、设备路径、网络命令或任意配置参数；
+- `simplus-netd` 同时实现 Mihomo 生命周期和固定的 per-Line Host VoWiFi `start/stop/status`；启动协议只接受稳定 Line ID、由 Line 层解析的当前不透明硬件目标、`direct`/`mihomo-country` 和国家码，不接受 shell、设备路径、网络命令或任意配置参数；
 - production 只有 root `simplus-netd` 拥有创建 namespace、veth、策略路由、nftables 和 XFRM 所需权限；`simplusd` 与 Web 始终没有网络管理 capability；
 - Mihomo supervisor 只接受已安装 core 和每订阅不可变生成配置的固定路径形状，并把 listener bind error 视为启动失败；
-- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；
+- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；
 - 同一 worker 还独占 SMS over IMS 的受保护 SIP socket、Service-Route、RP reference、异步出站提交事务与待确认入站消息；root-only worker socket 只提供固定的发送、入站 list/read/acknowledge、出站报告 list/acknowledge 操作，管理进程无法提交 SIP、RPDU、APDU、设备路径或网络参数；提交报告优先按 `In-Reply-To` 并始终按仍占用的 RP reference 关联原 SIP transaction；
-- worker 重新检查固定 ML307A、SIM identity fence、SIM READY、RF Off 与出口，维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连；停用、进程退出及服务重启都清理其临时网络对象；
+- Line 应用层先把稳定业务 Line 唯一解析到当前硬件目标；worker 再用该不透明目标检查具备 `sim-auth` 的就绪 SIM、identity fence、无活动呼叫与出口，并维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连。它不检查或修改 RF，停用、进程退出及服务重启都清理其临时网络对象；
 - core SQLite 只保存管理员的 `desired_active` 意图，实时 online 状态只来自 `simplus-netd`；`simplusd` 启动和每十秒协调二者；
 - 权限与协议决策见 [`0008`](decisions/0008-mihomo-tproxy-privilege-separation.md)、[`0012`](decisions/0012-web-managed-vowifi-runtime.md) 和 [`0016`](decisions/0016-vowifi-sms-over-ims.md)。
 - Zashboard `v3.6.0` 是安装到 Mihomo working directory 的固定摘要、MIT 许可静态产物，没有独立进程或 systemd unit，由运行中的 core 通过 `external-ui` 直接托管；controller 的监听范围跟随管理后台，production 为 `0.0.0.0:19090`，并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md) 与 [`0015`](decisions/0015-zashboard-wildcard-controller.md)。
@@ -115,13 +141,15 @@ Host VoWiFi packets -> per-Line network boundary -> direct or Mihomo -> ePDG/P-C
 
 ML307A 与受控测试 Profile 的首个真实纵切已按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 通过：第一次 IKE_AUTH 用 `IDr=ims` 选择 IMS APN，ePDG EAP-AKA 建立外层 CHILD SA；初始 SIP REGISTER 取得 IMS AKA challenge 后，Host 以 SIM 返回的 CK/IK 创建两对 Gm transport-mode ESP SA，并把 Gm 与 ePDG template 组成双层 XFRM bundle。该路径随后按 [`0012`](decisions/0012-web-managed-vowifi-runtime.md) 迁入 `simplus-netd` 长生命周期和 Web 线路页，仍固定保持 RF Off、fail closed、脱敏状态和全量异常清理。公开证据等级和未验证边界见 [`compatibility.md`](compatibility.md)。
 
+动态 IMS Home Domain 只消除了 SIM 身份与 SIP 层的运营商硬编码，不等于完整的多运营商 VoWiFi 支持。当前 ePDG FQDN、IKE responder identity 和已验证远端集合仍属于首个已验证运营商的专用接入 profile；在它们也改为由 SIM/标准发现与独立 HIL 驱动前，其他运营商必须保持未验证和 fail closed。
+
 ## 3. 简化后的领域模型
 
 ```text
 Modem  物理模组及其可操作能力
 SIM    当前插入或激活的卡
 Profile  可拔插 eUICC 中的已安装 Profile
-Line   用户用于选择收发短信/电话的逻辑入口
+Line   管理员绑定到一个 ManagedModem 与 SIM/Profile、用于短信/电话/Host VoWiFi 的稳定逻辑入口
 Message
 Call
 Contact
@@ -143,7 +171,7 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 - 超时或响应丢失时先读取模组状态，不盲目重发有费用或外部副作用的动作；
 - 不再为所有动作构建通用 ResourceGroup lease、跨层 generation/fencing 和多套 durable outcome 真相源。
 
-现有 `radio.ensure-off` ledger 代码与 ResourceGroup lease 可以保留为 fixture/历史基础设施，但 production Agent 不注册该命令；新的 SMS/Call 纵切不应扩展通用分布式命令平台。
+现有 `radio.ensure-off` ledger 代码与 ResourceGroup lease 可以保留为 fixture/历史基础设施，但 production Agent 不注册该命令。新的 RF 路径只接受目标开关状态，在 Agent 内串行执行固定命令并立即读回；新的 SMS/Call 纵切也不应扩展通用分布式命令平台。
 
 ## 5. 关键数据流
 
@@ -200,9 +228,10 @@ Web -> emergency/number validation -> modem worker
 7. hardware backend 失败时不能静默回退 Simulator。
 8. eUICC Profile 切换后必须重新读取并确认活动 Profile；
 9. `mihomo-required` Line 在 Mihomo 不可用时不能回退 direct。
-10. Host VoWiFi 只有 ePDG、Gm 和受保护 IMS REGISTER 同时成立才能报告 online；
+10. Host VoWiFi 只有 ePDG、Gm 和受保护 IMS REGISTER 同时成立才能报告 online；其生命周期不得隐式控制 RF；
 11. `simplus-netd` 是 Host VoWiFi 临时网络对象的唯一 owner，Web/API 不得传入底层网络参数。
 12. SMS over IMS 不能把 SIP 2xx 当作短信提交成功，且入站 RP-ACK 只能发生在可恢复持久化之后。
+13. 每个控制层只能依赖下一级的类型化能力契约；新增实现同一能力的模组型号不得要求上层业务按型号分支。
 
 这些规则应优先由类型、测试和小型检查器强制执行，而不是在多份文档中重复描述。
 

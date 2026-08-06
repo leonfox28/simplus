@@ -68,6 +68,7 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 			snapshot.ResourceGroups[0].Resources = append(snapshot.ResourceGroups[0].Resources, ResourceSIMAPDU)
 		}},
 		{name: "uac without cellular digital voice", mutate: func(snapshot *Snapshot) { snapshot.ModemFunctions[0].Capabilities.USBUAC = true }},
+		{name: "malformed equipment identity", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].EquipmentIdentityFingerprint = "raw-imei" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -77,6 +78,23 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestNormalizeAndValidatePreservesDuplicateEquipmentIdentityForFailClosedResolution(t *testing.T) {
+	snapshot := validSnapshot()
+	identity := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	snapshot.Devices[0].EquipmentIdentityFingerprint = identity
+	snapshot.Devices = append(snapshot.Devices, PhysicalDevice{
+		ID: "device-2", DisplayName: "Second modem", Transport: TransportUSB,
+		State: DeviceAvailable, EquipmentIdentityFingerprint: identity, Generation: 1,
+	})
+	normalized, err := NormalizeAndValidate(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(normalized.Devices) != 2 {
+		t.Fatalf("devices = %#v", normalized.Devices)
 	}
 }
 

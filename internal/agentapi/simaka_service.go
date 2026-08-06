@@ -13,7 +13,6 @@ var (
 	ErrSIMAKASnapshotStale   = errors.New("SIM AKA hardware snapshot changed")
 	ErrSIMAKADeviceStale     = errors.New("SIM AKA device generation changed")
 	ErrSIMAKAUnsupported     = errors.New("SIM AKA is unsupported for this device")
-	ErrSIMAKARFNotOff        = errors.New("SIM AKA requires RF off")
 	ErrSIMAKASIMNotReady     = errors.New("SIM AKA requires a ready SIM")
 	ErrSIMAKAIdentityChanged = errors.New("SIM AKA identity changed")
 	ErrSIMAKAUnavailable     = errors.New("SIM AKA backend is unavailable")
@@ -284,7 +283,7 @@ func (service *SIMAKAService) validateTarget(ctx context.Context, target SIMAKAT
 		if device.Generation != target.DeviceGeneration {
 			return Snapshot{}, ErrSIMAKADeviceStale
 		}
-		if device.Profile != ProfileML307A || !observedAgentCapability(device, "sim-apdu") {
+		if !observedAgentCapability(device, "sim-auth") {
 			return Snapshot{}, ErrSIMAKAUnsupported
 		}
 		break
@@ -299,9 +298,6 @@ func (service *SIMAKAService) validateTarget(ctx context.Context, target SIMAKAT
 	observed := probe.Devices[0]
 	if observed.DeviceID != target.DeviceID || observed.State != ProbeStateComplete {
 		return Snapshot{}, ErrSIMAKAUnavailable
-	}
-	if observed.RF.State != RFStateOff {
-		return Snapshot{}, ErrSIMAKARFNotOff
 	}
 	if observed.SIM.State != SIMStatePresent || observed.SIM.PrimaryLockState != PrimaryLockReady {
 		return Snapshot{}, ErrSIMAKASIMNotReady

@@ -60,7 +60,7 @@ func TestCountryBindingUsesCurrentSubscriptionWithoutRewritingMihomo(t *testing.
 			"subscription_BBBBBBBBBBBBBBBBBBBBBB": {{CountryCode: "US", CountryName: "美国"}},
 		},
 	}
-	line := inventory.Line{ID: "agent-line-123", AccessMode: accessmode.HostVoWiFiOnly, Capabilities: hardware.Capabilities{SIMAccess: true}}
+	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", AccessMode: accessmode.HostVoWiFiOnly, Capabilities: hardware.Capabilities{SIMAccess: true}}
 	service := New(store, staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}, staticRuntime{state: "running"})
 	service.Now = func() time.Time { return time.Unix(100, 0).UTC() }
 
@@ -90,7 +90,7 @@ func TestLineEgressFailsClosedOutsideHostVoWiFiAndWhenMihomoStops(t *testing.T) 
 		bindings: map[string]domain.Binding{}, selected: "subscription_AAAAAAAAAAAAAAAAAAAAAA", running: "subscription_AAAAAAAAAAAAAAAAAAAAAA",
 		nodes: map[string][]mihomodomain.Node{"subscription_AAAAAAAAAAAAAAAAAAAAAA": {{CountryCode: "GB", CountryName: "英国"}}},
 	}
-	line := inventory.Line{ID: "agent-line-123", AccessMode: accessmode.HoldRFOff, Capabilities: hardware.Capabilities{SIMAccess: true}}
+	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", AccessMode: accessmode.HoldRFOff, Capabilities: hardware.Capabilities{SIMAccess: true}}
 	service := New(store, staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}, staticRuntime{state: "stopped"})
 	if _, err := service.Put(context.Background(), line.ID, domain.ModeMihomoCountry, "GB"); err != ErrLineMode {
 		t.Fatalf("non-Host VoWiFi put error = %v", err)

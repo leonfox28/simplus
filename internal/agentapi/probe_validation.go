@@ -49,6 +49,9 @@ func validateDeviceProbe(device DeviceProbe) error {
 	if !oneOf(device.RF.State, RFStateOff, RFStateMinimum, RFStateOn, RFStateUnknown) {
 		return fmt.Errorf("invalid RF state %q", device.RF.State)
 	}
+	if device.Identity.EquipmentIdentityFingerprint != "" && !isSHA256Hex(device.Identity.EquipmentIdentityFingerprint) {
+		return errors.New("equipment identity must be an instance-scoped fingerprint")
+	}
 	if !oneOf(device.SIM.State, SIMStatePresent, SIMStateAbsent, SIMStateLocked, SIMStateUnknown) {
 		return fmt.Errorf("invalid SIM state %q", device.SIM.State)
 	}

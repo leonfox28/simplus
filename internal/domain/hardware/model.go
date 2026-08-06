@@ -59,11 +59,13 @@ type Capabilities struct {
 }
 
 type PhysicalDevice struct {
-	ID          string
-	DisplayName string
-	Transport   string
-	State       string
-	Generation  uint64
+	ID                           string
+	DisplayName                  string
+	Transport                    string
+	State                        string
+	EquipmentIdentityFingerprint string
+	USBSerialFingerprint         string
+	Generation                   uint64
 }
 
 type ModemFunction struct {

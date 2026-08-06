@@ -1,37 +1,10 @@
-package hardwareprobe
+package standardat
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 )
-
-type fixedIdentityPseudonymizer struct{ value string }
-
-func (pseudonymizer fixedIdentityPseudonymizer) Pseudonym(string, []byte) (string, error) {
-	return pseudonymizer.value, nil
-}
-
-func TestML307AICCIDIsOnlyReturnedAsAKeyedPseudonymAndMaskedHint(t *testing.T) {
-	fingerprint := strings.Repeat("a", 64)
-	actual, hint := pseudonymizedML307AICCID(
-		[]string{"+MCCID: 89861118216007272115", "OK"},
-		fixedIdentityPseudonymizer{value: fingerprint},
-	)
-	if actual != fingerprint || hint != "ICCID •••• 2115" {
-		t.Fatalf("identity = (%q, %q)", actual, hint)
-	}
-	for _, lines := range [][]string{
-		{"+MCCID: not-an-iccid", "OK"},
-		{"+MCCID: 12345678901234", "OK"},
-		{"89861118216007272115", "OK"},
-	} {
-		if value, display := pseudonymizedML307AICCID(lines, fixedIdentityPseudonymizer{value: fingerprint}); value != "" || display != "" {
-			t.Fatalf("invalid identity was accepted: (%q, %q)", value, display)
-		}
-	}
-}
 
 func TestTypedRFAndSIMObservations(t *testing.T) {
 	for _, test := range []struct {
@@ -43,12 +16,12 @@ func TestTypedRFAndSIMObservations(t *testing.T) {
 		{line: "+CFUN: 1", state: agentapi.RFStateOn, mode: 1},
 		{line: "+CFUN: 4", state: agentapi.RFStateOff, mode: 4},
 	} {
-		observation := rfObservation([]string{test.line, "OK"})
+		observation := RFObservation([]string{test.line, "OK"})
 		if observation.State != test.state || observation.Mode == nil || *observation.Mode != test.mode {
 			t.Fatalf("RF observation for %q = %#v", test.line, observation)
 		}
 	}
-	if observation := rfObservation([]string{"+CFUN: invalid", "OK"}); observation.State != agentapi.RFStateUnknown || observation.Mode != nil {
+	if observation := RFObservation([]string{"+CFUN: invalid", "OK"}); observation.State != agentapi.RFStateUnknown || observation.Mode != nil {
 		t.Fatalf("invalid RF observation = %#v", observation)
 	}
 
@@ -67,7 +40,7 @@ func TestTypedRFAndSIMObservations(t *testing.T) {
 		{lines: []string{"+CPIN: SIM PUK BLOCKED", "OK"}, simState: agentapi.SIMStateLocked, primaryLock: agentapi.PrimaryLockPermanentlyBlocked, lockType: "puk1-blocked"},
 		{lines: []string{"+CME ERROR: 10"}, simState: agentapi.SIMStateAbsent, primaryLock: agentapi.PrimaryLockUnknown},
 	} {
-		observation := simObservation(test.lines, nil)
+		observation := SIMObservation(test.lines, nil)
 		if observation.State != test.simState || observation.PrimaryLockState != test.primaryLock || observation.LockType != test.lockType {
 			t.Fatalf("SIM observation for %v = %#v", test.lines, observation)
 		}
@@ -140,22 +113,22 @@ func TestTypedParsersRejectMalformedAndOversizedCSV(t *testing.T) {
 }
 
 func TestReadOnlyATParsingRedactsIdentityNumbersAndCallDestinations(t *testing.T) {
-	if got := identityPayload([]string{"QDC507GLEFM21", "OK"}); got != "QDC507GLEFM21" {
+	if got := IdentityPayload([]string{"QDC507GLEFM21", "OK"}); got != "QDC507GLEFM21" {
 		t.Fatalf("revision = %q", got)
 	}
 	for _, identity := range []string{"867530900000001", "89860012345678901234"} {
-		if got := identityPayload([]string{identity, "OK"}); got != "" {
+		if got := IdentityPayload([]string{identity, "OK"}); got != "" {
 			t.Fatalf("identity-shaped payload leaked: %q", got)
 		}
 	}
 	calls := []string{`+CLCC: 1,0,0,0,0,"+441234567890",145`, `+CLCC: 2,1,0,0,0,"+8613800138000",145`, "OK"}
-	if got := activeCallCount(calls); got != 2 {
+	if got := ActiveCallCount(calls); got != 2 {
 		t.Fatalf("call count = %d", got)
 	}
-	if observation := simObservation([]string{"+CPIN: SIM PIN", "OK"}, nil); observation.State != agentapi.SIMStateLocked || observation.LockType != "pin1" {
+	if observation := SIMObservation([]string{"+CPIN: SIM PIN", "OK"}, nil); observation.State != agentapi.SIMStateLocked || observation.LockType != "pin1" {
 		t.Fatalf("SIM observation = %#v", observation)
 	}
-	if observation := simObservation([]string{"+CME ERROR: 10"}, nil); observation.State != agentapi.SIMStateAbsent {
+	if observation := SIMObservation([]string{"+CME ERROR: 10"}, nil); observation.State != agentapi.SIMStateAbsent {
 		t.Fatalf("absent SIM observation = %#v", observation)
 	}
 }

@@ -21,6 +21,12 @@ type fakeAPI struct {
 	reportAcked  bool
 }
 
+const (
+	testManagedLineID  = "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	testManagedLineID2 = "line_AgICAgICAgICAgICAgICAg"
+	testHardwareLineID = "agent-line-0123456789abcdef0123456789abcdef"
+)
+
 func (fake *fakeAPI) SendSMS(_ context.Context, request SMSSendRequest) (SMSSendResponse, error) {
 	if !validSMSSendRequest(request) {
 		return SMSSendResponse{}, ErrRequestInvalid
@@ -29,7 +35,7 @@ func (fake *fakeAPI) SendSMS(_ context.Context, request SMSSendRequest) (SMSSend
 }
 
 func (fake *fakeAPI) ListSMS(_ context.Context, lineID string) ([]SMSMessageReference, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return nil, ErrRequestInvalid
 	}
 	return []SMSMessageReference{{MessageID: fake.message.MessageID, ReceivedAt: fake.message.ReceivedAt}}, nil
@@ -51,7 +57,7 @@ func (fake *fakeAPI) AcknowledgeSMS(_ context.Context, request SMSAcknowledgeReq
 }
 
 func (fake *fakeAPI) ListSMSSubmitReports(_ context.Context, lineID string) (SMSSubmitReportListResponse, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return SMSSubmitReportListResponse{}, ErrRequestInvalid
 	}
 	return SMSSubmitReportListResponse{
@@ -114,7 +120,7 @@ func TestClientServerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressMihomoCountry, CountryCode: "JP"}
+	request := StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressMihomoCountry, CountryCode: "JP"}
 	started, err := client.Start(context.Background(), request)
 	if err != nil || started.State != StateStarting {
 		t.Fatalf("start=%#v err=%v", started, err)
@@ -127,7 +133,7 @@ func TestClientServerRoundTrip(t *testing.T) {
 	if err != nil || stopped.State != StateStopped {
 		t.Fatalf("stop=%#v err=%v", stopped, err)
 	}
-	if _, err := client.Stop(context.Background(), "agent-line-fedcba9876543210fedcba9876543210"); !errors.Is(err, ErrNotRunning) {
+	if _, err := client.Stop(context.Background(), testManagedLineID2); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("missing stop error = %v", err)
 	}
 	sent, err := client.SendSMS(context.Background(), SMSSendRequest{
@@ -164,7 +170,7 @@ func TestClientServerRoundTrip(t *testing.T) {
 func TestHandlerRejectsUnknownFields(t *testing.T) {
 	// Covered through the same decoder contract used by both start and stop;
 	// keep this assertion at the API layer instead of relying on Local.
-	if validStartRequest(StartRequest{LineID: "agent-line-0123456789abcdef0123456789abcdef", EgressMode: EgressDirect, CountryCode: "JP"}) {
+	if validStartRequest(StartRequest{LineID: testManagedLineID, HardwareLineID: testHardwareLineID, EgressMode: EgressDirect, CountryCode: "JP"}) {
 		t.Fatal("direct request with a country unexpectedly accepted")
 	}
 }

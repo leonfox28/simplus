@@ -107,6 +107,21 @@ func (client *Client) EnsureRadioOff(ctx context.Context, request RadioEnsureOff
 	return response, nil
 }
 
+func (client *Client) SetRFState(ctx context.Context, request RFSetRequest) (RFSetResponse, error) {
+	var response RFSetResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/radio/state", request, &response); err != nil {
+		return RFSetResponse{}, err
+	}
+	if response.ProtocolVersion != ProtocolVersion || response.AgentInstanceID != request.AgentInstanceID ||
+		response.DeviceID != request.DeviceID || (response.State != RFStateOn && response.State != RFStateOff) {
+		return RFSetResponse{}, errors.New("invalid RF state response")
+	}
+	if request.Enabled != (response.State == RFStateOn) {
+		return RFSetResponse{}, errors.New("RF state response does not match request")
+	}
+	return response, nil
+}
+
 func (client *Client) ListSMS(ctx context.Context, request SMSListRequest) (SMSListResponse, error) {
 	if err := validateSMSListRequest(request); err != nil {
 		return SMSListResponse{}, err

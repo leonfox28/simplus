@@ -26,9 +26,11 @@ import (
 	euiccapp "github.com/leonfox28/simplus/internal/application/euicc"
 	"github.com/leonfox28/simplus/internal/application/health"
 	"github.com/leonfox28/simplus/internal/application/inventory"
+	lineapp "github.com/leonfox28/simplus/internal/application/line"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	messageapp "github.com/leonfox28/simplus/internal/application/messaging"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
+	modemapp "github.com/leonfox28/simplus/internal/application/modem"
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
@@ -38,7 +40,9 @@ import (
 	"github.com/leonfox28/simplus/internal/domain/contact"
 	domaineuicc "github.com/leonfox28/simplus/internal/domain/euicc"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
+	linedomain "github.com/leonfox28/simplus/internal/domain/line"
 	mihomodomain "github.com/leonfox28/simplus/internal/domain/mihomo"
+	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	vowifidomain "github.com/leonfox28/simplus/internal/domain/vowifi"
 )
@@ -146,6 +150,20 @@ type VoWiFiManager interface {
 	Deactivate(context.Context, string) (vowifidomain.State, error)
 }
 
+type ManagedModemManager interface {
+	List(context.Context) ([]modemdomain.View, error)
+	Candidates(context.Context) ([]modemdomain.Candidate, error)
+	Add(context.Context, string) (modemdomain.View, error)
+	SetRFState(context.Context, string, bool) (modemdomain.View, error)
+}
+
+type ManagedLineManager interface {
+	List(context.Context) ([]linedomain.View, error)
+	Candidates(context.Context) ([]linedomain.Candidate, error)
+	Add(context.Context, string, string, accessmode.Mode) (linedomain.View, error)
+	Update(context.Context, string, string, accessmode.Mode) (linedomain.View, error)
+}
+
 type Server struct {
 	health              *health.Service
 	setup               *setupapp.Service
@@ -158,6 +176,8 @@ type Server struct {
 	accessPaths         AccessPathManager
 	lineEgress          LineEgressManager
 	vowifi              VoWiFiManager
+	modems              ManagedModemManager
+	lines               ManagedLineManager
 	mihomoCore          MihomoCoreManager
 	mihomoSubscriptions MihomoSubscriptionManager
 	mihomoEgress        MihomoEgressManager
@@ -199,6 +219,20 @@ func WithLineEgress(server *Server, manager LineEgressManager) *Server {
 func WithVoWiFi(server *Server, manager VoWiFiManager) *Server {
 	if server != nil {
 		server.vowifi = manager
+	}
+	return server
+}
+
+func WithManagedModems(server *Server, manager ManagedModemManager) *Server {
+	if server != nil {
+		server.modems = manager
+	}
+	return server
+}
+
+func WithManagedLines(server *Server, manager ManagedLineManager) *Server {
+	if server != nil {
+		server.lines = manager
 	}
 	return server
 }
@@ -2232,6 +2266,249 @@ func (server *Server) writeMessageError(w http.ResponseWriter, r *http.Request, 
 	default:
 		server.logger.ErrorContext(r.Context(), "message operation failed", "operation_id", operationID, "line_id", lineID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_PERSIST_FAILED", Retryable: true})
+	}
+}
+
+func (server *Server) ListManagedModems(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.modems == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	items, err := server.modems.List(r.Context())
+	if err != nil {
+		server.logger.ErrorContext(r.Context(), "managed modem list failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MODEM_LIST_UNAVAILABLE", Retryable: true})
+		return
+	}
+	modems := make([]openapi.ManagedModem, 0, len(items))
+	for _, item := range items {
+		modems = append(modems, managedModemResponse(item))
+	}
+	writeJSON(w, http.StatusOK, openapi.ManagedModemList{Modems: modems})
+}
+
+func (server *Server) ListManagedLines(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.lines == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "LINE_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	items, err := server.lines.List(r.Context())
+	if err != nil {
+		server.logger.ErrorContext(r.Context(), "managed line list failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "LINE_LIST_UNAVAILABLE", Retryable: true})
+		return
+	}
+	lines := make([]openapi.ManagedLine, 0, len(items))
+	for _, item := range items {
+		lines = append(lines, managedLineResponse(item))
+	}
+	writeJSON(w, http.StatusOK, openapi.ManagedLineList{Lines: lines})
+}
+
+func (server *Server) ListLineCandidates(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.lines == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "LINE_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	items, err := server.lines.Candidates(r.Context())
+	if err != nil {
+		server.logger.WarnContext(r.Context(), "managed line candidate resolution failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "LINE_CANDIDATES_UNAVAILABLE", Retryable: true})
+		return
+	}
+	candidates := make([]openapi.LineCandidate, 0, len(items))
+	for _, item := range items {
+		candidates = append(candidates, openapi.LineCandidate{
+			CandidateId: item.CandidateID, ManagedModemId: item.ManagedModemID,
+			ManagedModemDisplayName: item.ManagedModemDisplayName,
+			SubscriptionDisplayHint: item.SubscriptionDisplayHint,
+			Capabilities:            hardwareCapabilitiesResponse(item.Capabilities), Addable: item.Addable,
+		})
+	}
+	writeJSON(w, http.StatusOK, openapi.LineCandidateList{Candidates: candidates})
+}
+
+func (server *Server) AddManagedLine(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.lines == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "LINE_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	var request openapi.AddManagedLineRequest
+	if decodeJSON(w, r, &request) != nil {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "LINE_ADD_REQUEST_INVALID", Retryable: false})
+		return
+	}
+	item, err := server.lines.Add(r.Context(), request.CandidateId, request.DisplayName, accessmode.Mode(request.AccessMode))
+	if err != nil {
+		server.writeManagedLineError(w, r, err, true)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/lines/"+item.ID)
+	writeJSON(w, http.StatusCreated, managedLineResponse(item))
+}
+
+func (server *Server) UpdateManagedLine(w http.ResponseWriter, r *http.Request, lineID string) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.lines == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "LINE_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	var request openapi.UpdateManagedLineRequest
+	if decodeJSON(w, r, &request) != nil {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "LINE_UPDATE_REQUEST_INVALID", Retryable: false})
+		return
+	}
+	item, err := server.lines.Update(r.Context(), lineID, request.DisplayName, accessmode.Mode(request.AccessMode))
+	if err != nil {
+		server.writeManagedLineError(w, r, err, false)
+		return
+	}
+	writeJSON(w, http.StatusOK, managedLineResponse(item))
+}
+
+func (server *Server) writeManagedLineError(w http.ResponseWriter, r *http.Request, err error, adding bool) {
+	switch {
+	case errors.Is(err, lineapp.ErrRequestInvalid):
+		code := "LINE_UPDATE_REQUEST_INVALID"
+		if adding {
+			code = "LINE_ADD_REQUEST_INVALID"
+		}
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: code, Retryable: false})
+	case errors.Is(err, lineapp.ErrCandidateNotFound):
+		writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "LINE_CANDIDATE_NOT_FOUND", Retryable: true})
+	case errors.Is(err, linedomain.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "LINE_NOT_FOUND", Retryable: false})
+	case errors.Is(err, lineapp.ErrCandidateInvalid):
+		writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "LINE_CANDIDATE_NOT_READY", Retryable: true})
+	case errors.Is(err, lineapp.ErrAlreadyManaged):
+		writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "LINE_ALREADY_ADDED", Retryable: false})
+	default:
+		server.logger.ErrorContext(r.Context(), "managed line mutation failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "LINE_PERSIST_FAILED", Retryable: true})
+	}
+}
+
+func managedLineResponse(item linedomain.View) openapi.ManagedLine {
+	return openapi.ManagedLine{
+		Id: item.ID, DisplayName: item.DisplayName, ManagedModemId: item.ManagedModemID,
+		ManagedModemDisplayName: item.ManagedModemDisplayName,
+		SubscriptionDisplayHint: item.SubscriptionDisplayHint, AccessMode: openapi.AccessMode(item.AccessMode),
+		State: openapi.ManagedLineState(item.State), Capabilities: hardwareCapabilitiesResponse(item.Capabilities),
+		CreatedAt: item.CreatedAt.UTC(),
+	}
+}
+
+func (server *Server) ListModemCandidates(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.modems == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	items, err := server.modems.Candidates(r.Context())
+	if err != nil {
+		server.logger.WarnContext(r.Context(), "modem candidate scan failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MODEM_SCAN_FAILED", Retryable: true})
+		return
+	}
+	candidates := make([]openapi.ModemCandidate, 0, len(items))
+	for _, item := range items {
+		candidates = append(candidates, openapi.ModemCandidate{
+			CandidateId: item.CandidateID, Model: item.Model, Transport: openapi.DeviceTransport(item.Transport),
+			SupportStatus: openapi.ModemSupportStatus(item.Support), Addable: item.Addable,
+			ReadinessReason: openapi.ModemCandidateReadinessReason(item.Readiness),
+			Capabilities:    hardwareCapabilitiesResponse(item.Capabilities), SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence),
+		})
+	}
+	writeJSON(w, http.StatusOK, openapi.ModemCandidateList{Candidates: candidates})
+}
+
+func (server *Server) AddManagedModem(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.modems == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	var request openapi.AddManagedModemRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MODEM_ADD_REQUEST_INVALID", Retryable: false})
+		return
+	}
+	item, err := server.modems.Add(r.Context(), request.CandidateId)
+	if err != nil {
+		switch {
+		case errors.Is(err, modemapp.ErrCandidateInvalid):
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MODEM_ADD_REQUEST_INVALID", Retryable: false})
+		case errors.Is(err, modemapp.ErrCandidateNotFound):
+			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MODEM_CANDIDATE_NOT_FOUND", Retryable: true})
+		case errors.Is(err, modemapp.ErrCandidateNotReady):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_CANDIDATE_NOT_READY", Retryable: true})
+		case errors.Is(err, modemapp.ErrAlreadyManaged):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_ALREADY_ADDED", Retryable: false})
+		case errors.Is(err, modemapp.ErrIdentityConflict):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_IDENTITY_CONFLICT", Retryable: false})
+		default:
+			server.logger.ErrorContext(r.Context(), "managed modem add failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MODEM_ADD_FAILED", Retryable: true})
+		}
+		return
+	}
+	w.Header().Set("Location", "/api/v1/modems/"+item.ID)
+	writeJSON(w, http.StatusCreated, managedModemResponse(item))
+}
+
+func (server *Server) SetManagedModemRFState(w http.ResponseWriter, r *http.Request, modemID string) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.modems == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	var request openapi.SetManagedModemRFStateRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MODEM_RF_REQUEST_INVALID", Retryable: false})
+		return
+	}
+	item, err := server.modems.SetRFState(r.Context(), modemID, request.Enabled)
+	if err != nil {
+		switch {
+		case errors.Is(err, modemapp.ErrModemNotFound):
+			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MODEM_NOT_FOUND", Retryable: false})
+		case errors.Is(err, modemapp.ErrRFUnavailable):
+			writeJSON(w, http.StatusUnprocessableEntity, openapi.ApiError{Code: "MODEM_RF_UNAVAILABLE", Retryable: false})
+		default:
+			server.logger.WarnContext(r.Context(), "managed modem RF change failed", "modem_id", modemID, "error", err)
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_RF_CHANGE_FAILED", Retryable: true})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, managedModemResponse(item))
+}
+
+func managedModemResponse(item modemdomain.View) openapi.ManagedModem {
+	return openapi.ManagedModem{
+		Id: item.ID, DisplayName: item.DisplayName, Model: item.Model,
+		Transport: openapi.DeviceTransport(item.Transport), State: openapi.ManagedModemState(item.State),
+		Capabilities: hardwareCapabilitiesResponse(item.Capabilities), RfState: openapi.ManagedModemRFState(item.RFState),
+		SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence), AddedAt: item.AddedAt,
 	}
 }
 

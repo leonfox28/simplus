@@ -18,12 +18,12 @@ func TestExtractChallengeAndBuildAuthenticatedRegister(t *testing.T) {
 	response := "SIP/2.0 401 Unauthorized\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"CSeq: 1 REGISTER\r\n" +
-		"WWW-Authenticate: Digest realm=\"" + IMSHomeDomain + "\", nonce=\"" + nonce +
+		"WWW-Authenticate: Digest realm=\"" + testIMSHomeDomain + "\", nonce=\"" + nonce +
 		"\", algorithm=AKAv1-MD5, qop=\"auth,auth-int\", opaque=\"opaque-token\"\r\n" +
 		"Security-Server: ipsec-3gpp;q=0.1;alg=hmac-sha-1-96;ealg=aes-cbc;prot=esp;mod=trans;" +
 		"spi-c=3234567890;spi-s=4234567890;port-c=43001;port-s=43002\r\n" +
 		"Content-Length: 0\r\n\r\n"
-	challenge, err := ExtractIMSRegistrationChallenge([]byte(response), callID)
+	challenge, err := ExtractIMSRegistrationChallenge([]byte(response), callID, testIMSHomeDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,13 +31,20 @@ func TestExtractChallengeAndBuildAuthenticatedRegister(t *testing.T) {
 		challenge.SecurityServer.ClientSPI != 3234567890 || challenge.SecurityServer.ProtectedServerPort != 43002 {
 		t.Fatalf("unexpected challenge metadata: qop=%q", challenge.QOP)
 	}
+	if _, err := ExtractIMSRegistrationChallenge([]byte(response), callID, alternateIMSHomeDomain); err == nil {
+		t.Fatal("accepted an IMS challenge for a different Home Domain")
+	}
+	alternateResponse := strings.ReplaceAll(response, testIMSHomeDomain, alternateIMSHomeDomain)
+	if alternate, err := ExtractIMSRegistrationChallenge([]byte(alternateResponse), callID, alternateIMSHomeDomain); err != nil || alternate.Realm != alternateIMSHomeDomain {
+		t.Fatalf("alternate challenge = %#v, error = %v", alternate, err)
+	}
 
-	privateIdentity := "234150123456789@" + IMSHomeDomain
+	privateIdentity := "234150123456789@" + testIMSHomeDomain
 	input := IMSInitialRegisterInput{
 		Source: netip.MustParseAddr("10.255.0.42"), UnprotectedPort: 5060,
 		ProtectedClientPort: 42001, ProtectedServerPort: 42002,
 		ClientSPI: 1234567890, ServerSPI: 2234567890,
-		PrivateIdentity: privateIdentity, PublicIdentity: "sip:" + privateIdentity, HomeDomain: IMSHomeDomain,
+		PrivateIdentity: privateIdentity, PublicIdentity: "sip:" + privateIdentity, HomeDomain: testIMSHomeDomain,
 		Branch: "0123456789abcdef", FromTag: "1123456789abcdef", CallID: callID,
 		ContactUser: "3123456789abcdef", WLANNodeID: "020000000001",
 	}
@@ -81,11 +88,11 @@ func TestExtractChallengeRejectsIncompleteIPSecMechanism(t *testing.T) {
 	callID := "2123456789abcdef@10.255.0.42"
 	nonce := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	response := "SIP/2.0 401 Unauthorized\r\nCall-ID: " + callID +
-		"\r\nCSeq: 1 REGISTER\r\nWWW-Authenticate: Digest realm=\"" + IMSHomeDomain +
+		"\r\nCSeq: 1 REGISTER\r\nWWW-Authenticate: Digest realm=\"" + testIMSHomeDomain +
 		"\", nonce=\"" + nonce + "\", algorithm=AKAv1-MD5\r\n" +
 		"Security-Server: ipsec-3gpp;alg=hmac-sha-1-96;spi-c=3234567890;spi-s=4234567890;" +
 		"port-c=43001;port-s=43002\r\nContent-Length: 0\r\n\r\n"
-	if _, err := ExtractIMSRegistrationChallenge([]byte(response), callID); err == nil {
+	if _, err := ExtractIMSRegistrationChallenge([]byte(response), callID, testIMSHomeDomain); err == nil {
 		t.Fatal("accepted Security-Server without negotiated encryption")
 	}
 }

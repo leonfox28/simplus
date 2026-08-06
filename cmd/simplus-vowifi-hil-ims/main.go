@@ -152,7 +152,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 	}
 	defer zero(response)
 	output.ResponseReceived = true
-	summary, parseErr := vowifihil.ParseIMSInitialResponse(response, input.CallID)
+	summary, parseErr := vowifihil.ParseIMSInitialResponse(response, input.CallID, input.HomeDomain)
 	output.Status = summary.Status
 	output.MinExpires = summary.MinExpires
 	output.AKAAlgorithm = summary.AKAAlgorithm
@@ -163,7 +163,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		return output, false
 	}
 
-	challenge, err := vowifihil.ExtractIMSRegistrationChallenge(response, input.CallID)
+	challenge, err := vowifihil.ExtractIMSRegistrationChallenge(response, input.CallID, input.HomeDomain)
 	if err != nil {
 		output.Stage = "challenge-parse"
 		return output, false

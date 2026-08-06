@@ -10,6 +10,8 @@ import (
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/application/inventory"
+	lineapp "github.com/leonfox28/simplus/internal/application/line"
+	modemapp "github.com/leonfox28/simplus/internal/application/modem"
 	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
@@ -18,6 +20,33 @@ import (
 
 type senderFunc func(context.Context, SendSMSCommand) (SendSMSResult, error)
 type messagingAccessGuard bool
+
+const (
+	testManagedLineID1 = "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	testManagedLineID2 = "line_AgICAgICAgICAgICAgICAg"
+)
+
+type managedTestLineSource struct{ source LineSource }
+
+func (source managedTestLineSource) Topology(ctx context.Context) (inventory.Topology, error) {
+	topology, err := source.source.Topology(ctx)
+	if err != nil {
+		return inventory.Topology{}, err
+	}
+	for index := range topology.Lines {
+		switch topology.Lines[index].ID {
+		case "simulator-line-1":
+			topology.Lines[index].RuntimeLineID = topology.Lines[index].ID
+			topology.Lines[index].ID = testManagedLineID1
+		case "simulator-line-2":
+			topology.Lines[index].RuntimeLineID = topology.Lines[index].ID
+			topology.Lines[index].ID = testManagedLineID2
+		}
+	}
+	return topology, nil
+}
+
+func managedTestLines(source LineSource) LineSource { return managedTestLineSource{source: source} }
 
 func (guard messagingAccessGuard) Available(context.Context, string) bool { return bool(guard) }
 
@@ -81,7 +110,7 @@ func newTestService(t *testing.T, sender Sender) (*Service, *sqlitestore.Set) {
 		stores.Close()
 		t.Fatal(err)
 	}
-	service, err := NewService(ctx, stores, inventory.NewSimulator(stores), sender)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator(stores)), sender)
 	if err != nil {
 		stores.Close()
 		t.Fatal(err)
@@ -109,7 +138,7 @@ func TestSendPersistsBeforeDispatchAndReplaysByOperationID(t *testing.T) {
 		return SendSMSResult{ProviderMessageID: "provider-1"}, nil
 	}))
 	request := SendRequest{
-		OperationID: "operation-0123456789abcdef", LineID: "simulator-line-1",
+		OperationID: "operation-0123456789abcdef", LineID: testManagedLineID1,
 		Destination: "+8613800138000", Body: "hello 模拟器",
 	}
 	result, err := service.Send(context.Background(), request)
@@ -129,6 +158,57 @@ func TestSendPersistsBeforeDispatchAndReplaysByOperationID(t *testing.T) {
 	request.Destination = "+8613900139000"
 	if _, err := service.Send(context.Background(), request); !errors.Is(err, sms.ErrOperationConflict) {
 		t.Fatalf("conflicting replay error = %v", err)
+	}
+}
+
+func TestPersistentLineResolvesSimulatorTransportWithoutLeakingRuntimeIdentity(t *testing.T) {
+	ctx := context.Background()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	rawInventory := inventory.NewSimulator(stores)
+	modems, err := modemapp.New(stores, rawInventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modemCandidates, err := modems.Candidates(ctx)
+	if err != nil || len(modemCandidates) < 1 {
+		t.Fatalf("modem candidates=%#v error=%v", modemCandidates, err)
+	}
+	if _, err := modems.Add(ctx, modemCandidates[0].CandidateID); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := lineapp.New(stores, rawInventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lineCandidates, err := lines.Candidates(ctx)
+	if err != nil || len(lineCandidates) != 1 {
+		t.Fatalf("line candidates=%#v error=%v", lineCandidates, err)
+	}
+	created, err := lines.Add(ctx, lineCandidates[0].CandidateID, "Simulator primary", accessmode.CellularNative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dispatched SendSMSCommand
+	service, err := NewService(ctx, stores, lines, senderFunc(func(_ context.Context, command SendSMSCommand) (SendSMSResult, error) {
+		dispatched = command
+		return SendSMSResult{ProviderMessageID: "provider-stable-line"}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Send(ctx, SendRequest{
+		OperationID: "operation-stable-line-0001", LineID: created.ID,
+		Destination: "+8613800138000", Body: "stable Line",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if dispatched.LineID != created.ID || dispatched.PhysicalDeviceID != "simulator-device-1" ||
+		dispatched.ModemFunctionID != "simulator-function-1" || dispatched.LineID == "simulator-line-1" {
+		t.Fatalf("dispatched=%#v", dispatched)
 	}
 }
 
@@ -164,7 +244,7 @@ func TestSendSerializesCommandsPerModem(t *testing.T) {
 		go func() {
 			_, err := service.Send(context.Background(), SendRequest{
 				OperationID: []string{"operation-0123456789abcdef", "operation-fedcba9876543210"}[index],
-				LineID:      "simulator-line-1", Destination: destination, Body: "serialized",
+				LineID:      testManagedLineID1, Destination: destination, Body: "serialized",
 			})
 			results <- err
 		}()
@@ -211,10 +291,10 @@ func TestSendAllowsIndependentModemsToProgressConcurrently(t *testing.T) {
 	if err := stores.PutSubscriptionProfileAccessMode(context.Background(), "simulator-profile-2", accessmode.CellularNative); err != nil {
 		t.Fatal(err)
 	}
-	service.lines = inventory.NewMultiSimulator(stores)
+	service.lines = managedTestLines(inventory.NewMultiSimulator(stores))
 
 	results := make(chan error, 2)
-	for index, lineID := range []string{"simulator-line-1", "simulator-line-2"} {
+	for index, lineID := range []string{testManagedLineID1, testManagedLineID2} {
 		index, lineID := index, lineID
 		go func() {
 			_, err := service.Send(context.Background(), SendRequest{
@@ -254,7 +334,7 @@ func TestHostVoWiFiSMSRequiresOnlineFailClosedAccessPath(t *testing.T) {
 	if err := stores.PutSubscriptionProfileAccessMode(context.Background(), "simulator-profile-1", accessmode.HostVoWiFiOnly); err != nil {
 		t.Fatal(err)
 	}
-	request := SendRequest{OperationID: "operation-vowifi-sms-001", LineID: "simulator-line-1", Destination: "13800138000", Body: "VoWiFi"}
+	request := SendRequest{OperationID: "operation-vowifi-sms-001", LineID: testManagedLineID1, Destination: "13800138000", Body: "VoWiFi"}
 	service.UseAccessPathGuard(messagingAccessGuard(false))
 	if _, err := service.Send(context.Background(), request); !errors.Is(err, ErrLineUnavailable) {
 		t.Fatalf("offline error=%v", err)
@@ -274,7 +354,7 @@ func TestTransportFailureBecomesDurableMessageState(t *testing.T) {
 		return SendSMSResult{}, &TransportError{Code: "MODEM_REJECTED"}
 	}))
 	result, err := service.Send(context.Background(), SendRequest{
-		OperationID: "operation-0123456789abcdef", LineID: "simulator-line-1",
+		OperationID: "operation-0123456789abcdef", LineID: testManagedLineID1,
 		Destination: "13800138000", Body: "will fail",
 	})
 	if err != nil {
@@ -297,7 +377,7 @@ func TestUnknownTransportOutcomeBecomesDurableUnconfirmedState(t *testing.T) {
 		return SendSMSResult{}, &TransportError{Code: ErrorSendOutcomeUnknown}
 	}))
 	request := SendRequest{
-		OperationID: "operation-unknown01234567", LineID: "simulator-line-1",
+		OperationID: "operation-unknown01234567", LineID: testManagedLineID1,
 		Destination: "13800138000", Body: "may have been sent",
 	}
 	result, err := service.Send(context.Background(), request)
@@ -354,14 +434,14 @@ func TestServiceStartupDoesNotRedispatchInterruptedQueuedSMS(t *testing.T) {
 	createdAt := time.Now().Add(-time.Minute).UTC()
 	_, _, err = stores.CreateOutboundSMS(ctx, sms.Message{
 		ID: "msg_0123456789abcdef012345", OperationID: "operation-0123456789abcdef",
-		Direction: sms.DirectionOutbound, LineID: "simulator-line-1", RemoteAddress: "13800138000",
+		Direction: sms.DirectionOutbound, LineID: testManagedLineID1, RemoteAddress: "13800138000",
 		Body: "interrupted", Status: sms.StatusQueued, CreatedAt: createdAt, UpdatedAt: createdAt,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	transportCalls := 0
-	service, err := NewService(ctx, stores, inventory.NewSimulator(stores), senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator(stores)), senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
 		transportCalls++
 		return SendSMSResult{ProviderMessageID: "unexpected"}, nil
 	}))
@@ -386,11 +466,11 @@ func TestSendRejectsInvalidOrUnavailableInputsWithoutPersistence(t *testing.T) {
 		expected error
 	}{
 		"invalid destination": {
-			request:  SendRequest{OperationID: "operation-0123456789abcdef", LineID: "simulator-line-1", Destination: "not-a-number", Body: "body"},
+			request:  SendRequest{OperationID: "operation-0123456789abcdef", LineID: testManagedLineID1, Destination: "not-a-number", Body: "body"},
 			expected: ErrRequestInvalid,
 		},
 		"unknown line": {
-			request:  SendRequest{OperationID: "operation-0123456789abcdef", LineID: "missing-line", Destination: "13800138000", Body: "body"},
+			request:  SendRequest{OperationID: "operation-0123456789abcdef", LineID: testManagedLineID2, Destination: "13800138000", Body: "body"},
 			expected: ErrLineNotFound,
 		},
 	} {
@@ -412,7 +492,7 @@ func TestSendRejectsInvalidOrUnavailableInputsWithoutPersistence(t *testing.T) {
 func TestSendWithoutRuntimeTransportFailsBeforePersistence(t *testing.T) {
 	service, _ := newTestService(t, nil)
 	_, err := service.Send(context.Background(), SendRequest{
-		OperationID: "operation-0123456789abcdef", LineID: "simulator-line-1",
+		OperationID: "operation-0123456789abcdef", LineID: testManagedLineID1,
 		Destination: "13800138000", Body: "must not queue",
 	})
 	if !errors.Is(err, ErrTransportUnavailable) {
@@ -443,7 +523,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	gateway, backend := newAgentGatewayForTest(t, inbound)
 	inbox := &failOnceInbox{Inbox: gateway}
-	service, err := NewService(ctx, stores, inventory.NewSimulator(stores), gateway, inbox)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator(stores)), gateway, inbox)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +554,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 
 	restartedGateway, restartedBackend := newAgentGatewayForTest(t, inbound)
-	restarted, err := NewService(ctx, stores, inventory.NewSimulator(stores), restartedGateway, restartedGateway)
+	restarted, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator(stores)), restartedGateway, restartedGateway)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +596,7 @@ func TestInboundSyncDoesNotAcknowledgePersistenceFailure(t *testing.T) {
 		Body: "must remain in Agent", ReceivedAt: time.Date(2026, 8, 3, 14, 0, 0, 0, time.UTC),
 	}
 	gateway, backend := newAgentGatewayForTest(t, inbound)
-	service, err := NewService(ctx, failingInboundRepository{Set: stores}, inventory.NewSimulator(stores), gateway, gateway)
+	service, err := NewService(ctx, failingInboundRepository{Set: stores}, managedTestLines(inventory.NewSimulator(stores)), gateway, gateway)
 	if err != nil {
 		t.Fatal(err)
 	}

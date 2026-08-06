@@ -2,46 +2,59 @@ package hardwareprobe
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/modemadapter"
 )
 
 type fakeQuerier struct {
-	endpoint string
-	profile  string
-	commands int
+	endpoint               string
+	profile                string
+	equipmentFingerprint   string
+	probeState             string
+	sim                    agentapi.SIMObservation
+	simIdentityFingerprint string
+	simIdentityHint        string
 }
 
-func (querier *fakeQuerier) Probe(_ context.Context, endpoint, profile string) agentapi.DeviceProbe {
+func (querier *fakeQuerier) Probe(_ context.Context, endpoint string, adapter modemadapter.Adapter) agentapi.DeviceProbe {
 	querier.endpoint = endpoint
-	querier.profile = profile
+	querier.profile = adapter.Profile()
 	count := 0
+	state := querier.probeState
+	if state == "" {
+		state = agentapi.ProbeStateComplete
+	}
+	sim := querier.sim
+	if sim.State == "" {
+		sim = agentapi.SIMObservation{State: agentapi.SIMStateAbsent, PrimaryLockState: agentapi.PrimaryLockUnknown}
+	}
+	sim.IdentityFingerprint = querier.simIdentityFingerprint
+	sim.DisplayIdentityHint = querier.simIdentityHint
 	return agentapi.DeviceProbe{
-		State:           agentapi.ProbeStateComplete,
+		State:           state,
 		RF:              agentapi.RFObservation{State: agentapi.RFStateOff},
-		SIM:             agentapi.SIMObservation{State: agentapi.SIMStateAbsent, PrimaryLockState: agentapi.PrimaryLockUnknown},
+		SIM:             sim,
 		SignalMetrics:   agentapi.SignalObservation{State: agentapi.SignalStateUnknown},
 		Registrations:   []agentapi.RegistrationObservation{},
 		CurrentNetwork:  agentapi.NetworkObservation{SelectionMode: agentapi.NetworkSelectionUnknown},
 		ActiveCallCount: &count,
+		Identity:        agentapi.ModemIdentity{EquipmentIdentityFingerprint: querier.equipmentFingerprint},
 	}
 }
 
-func (querier *fakeQuerier) EnsureRadioOff(_ context.Context, endpoint, profile string) agentapi.RadioEnsureOffExecution {
-	querier.endpoint = endpoint
-	querier.profile = profile
-	querier.commands++
-	count := 0
-	return agentapi.RadioEnsureOffExecution{
-		Observation: agentapi.RadioEnsureOffObservation{
-			RF: agentapi.RFObservation{State: agentapi.RFStateOff}, ActiveCallCount: &count,
-		},
-	}
+type deterministicPseudonymizer struct{}
+
+func (deterministicPseudonymizer) Pseudonym(label string, value []byte) (string, error) {
+	digest := sha256.Sum256(append(append([]byte(label), 0), value...))
+	return fmt.Sprintf("%x", digest[:]), nil
 }
 
 func TestStableDeviceIDNormalizesHubPortSeparators(t *testing.T) {
@@ -73,8 +86,8 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 	writeInterface(t, usbRoot, "1-3:1.2", 2, "ff", "00", "00", "option", "ttyUSB6")
 	writeUSBDevice(t, usbRoot, "2-1", map[string]string{"idVendor": "1234", "idProduct": "5678", "product": "ignored"})
 
-	querier := &fakeQuerier{}
-	scanner := &Scanner{USBRoot: usbRoot, DevRoot: devRoot, Querier: querier}
+	querier := &fakeQuerier{equipmentFingerprint: strings.Repeat("e", 64)}
+	scanner := &Scanner{USBRoot: usbRoot, DevRoot: devRoot, Querier: querier, Identities: deterministicPseudonymizer{}}
 	devices, err := scanner.Scan(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +98,10 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 	qdc := devices[0]
 	if qdc.ID != "usb-1-1" || qdc.Profile != agentapi.ProfileQDC507 || !qdc.USB.SerialPresent {
 		t.Fatalf("qdc = %#v", qdc)
+	}
+	if !fingerprintPattern.MatchString(qdc.USB.SerialFingerprint) || !fingerprintPattern.MatchString(devices[1].USB.SerialFingerprint) ||
+		qdc.USB.SerialFingerprint == devices[1].USB.SerialFingerprint {
+		t.Fatalf("USB serial fingerprints were not stable, distinct pseudonyms: %#v", devices)
 	}
 	encoded, err := json.Marshal(devices)
 	if err != nil {
@@ -110,15 +127,23 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 	if len(probes) != 1 || probes[0].State != agentapi.ProbeStateComplete {
 		t.Fatalf("probes = %#v", probes)
 	}
-	if querier.endpoint != filepath.Join(devRoot, "ttyUSB2") || querier.profile != agentapi.ProfileQDC507 {
-		t.Fatalf("query = endpoint %q profile %q", querier.endpoint, querier.profile)
+	if querier.endpoint != filepath.Join(devRoot, "ttyUSB2") {
+		t.Fatalf("query endpoint = %q", querier.endpoint)
+	}
+	if querier.profile != agentapi.ProfileQDC507 {
+		t.Fatalf("QDC507 adapter profile = %q", querier.profile)
 	}
 	if _, err := scanner.Probe(context.Background(), snapshot, []string{"missing"}); err == nil {
 		t.Fatal("missing device probe unexpectedly succeeded")
 	}
+	ml307aProbes, err := scanner.Probe(context.Background(), snapshot, []string{devices[1].ID})
+	if err != nil || len(ml307aProbes) != 1 || ml307aProbes[0].Identity.EquipmentIdentityFingerprint != querier.equipmentFingerprint ||
+		querier.profile != agentapi.ProfileML307A {
+		t.Fatalf("ML307A adapter routing probes=%#v profile=%q error=%v", ml307aProbes, querier.profile, err)
+	}
 }
 
-func TestScannerReportsMissingPreferredQDC507EndpointAsRetryableDeviceError(t *testing.T) {
+func TestScannerReportsMissingPreferredATEndpointAsRetryableDeviceError(t *testing.T) {
 	scanner := &Scanner{USBRoot: "/unused", DevRoot: "/dev", Querier: &fakeQuerier{}}
 	snapshot := agentapi.Snapshot{Generation: 7, Devices: []agentapi.DeviceReport{{
 		ID: "usb-1-1", Profile: agentapi.ProfileQDC507,
@@ -147,7 +172,7 @@ func TestScannerReportsMissingPreferredQDC507EndpointAsRetryableDeviceError(t *t
 	}
 }
 
-func TestScannerDescriptorOnlyProbeUsesTypedDefaults(t *testing.T) {
+func TestScannerReportsMissingML307AEndpointWithTypedDefaults(t *testing.T) {
 	scanner := &Scanner{USBRoot: "/unused", DevRoot: "/dev", Querier: &fakeQuerier{}}
 	snapshot := agentapi.Snapshot{Generation: 3, Devices: []agentapi.DeviceReport{{
 		ID: "usb-1-3", Profile: agentapi.ProfileML307A,
@@ -156,30 +181,38 @@ func TestScannerDescriptorOnlyProbeUsesTypedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(probes) != 1 || probes[0].State != agentapi.ProbeStateDescriptorOnly ||
+	if len(probes) != 1 || probes[0].State != agentapi.ProbeStateUnavailable || probes[0].ErrorCode != agentapi.ErrorControlEndpointMissing ||
 		probes[0].SIM.PrimaryLockState != agentapi.PrimaryLockUnknown || probes[0].Registrations == nil {
-		t.Fatalf("descriptor-only probe = %#v", probes)
+		t.Fatalf("missing-endpoint probe = %#v", probes)
 	}
 }
 
-func TestScannerRoutesEnsureRadioOffOnlyToPreferredQDC507Endpoint(t *testing.T) {
-	querier := &fakeQuerier{}
-	scanner := &Scanner{USBRoot: "/unused", DevRoot: "/dev", Querier: querier}
-	snapshot := agentapi.Snapshot{Generation: 9, Devices: []agentapi.DeviceReport{{
-		ID: "usb-1-1", Profile: agentapi.ProfileQDC507,
-		Interfaces: []agentapi.USBInterface{{
-			Number: 2,
-			Endpoints: []agentapi.Endpoint{{
-				Kind: agentapi.EndpointTTY, InterfaceNumber: 2, Node: "/dev/ttyUSB2",
-			}},
-		}},
-	}}}
-	execution, err := scanner.EnsureRadioOff(context.Background(), snapshot, "usb-1-1")
-	if err != nil || execution.Error != nil || execution.Observation.RF.State != agentapi.RFStateOff {
-		t.Fatalf("execution=%#v err=%v", execution, err)
+func TestScannerReadsStableIdentitiesIndependentlyFromCompositeProbeState(t *testing.T) {
+	equipmentFingerprint := strings.Repeat("e", 64)
+	simFingerprint := strings.Repeat("f", 64)
+	querier := &fakeQuerier{
+		probeState: agentapi.ProbeStateFailed, equipmentFingerprint: equipmentFingerprint,
+		sim:                    agentapi.SIMObservation{State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady},
+		simIdentityFingerprint: simFingerprint, simIdentityHint: "ICCID •••• 1234",
 	}
-	if querier.commands != 1 || querier.endpoint != "/dev/ttyUSB2" || querier.profile != agentapi.ProfileQDC507 {
-		t.Fatalf("commands=%d endpoint=%q profile=%q", querier.commands, querier.endpoint, querier.profile)
+	scanner := &Scanner{USBRoot: "/unused", DevRoot: "/dev", Querier: querier}
+	snapshot := agentapi.Snapshot{Generation: 4, Devices: []agentapi.DeviceReport{{
+		ID: "usb-1-3", Profile: agentapi.ProfileML307A,
+		Interfaces: []agentapi.USBInterface{{Number: 2, Endpoints: []agentapi.Endpoint{{
+			Kind: agentapi.EndpointTTY, InterfaceNumber: 2, Node: "/dev/fixture-ml307a",
+		}}}},
+	}}}
+	probes, err := scanner.Probe(t.Context(), snapshot, nil)
+	if err != nil || len(probes) != 1 {
+		t.Fatalf("probes=%#v error=%v", probes, err)
+	}
+	probe := probes[0]
+	if probe.State != agentapi.ProbeStateFailed || probe.Identity.EquipmentIdentityFingerprint != equipmentFingerprint ||
+		probe.SIM.IdentityFingerprint != simFingerprint || probe.SIM.DisplayIdentityHint != "ICCID •••• 1234" {
+		t.Fatalf("independent identity observations = %#v", probe)
+	}
+	if querier.profile != agentapi.ProfileML307A {
+		t.Fatalf("adapter profile = %q", querier.profile)
 	}
 }
 

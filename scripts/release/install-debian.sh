@@ -45,7 +45,7 @@ install -o root -g root -m 0644 "$tmp/90-simplus-vowifi.conf" /etc/sysctl.d/90-s
 /usr/sbin/sysctl -p /etc/sysctl.d/90-simplus-vowifi.conf >/dev/null
 cat >"$tmp/simplus-agent.service" <<EOF
 [Unit]
-Description=Simplus read-only hardware Agent
+Description=Simplus typed hardware Agent
 Requires=simplus-ml307a-bind.service
 After=local-fs.target simplus-ml307a-bind.service
 [Service]

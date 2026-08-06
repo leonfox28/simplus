@@ -1,4 +1,4 @@
-package hardwareprobe
+package modemadapter
 
 import (
 	"context"

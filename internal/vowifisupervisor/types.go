@@ -45,13 +45,14 @@ var (
 	errorCodePattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 )
 
-// StartRequest deliberately contains only stable business selections. The
-// privileged supervisor resolves all executable paths, ports, network object
-// names and current SIM/Agent fences itself.
+// StartRequest contains a stable business Line and the current opaque hardware
+// target resolved by the unprivileged application. The privileged supervisor
+// still resolves every executable path, port and kernel object itself.
 type StartRequest struct {
-	LineID      string `json:"lineId"`
-	EgressMode  string `json:"egressMode"`
-	CountryCode string `json:"countryCode"`
+	LineID         string `json:"lineId"`
+	HardwareLineID string `json:"hardwareLineId"`
+	EgressMode     string `json:"egressMode"`
+	CountryCode    string `json:"countryCode"`
 }
 
 type StopRequest struct {
@@ -182,7 +183,7 @@ type SMSAPI interface {
 }
 
 func validSMSSendRequest(request SMSSendRequest) bool {
-	return hardwareLinePattern.MatchString(request.LineID) && smsOperationPattern.MatchString(request.OperationID) &&
+	return managedLinePattern.MatchString(request.LineID) && smsOperationPattern.MatchString(request.OperationID) &&
 		smsOperationPattern.MatchString(request.MessageID) &&
 		smsAddressPattern.MatchString(request.Destination) && strings.TrimSpace(request.Body) != "" &&
 		utf8.ValidString(request.Body) && utf8.RuneCountInString(request.Body) <= 1600 && len(request.Body) <= 6400
@@ -203,7 +204,7 @@ func validSMSSendResponse(response SMSSendResponse) bool {
 }
 
 func validSMSMessageRequest(lineID, messageID string) bool {
-	return hardwareLinePattern.MatchString(lineID) && smsOperationPattern.MatchString(messageID)
+	return managedLinePattern.MatchString(lineID) && smsOperationPattern.MatchString(messageID)
 }
 
 func validSMSAcknowledgeRequest(request SMSAcknowledgeRequest) bool {
@@ -211,7 +212,7 @@ func validSMSAcknowledgeRequest(request SMSAcknowledgeRequest) bool {
 }
 
 func validSMSSubmitReportAcknowledgeRequest(request SMSSubmitReportAcknowledgeRequest) bool {
-	return hardwareLinePattern.MatchString(request.LineID) && smsOperationPattern.MatchString(request.OperationID) &&
+	return managedLinePattern.MatchString(request.LineID) && smsOperationPattern.MatchString(request.OperationID) &&
 		smsOperationPattern.MatchString(request.ProviderMessageID)
 }
 

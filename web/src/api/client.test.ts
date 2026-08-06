@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   completeSetup,
+  configureAccessPath,
+  addManagedLine,
   activateVoWiFiLine,
   confirmSetupHardware,
   confirmSetupHTTPS,
@@ -16,6 +18,11 @@ import {
   getSetupStatus,
   getSystemHealth,
   listLineEgressBindings,
+  listAccessPaths,
+  listLineCandidates,
+  listManagedModems,
+  listModemCandidates,
+  listManagedLines,
   listVoWiFiLines,
   listSMSMessages,
   login,
@@ -28,6 +35,7 @@ import {
   putSubscriptionProfileAccessMode,
   deactivateVoWiFiLine,
   sendSMSMessage,
+  updateManagedLine,
 } from './client'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -561,9 +569,96 @@ describe('Mihomo subscription API client', () => {
   })
 })
 
+describe('managed Modem API client', () => {
+  const capabilities = {
+    simAccess: true, sms: false, cellularVoice: false, digitalVoiceMedia: false, usbUac: false,
+    simApdu: true, hostVoWifiAuth: true, rfControl: true, networkScan: false,
+    manualNetworkSelection: false, primarySimLockState: true, pin1Verify: false,
+    puk1Unblock: false, euiccProfiles: false,
+  }
+  const modem = {
+    id: 'modem_AQEBAQEBAQEBAQEBAQEBAQ', displayName: 'ML307A', model: 'ML307A', transport: 'usb',
+    state: 'online', capabilities, rfState: 'off', simPresence: 'present', addedAt: '2026-08-05T12:00:00Z',
+  }
+  const candidate = {
+    candidateId: 'agent-usb-1-3', model: 'ML307A', transport: 'usb', supportStatus: 'supported',
+    addable: true, readinessReason: 'READY', capabilities, simPresence: 'absent',
+  }
+
+  it('accepts typed present and absent SIM observations', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ modems: [modem] }))
+      .mockResolvedValueOnce(Response.json({ candidates: [candidate] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listManagedModems()).resolves.toEqual([modem])
+    await expect(listModemCandidates()).resolves.toEqual([candidate])
+  })
+
+  it('rejects a managed Modem response without an explicit SIM observation', async () => {
+    const { simPresence: _, ...invalid } = modem
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ modems: [invalid] })))
+
+    await expect(listManagedModems()).rejects.toThrow('MODEM_LIST_RESPONSE_INVALID')
+  })
+
+  it('rejects a Modem candidate without a typed readiness reason', async () => {
+    const { readinessReason: _, ...invalid } = candidate
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ candidates: [invalid] })))
+
+    await expect(listModemCandidates()).rejects.toThrow('MODEM_CANDIDATE_RESPONSE_INVALID')
+  })
+})
+
+describe('managed Line API client', () => {
+  const capabilities = {
+    simAccess: true, sms: false, cellularVoice: false, digitalVoiceMedia: false, usbUac: false,
+    simApdu: true, hostVoWifiAuth: true, rfControl: false, networkScan: false,
+    manualNetworkSelection: false, primarySimLockState: false, pin1Verify: false,
+    puk1Unblock: false, euiccProfiles: false,
+  }
+  const line = {
+    id: 'line_AQEBAQEBAQEBAQEBAQEBAQ',
+    displayName: 'VOXI',
+    managedModemId: 'modem_AQEBAQEBAQEBAQEBAQEBAQ',
+    managedModemDisplayName: 'ML307A',
+    subscriptionDisplayHint: 'ICCID •••• 5553',
+    accessMode: 'host-vowifi-only' as const,
+    state: 'ready' as const,
+    capabilities,
+    createdAt: '2026-08-05T12:00:00Z',
+  }
+  const candidate = {
+    candidateId: 'line-candidate-0123456789abcdef0123456789abcdef',
+    managedModemId: line.managedModemId,
+    managedModemDisplayName: line.managedModemDisplayName,
+    subscriptionDisplayHint: line.subscriptionDisplayHint,
+    capabilities,
+    addable: true,
+  }
+
+  it('lists candidates and performs typed create/update mutations', async () => {
+    document.cookie = 'simplus_csrf=line-csrf; path=/'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ lines: [line] }))
+      .mockResolvedValueOnce(Response.json({ candidates: [candidate] }))
+      .mockResolvedValueOnce(Response.json(line, { status: 201 }))
+      .mockResolvedValueOnce(Response.json({ ...line, displayName: 'VOXI primary' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listManagedLines()).resolves.toEqual([line])
+    await expect(listLineCandidates()).resolves.toEqual([candidate])
+    await expect(addManagedLine({ candidateId: candidate.candidateId, displayName: line.displayName, accessMode: line.accessMode })).resolves.toEqual(line)
+    await expect(updateManagedLine(line.id, { displayName: 'VOXI primary', accessMode: line.accessMode })).resolves.toEqual({ ...line, displayName: 'VOXI primary' })
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/lines')
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/v1/lines/${line.id}`)
+    expect(new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get('X-Simplus-CSRF')).toBe('line-csrf')
+  })
+})
+
 describe('Line egress API client', () => {
   const binding = {
-    lineId: 'simulator-line-1',
+    lineId: 'line_AQEBAQEBAQEBAQEBAQEBAQ',
     mode: 'mihomo-country' as const,
     countryCode: 'GB',
     countryName: '英国',
@@ -582,7 +677,7 @@ describe('Line egress API client', () => {
     await expect(listLineEgressBindings()).resolves.toEqual([binding])
     await expect(putLineEgressBinding(binding.lineId, { mode: binding.mode, countryCode: 'GB' })).resolves.toEqual(binding)
     const [path, init] = fetchMock.mock.calls[1] as [string, RequestInit]
-    expect(path).toBe('/api/v1/lines/simulator-line-1/egress')
+    expect(path).toBe('/api/v1/lines/line_AQEBAQEBAQEBAQEBAQEBAQ/egress')
     expect(init.method).toBe('PUT')
     expect(init.body).toBe('{"mode":"mihomo-country","countryCode":"GB"}')
     expect(new Headers(init.headers).get('X-Simplus-CSRF')).toBe('line-egress-csrf')
@@ -591,13 +686,13 @@ describe('Line egress API client', () => {
   it('rejects an inconsistent direct binding before dispatch', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    await expect(putLineEgressBinding('simulator-line-1', { mode: 'direct', countryCode: 'GB' })).rejects.toThrow('LINE_EGRESS_REQUEST_INVALID')
+    await expect(putLineEgressBinding('line_AQEBAQEBAQEBAQEBAQEBAQ', { mode: 'direct', countryCode: 'GB' })).rejects.toThrow('LINE_EGRESS_REQUEST_INVALID')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
 describe('Host VoWiFi API client', () => {
-  const lineID = 'agent-line-0123456789abcdef0123456789abcdef'
+  const lineID = 'line_AQEBAQEBAQEBAQEBAQEBAQ'
   const online = {
     lineId: lineID,
     desiredActive: true,
@@ -642,12 +737,45 @@ describe('Host VoWiFi API client', () => {
   })
 })
 
+describe('Simulator access-path API client', () => {
+  const lineId = 'line_AQEBAQEBAQEBAQEBAQEBAQ'
+  const state = {
+    lineId,
+    mode: 'mihomo-required',
+    mihomoState: 'failed',
+    lineState: 'offline',
+    authentication: 'simulated-aka-complete',
+    epdg: 'blocked',
+    ims: 'offline',
+    directFallback: false,
+  }
+
+  it('uses stable business Line IDs for list and update', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ lines: [state] }))
+      .mockResolvedValueOnce(Response.json(state))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listAccessPaths()).resolves.toEqual([state])
+    await expect(configureAccessPath(lineId, { mode: 'mihomo-required', mihomoState: 'failed' })).resolves.toEqual(state)
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/v1/access-paths/${lineId}`)
+  })
+
+  it('rejects the former hard-coded Simulator Line before transport', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(configureAccessPath('simulator-line-1', { mode: 'direct', mihomoState: 'stopped' })).rejects.toThrow('ACCESS_PATH_REQUEST_INVALID')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('SMS API client', () => {
   const sentMessage = {
     id: 'msg_0123456789abcdef012345',
     operationId: 'operation-0123456789abcdef',
     direction: 'outbound',
-    lineId: 'simulator-line-1',
+    lineId: 'line_AQEBAQEBAQEBAQEBAQEBAQ',
     remoteAddress: '+8613800138000',
     body: 'hello simulator',
     status: 'sent',

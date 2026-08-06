@@ -23,10 +23,15 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 
 ### 3.1 模组与线路
 
-- 发现支持的模组并显示型号、SIM 状态、注册状态和信号；
-- 为每个可用模组展示一个易懂的 `Modem / SIM / Line` 视图；
+- 扫描支持的模组，在“添加模组”对话框中显示尚未添加设备的型号、支持状态和能力；
+- 只有管理员明确添加的模组才进入模组列表；热插拔只改变在线状态，不自动创建或删除业务配置；
+- 已添加模组使用 IMEI 的每实例不可逆指纹保持稳定绑定；USB 端口名只作当前定位，换插口不创建新模组，缺失或冲突身份不得猜测绑定；
+- 管理员随后从已添加模组当前可确认的 SIM/Profile 候选创建稳定 `Line`；USB 端口变化不改变 Line，模组离线或 SIM/Profile 更换只会令原 Line 不可用，不得自动改绑；
+- 为每个已添加模组展示易懂的 `Modem / SIM / Line` 视图；
 - 支持少量模组并行，但同一模组上的命令串行执行；
 - 模组断开、重连或命令失败时给出明确状态。
+- RF 开关和受支持型号的上电 RF 策略属于模组；Host VoWiFi 属于 Line，二者互不隐式控制。
+- 没有显式创建 Line 时，短信、电话、出口和 Host VoWiFi 页面不得把动态扫描结果当作可操作线路。
 
 ### 3.2 短信
 
@@ -129,4 +134,4 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 11. SMS over IMS 先通过 fixture 验证 RPDU、SIP transaction、异步提交报告和 persist-before-RP-ACK，再在单独授权下完成真实单段与长短信收发；
 12. 安装和运行步骤可以由仓库文档在目标机器上复现。
 
-真实硬件默认禁止开启/关闭射频、建立蜂窝数据流量，以及短信、电话、eUICC 切换等任何会改变模组、SIM、网络或外部通信状态的操作。ML307A Host VoWiFi 注册仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；真实 SMS over IMS 还必须遵循 [`0016`](decisions/0016-vowifi-sms-over-ims.md) 的单独授权，其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。
+真实硬件默认禁止修改上电策略、建立蜂窝数据流量，以及短信、电话、eUICC 切换等会改变模组、SIM、网络或外部通信状态的操作。ML307A 运行时 RF 开关按 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md) 作为窄化例外：只接受明确的开关目标，使用型号固定命令并读回确认；它不等于已验证上电策略，也不允许 HIL 在未授权时实际切换。ML307A Host VoWiFi 注册仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；真实 SMS over IMS 还必须遵循 [`0016`](decisions/0016-vowifi-sms-over-ims.md) 的单独授权，其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。

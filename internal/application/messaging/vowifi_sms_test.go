@@ -46,7 +46,7 @@ func TestVoWiFiAcceptedSubmissionIsFinalizedByLaterRPACK(t *testing.T) {
 	}
 	service, stores := newTestService(t, gateway)
 	line := inventory.Line{
-		ID: "agent-line-0123456789abcdef0123456789abcdef", PhysicalDeviceID: "usb-device",
+		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
 		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
 		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
@@ -167,7 +167,7 @@ func TestVoWiFiGatewayAllowsHostLineWithoutCellularSMSCapability(t *testing.T) {
 	}
 	service, stores := newTestService(t, gateway)
 	line := inventory.Line{
-		ID: "agent-line-0123456789abcdef0123456789abcdef", PhysicalDeviceID: "usb-device",
+		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
 		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
 		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
 		Capabilities: hardware.Capabilities{SMS: false, HostVoWiFiAuth: true},
@@ -200,7 +200,7 @@ func TestVoWiFiGatewayDoesNotCaptureCellularSMSLine(t *testing.T) {
 	}
 	service, _ := newTestService(t, gateway)
 	line := inventory.Line{
-		ID: "agent-line-0123456789abcdef0123456789abcdef", PhysicalDeviceID: "usb-device",
+		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
 		ModemFunctionID: "modem-function", State: inventory.LineReady,
 		AccessMode: accessmode.CellularNative, Capabilities: hardware.Capabilities{SMS: true},
 	}
@@ -222,7 +222,7 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := inventory.Line{
-		ID: "agent-line-0123456789abcdef0123456789abcdef", PhysicalDeviceID: "usb-device",
+		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
 		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
 		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},

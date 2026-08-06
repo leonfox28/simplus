@@ -152,7 +152,7 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 		return fail(err)
 	}
 	defer zeroBytes(response)
-	initialSummary, err := ParseIMSInitialResponse(response, session.input.CallID)
+	initialSummary, err := ParseIMSInitialResponse(response, session.input.CallID, session.input.HomeDomain)
 	if err != nil {
 		return fail(err)
 	}
@@ -174,7 +174,7 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 			return fail(err)
 		}
 		defer zeroBytes(response)
-		initialSummary, err = ParseIMSInitialResponse(response, session.input.CallID)
+		initialSummary, err = ParseIMSInitialResponse(response, session.input.CallID, session.input.HomeDomain)
 		if err != nil {
 			return fail(err)
 		}
@@ -182,7 +182,7 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 	if initialSummary.Status != 401 {
 		return fail(errors.New("IMS initial registration was not challenged"))
 	}
-	challenge, err := ExtractIMSRegistrationChallenge(response, session.input.CallID)
+	challenge, err := ExtractIMSRegistrationChallenge(response, session.input.CallID, session.input.HomeDomain)
 	if err != nil {
 		return fail(err)
 	}

@@ -7,10 +7,11 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/leonfox28/simplus/internal/agentapi"
 )
 
 const (
-	IMSHomeDomain                 = "ims.mnc015.mcc234.3gppnetwork.org"
 	IMSSIPPort                    = 5060
 	DefaultIMSRegistrationExpires = uint32(1800)
 )
@@ -84,9 +85,9 @@ func smsCapabilityParameter(capable bool) string {
 	return ""
 }
 
-func ParseIMSInitialResponse(packet []byte, expectedCallID string) (IMSInitialResponseSummary, error) {
+func ParseIMSInitialResponse(packet []byte, expectedCallID, expectedHomeDomain string) (IMSInitialResponseSummary, error) {
 	status, headers, err := parseSIPResponse(packet)
-	if err != nil || !validIMSCallID(expectedCallID) {
+	if err != nil || !validIMSCallID(expectedCallID) || !agentapi.IsValidIMSHomeDomain(expectedHomeDomain) {
 		return IMSInitialResponseSummary{}, errors.New("invalid SIP response")
 	}
 	callIDs := headers["call-id"]
@@ -113,7 +114,7 @@ func ParseIMSInitialResponse(packet []byte, expectedCallID string) (IMSInitialRe
 	if status != 401 {
 		return summary, nil
 	}
-	algorithm, nonceValid := inspectAKAChallenge(headers["www-authenticate"])
+	algorithm, nonceValid := inspectAKAChallenge(headers["www-authenticate"], expectedHomeDomain)
 	summary.AKAAlgorithm = algorithm
 	summary.NonceValid = nonceValid
 	for _, value := range headers["security-server"] {
@@ -135,11 +136,11 @@ func ParseIMSInitialResponse(packet []byte, expectedCallID string) (IMSInitialRe
 
 func validateIMSInitialRegisterInput(input IMSInitialRegisterInput) error {
 	if !input.Source.Is4() || !input.Source.IsPrivate() || input.Source.IsLoopback() || input.Source.IsUnspecified() ||
-		input.HomeDomain != IMSHomeDomain || input.UnprotectedPort == 0 || input.ProtectedClientPort == 0 ||
+		!agentapi.IsValidIMSHomeDomain(input.HomeDomain) || input.UnprotectedPort == 0 || input.ProtectedClientPort == 0 ||
 		input.ProtectedServerPort == 0 || input.ProtectedClientPort == input.ProtectedServerPort ||
 		input.ProtectedClientPort == IMSSIPPort || input.ProtectedServerPort == IMSSIPPort ||
 		input.ClientSPI < 1_000_000_000 || input.ServerSPI < 1_000_000_000 || input.ClientSPI == input.ServerSPI ||
-		!strings.HasSuffix(input.PrivateIdentity, "@"+IMSHomeDomain) ||
+		!agentapi.IsValidIMSPrivateIdentity(input.PrivateIdentity, input.HomeDomain) ||
 		input.PublicIdentity != "sip:"+input.PrivateIdentity ||
 		!validIMSToken(input.Branch, 16, 64) || !validIMSToken(input.FromTag, 16, 64) ||
 		!validIMSCallID(input.CallID) || !validIMSToken(input.ContactUser, 16, 64) {
@@ -239,7 +240,7 @@ func parseSIPResponse(packet []byte) (int, map[string][]string, error) {
 	return status, headers, nil
 }
 
-func inspectAKAChallenge(values []string) (string, bool) {
+func inspectAKAChallenge(values []string, expectedRealm string) (string, bool) {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if len(value) < 7 || !strings.EqualFold(value[:7], "Digest ") {
@@ -250,7 +251,7 @@ func inspectAKAChallenge(values []string) (string, bool) {
 		if algorithm != "AKAv1-MD5" && algorithm != "AKAv2-SHA-256" {
 			continue
 		}
-		if parameters["realm"] != IMSHomeDomain || parameters["nonce"] == "" {
+		if parameters["realm"] != expectedRealm || parameters["nonce"] == "" {
 			return algorithm, false
 		}
 		decoded, err := base64.StdEncoding.DecodeString(parameters["nonce"])

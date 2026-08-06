@@ -66,12 +66,13 @@ func (material *IMSAKAMaterial) Destroy() {
 	zeroBytes(material.IK[:])
 }
 
-func ExtractIMSRegistrationChallenge(packet []byte, expectedCallID string) (IMSRegistrationChallenge, error) {
+func ExtractIMSRegistrationChallenge(packet []byte, expectedCallID, expectedHomeDomain string) (IMSRegistrationChallenge, error) {
 	status, headers, err := parseSIPResponse(packet)
-	if err != nil || status != 401 || !matchingRegisterTransaction(headers, expectedCallID, 1) {
+	if err != nil || status != 401 || !matchingRegisterTransaction(headers, expectedCallID, 1) ||
+		!agentapi.IsValidIMSHomeDomain(expectedHomeDomain) {
 		return IMSRegistrationChallenge{}, errors.New("invalid IMS AKA challenge")
 	}
-	challenge, err := extractAKAv1Challenge(headers["www-authenticate"])
+	challenge, err := extractAKAv1Challenge(headers["www-authenticate"], expectedHomeDomain)
 	if err != nil {
 		return IMSRegistrationChallenge{}, err
 	}
@@ -83,14 +84,14 @@ func ExtractIMSRegistrationChallenge(packet []byte, expectedCallID string) (IMSR
 	return challenge, nil
 }
 
-func extractAKAv1Challenge(values []string) (IMSRegistrationChallenge, error) {
+func extractAKAv1Challenge(values []string, expectedRealm string) (IMSRegistrationChallenge, error) {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if len(value) < 7 || !strings.EqualFold(value[:7], "Digest ") {
 			continue
 		}
 		parameters := parseSIPParameters(value[7:], ',')
-		if parameters["algorithm"] != "AKAv1-MD5" || parameters["realm"] != IMSHomeDomain {
+		if parameters["algorithm"] != "AKAv1-MD5" || parameters["realm"] != expectedRealm {
 			continue
 		}
 		nonce := parameters["nonce"]
@@ -100,7 +101,7 @@ func extractAKAv1Challenge(values []string) (IMSRegistrationChallenge, error) {
 			return IMSRegistrationChallenge{}, errors.New("invalid IMS AKA nonce")
 		}
 		challenge := IMSRegistrationChallenge{
-			Algorithm: "AKAv1-MD5", Realm: IMSHomeDomain, Nonce: nonce,
+			Algorithm: "AKAv1-MD5", Realm: expectedRealm, Nonce: nonce,
 			QOP: selectDigestQOP(parameters["qop"]), Opaque: parameters["opaque"],
 		}
 		copy(challenge.RAND[:], decoded[:imsRANDLength])
@@ -233,7 +234,7 @@ func BuildIMSAuthenticatedRegister(input IMSInitialRegisterInput, challenge IMSR
 func BuildIMSAuthenticatedRegisterSequence(input IMSInitialRegisterInput, challenge IMSRegistrationChallenge,
 	res []byte, securityClient, branch, cnonce string, sequence, nonceCount uint64, expires uint32) ([]byte, error) {
 	if err := validateIMSInitialRegisterInput(input); err != nil ||
-		challenge.Algorithm != "AKAv1-MD5" || challenge.Realm != IMSHomeDomain || challenge.Nonce == "" ||
+		challenge.Algorithm != "AKAv1-MD5" || challenge.Realm != input.HomeDomain || challenge.Nonce == "" ||
 		challenge.SecurityServer.Raw == "" || len(res) < 4 || len(res) > 16 ||
 		!validIMSToken(branch, 16, 64) || challenge.QOP != "" && !validIMSToken(cnonce, 16, 64) ||
 		securityClient == "" || len(securityClient) > 2048 || !validDigestValue(securityClient, 2048) ||

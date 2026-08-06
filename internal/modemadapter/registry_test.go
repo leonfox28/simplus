@@ -21,6 +21,10 @@ type smsTestAdapter struct {
 	release chan struct{}
 }
 
+type matchingAdapter struct{ smsTestAdapter }
+
+func (*matchingAdapter) Matches(USBDescriptor) bool { return true }
+
 func (adapter *smsTestAdapter) Profile() string { return adapter.profile }
 
 func (*smsTestAdapter) DisplayName() string { return "SMS test modem" }
@@ -109,6 +113,19 @@ func TestDefaultRegistryMatchesOnlyEvidenceBackedUSBIdentities(t *testing.T) {
 	}
 }
 
+func TestRegistryRejectsAmbiguousDescriptorMatches(t *testing.T) {
+	registry, err := NewRegistry(
+		&matchingAdapter{smsTestAdapter: smsTestAdapter{profile: "first"}},
+		&matchingAdapter{smsTestAdapter: smsTestAdapter{profile: "second"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter, matched := registry.Match(USBDescriptor{VendorID: "ffff", ProductID: "ffff"}); matched || adapter != nil {
+		t.Fatalf("ambiguous descriptor resolved to (%#v, %t)", adapter, matched)
+	}
+}
+
 func TestQDC507ResolvesOnlyKnownEndpointRoles(t *testing.T) {
 	device := agentapi.DeviceReport{
 		Profile: agentapi.ProfileQDC507,
@@ -154,10 +171,16 @@ func TestML307AUsesOfficialInterfaceTwoMappingAfterHIL(t *testing.T) {
 		t.Fatalf("primary ML307A endpoint = (%#v, %t)", endpoint, ok)
 	}
 	assertCapability(t, adapter.Capabilities(device), "at-control", agentapi.EvidenceObserved)
+	assertCapability(t, adapter.Capabilities(device), "sim-presence", agentapi.EvidenceObserved)
 	assertCapability(t, adapter.Capabilities(device), "sim-access", agentapi.EvidenceObserved)
 	assertCapability(t, adapter.Capabilities(device), "sim-apdu", agentapi.EvidenceObserved)
+	assertCapability(t, adapter.Capabilities(device), "sim-auth", agentapi.EvidenceObserved)
 	assertCapability(t, adapter.Capabilities(device), "sms-control", agentapi.EvidenceUnverified)
 	assertCapability(t, adapter.Capabilities(device), "digital-voice-media", agentapi.EvidenceUnsupported)
+	probePlan, ok := adapter.ATProbePlan()
+	if !ok || probePlan.Handshake != "AT" || probePlan.ActiveCalls != "AT+CLCC" {
+		t.Fatalf("ML307A AT probe plan = (%#v, %t)", probePlan, ok)
+	}
 }
 
 func TestQDC507CapabilitiesSeparateObservedTransportFromUnverifiedBusinessFeatures(t *testing.T) {
@@ -172,8 +195,13 @@ func TestQDC507CapabilitiesSeparateObservedTransportFromUnverifiedBusinessFeatur
 	capabilities := (QDC507{}).Capabilities(device)
 	assertCapability(t, capabilities, "at-control", agentapi.EvidenceObserved)
 	assertCapability(t, capabilities, "qmi-control", agentapi.EvidenceObserved)
+	assertCapability(t, capabilities, "sim-presence", agentapi.EvidenceObserved)
 	assertCapability(t, capabilities, "sms-control", agentapi.EvidenceDocumented)
 	assertCapability(t, capabilities, "digital-voice-media", agentapi.EvidenceUnverified)
+	probePlan, ok := (QDC507{}).ATProbePlan()
+	if !ok || probePlan.Handshake != "AT" || probePlan.ActiveCalls != "AT+CLCC" {
+		t.Fatalf("QDC507 AT probe plan = (%#v, %t)", probePlan, ok)
+	}
 	for index := 1; index < len(capabilities); index++ {
 		if capabilities[index-1].Capability >= capabilities[index].Capability {
 			t.Fatalf("capabilities are not strictly sorted: %#v", capabilities)

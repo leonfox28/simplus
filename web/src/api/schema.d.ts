@@ -752,6 +752,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/modems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List administrator-added modems and their current observed state */
+        get: operations["listManagedModems"];
+        put?: never;
+        /** Add one currently discovered modem without changing hardware state */
+        post: operations["addManagedModem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modem-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scan and list currently discovered modems that have not been added */
+        get: operations["listModemCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List administrator-created Lines and their resolved runtime state */
+        get: operations["listManagedLines"];
+        put?: never;
+        /** Create a stable Line from one current managed-modem SIM/Profile candidate */
+        post: operations["addManagedLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/line-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List current SIM/Profile candidates on administrator-added modems */
+        get: operations["listLineCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lines/{lineId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Update a Line display name and access mode without rebinding hardware */
+        put: operations["updateManagedLine"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modems/{modemId}/rf-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set one managed modem's runtime RF state through its typed adapter */
+        put: operations["setManagedModemRFState"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/subscription-profiles/{profileId}/access-mode": {
         parameters: {
             query?: never;
@@ -1150,6 +1256,87 @@ export interface components {
             pin1Verify: boolean;
             puk1Unblock: boolean;
             euiccProfiles: boolean;
+        };
+        /** @enum {string} */
+        ManagedModemState: "online" | "offline";
+        /** @enum {string} */
+        ManagedModemRFState: "on" | "off" | "unknown";
+        /** @enum {string} */
+        ManagedModemSIMPresence: "present" | "absent" | "unknown";
+        /** @enum {string} */
+        ModemSupportStatus: "supported" | "not-ready";
+        /** @enum {string} */
+        ModemCandidateReadinessReason: "READY" | "CONTROL_UNAVAILABLE" | "SIM_ACCESS_UNAVAILABLE" | "EQUIPMENT_IDENTITY_UNAVAILABLE" | "IDENTITY_CONFLICT";
+        ManagedModem: {
+            id: string;
+            displayName: string;
+            model: string;
+            transport: components["schemas"]["DeviceTransport"];
+            state: components["schemas"]["ManagedModemState"];
+            capabilities: components["schemas"]["HardwareCapabilities"];
+            rfState: components["schemas"]["ManagedModemRFState"];
+            simPresence: components["schemas"]["ManagedModemSIMPresence"];
+            /** Format: date-time */
+            addedAt: string;
+        };
+        ManagedModemList: {
+            modems: components["schemas"]["ManagedModem"][];
+        };
+        /** @enum {string} */
+        ManagedLineState: "ready" | "modem-offline" | "sim-unavailable";
+        ManagedLine: {
+            id: string;
+            displayName: string;
+            managedModemId: string;
+            managedModemDisplayName: string;
+            subscriptionDisplayHint: string;
+            accessMode: components["schemas"]["AccessMode"];
+            state: components["schemas"]["ManagedLineState"];
+            capabilities: components["schemas"]["HardwareCapabilities"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        ManagedLineList: {
+            lines: components["schemas"]["ManagedLine"][];
+        };
+        LineCandidate: {
+            candidateId: string;
+            managedModemId: string;
+            managedModemDisplayName: string;
+            subscriptionDisplayHint: string;
+            capabilities: components["schemas"]["HardwareCapabilities"];
+            addable: boolean;
+        };
+        LineCandidateList: {
+            candidates: components["schemas"]["LineCandidate"][];
+        };
+        AddManagedLineRequest: {
+            candidateId: string;
+            displayName: string;
+            accessMode: components["schemas"]["AccessMode"];
+        };
+        UpdateManagedLineRequest: {
+            displayName: string;
+            accessMode: components["schemas"]["AccessMode"];
+        };
+        ModemCandidate: {
+            candidateId: string;
+            model: string;
+            transport: components["schemas"]["DeviceTransport"];
+            supportStatus: components["schemas"]["ModemSupportStatus"];
+            addable: boolean;
+            readinessReason: components["schemas"]["ModemCandidateReadinessReason"];
+            capabilities: components["schemas"]["HardwareCapabilities"];
+            simPresence: components["schemas"]["ManagedModemSIMPresence"];
+        };
+        ModemCandidateList: {
+            candidates: components["schemas"]["ModemCandidate"][];
+        };
+        AddManagedModemRequest: {
+            candidateId: string;
+        };
+        SetManagedModemRFStateRequest: {
+            enabled: boolean;
         };
         PhysicalDeviceDetail: {
             id: string;
@@ -3964,6 +4151,474 @@ export interface operations {
             };
             /** @description The request exceeded the bounded control-plane deadline */
             504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listManagedModems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Managed modem list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedModemList"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The instance is not ready for business APIs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed modems could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    addManagedModem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddManagedModemRequest"];
+            };
+        };
+        responses: {
+            /** @description Modem added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedModem"];
+                };
+            };
+            /** @description Candidate selection is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate is no longer present */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate is already managed, not ready, or has a conflicting equipment identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed modem could not be persisted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listModemCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current unadded modem candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModemCandidateList"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The instance is not ready for business APIs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Current hardware candidates could not be scanned */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listManagedLines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Managed Line list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedLineList"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The instance is not ready for business APIs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed Lines could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    addManagedLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddManagedLineRequest"];
+            };
+        };
+        responses: {
+            /** @description Line created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedLine"];
+                };
+            };
+            /** @description Candidate, name, or access mode is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate is no longer present */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate is already represented by a Line */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed Line could not be persisted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listLineCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current unadded Line candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LineCandidateList"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The instance is not ready for business APIs */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Current Line candidates could not be resolved */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    updateManagedLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateManagedLineRequest"];
+            };
+        };
+        responses: {
+            /** @description Line updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedLine"];
+                };
+            };
+            /** @description Name or access mode is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed Line was not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed Line could not be updated */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    setManagedModemRFState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetManagedModemRFStateRequest"];
+            };
+        };
+        responses: {
+            /** @description RF state read back and confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedModem"];
+                };
+            };
+            /** @description RF request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed modem was not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description RF state cannot currently be changed or confirmed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description RF control is unsupported for this modem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description RF operation failed */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -3,36 +3,80 @@ package accesspath
 import (
 	"context"
 	"errors"
+	"regexp"
+	"sort"
+
+	"github.com/leonfox28/simplus/internal/application/inventory"
 	"github.com/leonfox28/simplus/internal/domain/accesspath"
 )
 
 var ErrInvalid = errors.New("access path request invalid")
 
+var lineIDPattern = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
+
 type Repository interface {
 	ListAccessPathConfigurations(context.Context) ([]accesspath.Configuration, error)
 	PutAccessPathConfiguration(context.Context, accesspath.Configuration) error
 }
-type Service struct{ repository Repository }
 
-func New(repository Repository) (*Service, error) {
-	if repository == nil {
-		return nil, errors.New("access path repository unavailable")
-	}
-	return &Service{repository: repository}, nil
+type LineSource interface {
+	Topology(context.Context) (inventory.Topology, error)
 }
+
+type Service struct {
+	repository Repository
+	lines      LineSource
+}
+
+func New(repository Repository, lines LineSource) (*Service, error) {
+	if repository == nil || lines == nil {
+		return nil, errors.New("access path dependencies are unavailable")
+	}
+	return &Service{repository: repository, lines: lines}, nil
+}
+
 func (service *Service) List(ctx context.Context) ([]accesspath.State, error) {
 	values, err := service.repository.ListAccessPathConfigurations(ctx)
 	if err != nil {
 		return nil, err
 	}
-	states := make([]accesspath.State, 0, len(values))
+	topology, err := service.lines.Topology(ctx)
+	if err != nil {
+		return nil, err
+	}
+	configured := make(map[string]accesspath.Configuration, len(values))
 	for _, value := range values {
+		configured[value.LineID] = value
+	}
+	states := make([]accesspath.State, 0, len(topology.Lines))
+	for _, line := range topology.Lines {
+		if !lineIDPattern.MatchString(line.ID) {
+			continue
+		}
+		value, exists := configured[line.ID]
+		if !exists {
+			value = accesspath.Configuration{LineID: line.ID, Mode: "direct", MihomoState: "stopped"}
+		}
 		states = append(states, derive(value))
 	}
+	sort.Slice(states, func(left, right int) bool { return states[left].LineID < states[right].LineID })
 	return states, nil
 }
+
 func (service *Service) Configure(ctx context.Context, lineID, mode, mihomoState string) (accesspath.State, error) {
-	if (lineID != "simulator-line-1" && lineID != "simulator-line-2") || (mode != "direct" && mode != "mihomo-required") || (mihomoState != "running" && mihomoState != "stopped" && mihomoState != "failed") {
+	if !lineIDPattern.MatchString(lineID) || (mode != "direct" && mode != "mihomo-required") ||
+		(mihomoState != "running" && mihomoState != "stopped" && mihomoState != "failed") {
+		return accesspath.State{}, ErrInvalid
+	}
+	topology, err := service.lines.Topology(ctx)
+	if err != nil {
+		return accesspath.State{}, err
+	}
+	found := false
+	for _, line := range topology.Lines {
+		found = found || line.ID == lineID
+	}
+	if !found {
 		return accesspath.State{}, ErrInvalid
 	}
 	value := accesspath.Configuration{LineID: lineID, Mode: mode, MihomoState: mihomoState}
@@ -41,6 +85,7 @@ func (service *Service) Configure(ctx context.Context, lineID, mode, mihomoState
 	}
 	return derive(value), nil
 }
+
 func derive(value accesspath.Configuration) accesspath.State {
 	state := accesspath.State{LineID: value.LineID, Mode: value.Mode, MihomoState: value.MihomoState, Authentication: "simulated-aka-complete", EPDG: "connected", IMS: "registered", LineState: "online", DirectFallback: false}
 	if value.Mode == "mihomo-required" && value.MihomoState != "running" {

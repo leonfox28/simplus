@@ -11,7 +11,7 @@ func TestSMSIPMessageBuildParseAndTransactionMatch(t *testing.T) {
 	body := []byte{0x00, 0x17, 0x00, 0x02, 0x91, 0x44, 0x01, 0x00}
 	input := smsSIPRequestInput{
 		Source: netip.MustParseAddr("10.255.0.42"), ViaPort: 42002,
-		RequestURI: "tel:+447700900123", PublicIdentity: "sip:234150123456789@" + IMSHomeDomain,
+		RequestURI: "tel:+447700900123", PublicIdentity: "sip:234150123456789@" + testIMSHomeDomain,
 		Branch: "0123456789abcdef", FromTag: "1123456789abcdef",
 		CallID: "2123456789abcdef@10.255.0.42", InReplyTo: "incoming0123456789@pcscf", Sequence: 7,
 		Routes:         []string{"<sip:pcscf.example.invalid;lr>"},
@@ -52,7 +52,7 @@ func TestParseSMSIPRequestAndBuildResponsePreserveTransaction(t *testing.T) {
 		"Via: SIP/2.0/UDP pcscf.example.invalid;branch=z9hG4bKone\r\n" +
 		"Via: SIP/2.0/UDP ipsmgw.example.invalid;branch=z9hG4bKtwo\r\n" +
 		"From: <sip:ipsmgw.example.invalid>;tag=remote\r\n" +
-		"To: <sip:234150123456789@" + IMSHomeDomain + ">\r\n" +
+		"To: <sip:234150123456789@" + testIMSHomeDomain + ">\r\n" +
 		"Call-ID: 2123456789abcdef@pcscf\r\n" +
 		"CSeq: 8 MESSAGE\r\n" +
 		"P-Asserted-Identity: <sip:ipsmgw.example.invalid>\r\n" +
@@ -68,7 +68,7 @@ func TestParseSMSIPRequestAndBuildResponsePreserveTransaction(t *testing.T) {
 	}
 	for _, required := range []string{
 		"SIP/2.0 200 OK\r\n", "Via: SIP/2.0/UDP pcscf.example.invalid", "Via: SIP/2.0/UDP ipsmgw.example.invalid",
-		"To: <sip:234150123456789@" + IMSHomeDomain + ">;tag=0123456789abcdef\r\n",
+		"To: <sip:234150123456789@" + testIMSHomeDomain + ">;tag=0123456789abcdef\r\n",
 		"Call-ID: 2123456789abcdef@pcscf\r\n", "CSeq: 8 MESSAGE\r\n", "Content-Length: 0\r\n\r\n",
 	} {
 		if !strings.Contains(string(response), required) {

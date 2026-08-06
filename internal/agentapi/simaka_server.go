@@ -127,9 +127,6 @@ func writeSIMAKAError(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	case errors.Is(err, ErrSIMAKAUnsupported):
 		status = http.StatusUnprocessableEntity
 		response = ErrorResponse{Code: "SIM_AKA_UNSUPPORTED", Detail: "SIM AKA is unsupported for this device"}
-	case errors.Is(err, ErrSIMAKARFNotOff):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "RF_NOT_OFF", Detail: "SIM AKA requires RF off"}
 	case errors.Is(err, ErrSIMAKASIMNotReady):
 		status = http.StatusConflict
 		response = ErrorResponse{Code: "SIM_NOT_READY", Detail: "SIM AKA requires a ready SIM", Retryable: true}

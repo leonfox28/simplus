@@ -16,6 +16,24 @@ import (
 
 type accessGuard bool
 
+const testManagedLineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
+
+type managedCallLineSource struct{ source LineSource }
+
+func (source managedCallLineSource) Topology(ctx context.Context) (inventory.Topology, error) {
+	topology, err := source.source.Topology(ctx)
+	if err != nil {
+		return inventory.Topology{}, err
+	}
+	for index := range topology.Lines {
+		if topology.Lines[index].ID == "simulator-line-1" {
+			topology.Lines[index].RuntimeLineID = topology.Lines[index].ID
+			topology.Lines[index].ID = testManagedLineID
+		}
+	}
+	return topology, nil
+}
+
 func (guard accessGuard) Available(context.Context, string) bool { return bool(guard) }
 
 func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
@@ -28,7 +46,7 @@ func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
 	if err := stores.PutSubscriptionProfileAccessMode(ctx, "simulator-profile-1", accessmode.CellularNative); err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(ctx, stores, inventory.NewSimulator(stores))
+	service, err := New(ctx, stores, managedCallLineSource{source: inventory.NewSimulator(stores)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,27 +60,27 @@ func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
 func TestSimulatorCallLifecycleAndSafety(t *testing.T) {
 	service, _ := newCallService(t)
 	ctx := context.Background()
-	if _, _, err := service.Dial(ctx, "operation-emergency-0001", "simulator-line-1", "112"); !errors.Is(err, ErrUnsafeNumber) {
+	if _, _, err := service.Dial(ctx, "operation-emergency-0001", testManagedLineID, "112"); !errors.Is(err, ErrUnsafeNumber) {
 		t.Fatalf("emergency error = %v", err)
 	}
-	outbound, replayed, err := service.Dial(ctx, "operation-call-out-0001", "simulator-line-1", "13800138000")
+	outbound, replayed, err := service.Dial(ctx, "operation-call-out-0001", testManagedLineID, "13800138000")
 	if err != nil || replayed || outbound.State != call.StateActive {
 		t.Fatalf("outbound = %#v replayed=%v err=%v", outbound, replayed, err)
 	}
 	if _, err := service.DTMF(ctx, outbound.ID, "12#"); err != nil {
 		t.Fatal(err)
 	}
-	if replay, wasReplay, err := service.Dial(ctx, "operation-call-out-0001", "simulator-line-1", "13800138000"); err != nil || !wasReplay || replay.ID != outbound.ID {
+	if replay, wasReplay, err := service.Dial(ctx, "operation-call-out-0001", testManagedLineID, "13800138000"); err != nil || !wasReplay || replay.ID != outbound.ID {
 		t.Fatalf("replay=%#v wasReplay=%v err=%v", replay, wasReplay, err)
 	}
-	if _, _, err := service.Incoming(ctx, "operation-call-busy-0001", "simulator-line-1", "13900139000"); !errors.Is(err, ErrLineBusy) {
+	if _, _, err := service.Incoming(ctx, "operation-call-busy-0001", testManagedLineID, "13900139000"); !errors.Is(err, ErrLineBusy) {
 		t.Fatalf("busy error=%v", err)
 	}
 	ended, err := service.Hangup(ctx, outbound.ID)
 	if err != nil || ended.State != call.StateEnded {
 		t.Fatalf("ended = %#v err=%v", ended, err)
 	}
-	inbound, _, err := service.Incoming(ctx, "operation-call-in-00001", "simulator-line-1", "13900139000")
+	inbound, _, err := service.Incoming(ctx, "operation-call-in-00001", testManagedLineID, "13900139000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +92,11 @@ func TestSimulatorCallLifecycleAndSafety(t *testing.T) {
 
 func TestRestartReconcilesUnfinishedCall(t *testing.T) {
 	service, stores := newCallService(t)
-	inbound, _, err := service.Incoming(context.Background(), "operation-call-in-00002", "simulator-line-1", "13900139000")
+	inbound, _, err := service.Incoming(context.Background(), "operation-call-in-00002", testManagedLineID, "13900139000")
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := New(context.Background(), stores, inventory.NewSimulator(stores))
+	restarted, err := New(context.Background(), stores, managedCallLineSource{source: inventory.NewSimulator(stores)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,11 +115,11 @@ func TestHostVoWiFiCallRequiresOnlineFailClosedAccessPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.UseAccessPathGuard(accessGuard(false))
-	if _, _, err := service.Dial(context.Background(), "operation-vowifi-call-01", "simulator-line-1", "13800138000"); !errors.Is(err, ErrLineUnavailable) {
+	if _, _, err := service.Dial(context.Background(), "operation-vowifi-call-01", testManagedLineID, "13800138000"); !errors.Is(err, ErrLineUnavailable) {
 		t.Fatalf("offline error=%v", err)
 	}
 	service.UseAccessPathGuard(accessGuard(true))
-	if value, _, err := service.Dial(context.Background(), "operation-vowifi-call-02", "simulator-line-1", "13800138000"); err != nil || value.State != call.StateActive {
+	if value, _, err := service.Dial(context.Background(), "operation-vowifi-call-02", testManagedLineID, "13800138000"); err != nil || value.State != call.StateActive {
 		t.Fatalf("online=%#v err=%v", value, err)
 	}
 }

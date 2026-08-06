@@ -6,6 +6,7 @@ set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 node_config=/run/simplus-vowifi-hil-node.yaml
 expected_loc=$2
+ims_home_domain=ims.mnc015.mcc234.3gppnetwork.org
 mihomo=/var/lib/simplus/mihomo/versions/v1.19.29/mihomo
 vici_control=$repo/.dev/bin/simplus-vowifi-hil-vici
 pcscf_probe=$repo/.dev/bin/simplus-vowifi-hil-pcscf
@@ -158,7 +159,7 @@ if [[ $child_installed == true && -n $inner_ipv4_address ]]; then
     for address in "${pcscf_addresses[@]}"; do
       pcscf_args+=(--target "$address")
     done
-		pcscf_result=$(/usr/sbin/ip netns exec "$ns" "$pcscf_probe" --source "$inner_ipv4_address" "${pcscf_args[@]}" 2>/dev/null || printf '{"targets":0,"reachable":false}')
+		pcscf_result=$(/usr/sbin/ip netns exec "$ns" "$pcscf_probe" --source "$inner_ipv4_address" --home-domain "$ims_home_domain" "${pcscf_args[@]}" 2>/dev/null || printf '{"targets":0,"reachable":false}')
 		xfrm_before=$(/usr/sbin/ip netns exec "$ns" ip -s xfrm state 2>/dev/null | awk '/lifetime current:/{getline;gsub(/^[[:space:]]+|[[:space:]]+$/,"");printf "%s%s",separator,$0;separator="|"}' || true)
 		xfrm_errors_before=$(/usr/sbin/ip netns exec "$ns" awk '$2 != 0{printf "%s%s=%s",separator,$1,$2;separator="|"}END{if(separator=="")printf "none"}' /proc/net/xfrm_stat 2>/dev/null || true)
 		ims_result=$(/usr/sbin/ip netns exec "$ns" "$ims_probe" --source "$inner_ipv4_address" --pcscf "${pcscf_addresses[0]}" 2>/dev/null || true)

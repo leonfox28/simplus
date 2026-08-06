@@ -1,11 +1,14 @@
 package modemadapter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/attransport"
+	"github.com/leonfox28/simplus/internal/modemadapter/standardat"
 )
 
 type EndpointRole string
@@ -22,6 +25,10 @@ type USBDescriptor struct {
 	Product      string
 }
 
+type IdentityPseudonymizer interface {
+	Pseudonym(string, []byte) (string, error)
+}
+
 // Adapter contains only model-specific discovery facts that are safe to use
 // before a business driver is enabled. SMS, call, and eUICC drivers are added
 // as separate capabilities after their model-specific behavior is verified.
@@ -31,6 +38,60 @@ type Adapter interface {
 	Matches(USBDescriptor) bool
 	Endpoint(agentapi.DeviceReport, EndpointRole) (agentapi.Endpoint, bool)
 	Capabilities(agentapi.DeviceReport) []agentapi.CapabilityEvidence
+}
+
+// ATProbeAdapter explicitly opts a model into one compiled-in read-only AT
+// probe plan. The Linux transport never selects commands or model behavior.
+type ATProbeAdapter interface {
+	Adapter
+	ATProbePlan() (standardat.ProbePlan, bool)
+}
+
+// SIMAuthAdapter is the smallest model seam for SIM-backed network
+// authentication. The common Agent service owns request fencing and secret
+// handling; the model adapter owns the fixed protocol flow and resolves the
+// control endpoint used by its verified implementation. Host VoWiFi is one
+// consumer of this capability, not part of the adapter contract. No Web/API
+// caller may provide a command or device path.
+type SIMAuthAdapter interface {
+	Adapter
+	SIMAuthEndpoint(agentapi.DeviceReport) (agentapi.Endpoint, bool)
+	ReadSIMAKAIdentity(context.Context, attransport.Query, IdentityPseudonymizer, string) (string, error)
+	AuthenticateSIMAKA(context.Context, attransport.Query, IdentityPseudonymizer, string, agentapi.SIMAKAChallenge) (agentapi.SIMAKAExecution, error)
+	ProbeSIMIMSProfile(context.Context, attransport.Query, IdentityPseudonymizer, string) (bool, error)
+	ReadSIMIMSIdentity(context.Context, attransport.Query, IdentityPseudonymizer, string) (agentapi.SIMIMSIdentityMaterial, error)
+}
+
+// SIMPresenceAdapter detects whether the primary SIM slot is populated. It
+// does not read identity, unlock the card, change RF, or imply that a Line
+// should be created. Each model owns the fixed queries needed for this result.
+type SIMPresenceAdapter interface {
+	Adapter
+	ReadSIMPresence(context.Context, attransport.Query) (agentapi.SIMObservation, error)
+}
+
+// SIMIdentityAdapter is separate from presence and authentication: Line
+// binding needs a stable SIM identity, while a card may be present without
+// being ready for identity access or network authentication.
+type SIMIdentityAdapter interface {
+	Adapter
+	ReadSIMIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (string, string, error)
+}
+
+// RFControlAdapter describes model-specific runtime RF transitions. Commands
+// never cross the Agent API; they are fixed adapter facts consumed by the
+// bounded Agent driver and confirmed through a fresh read-only probe.
+type RFControlAdapter interface {
+	Adapter
+	SetRFState(context.Context, attransport.Query, bool) (agentapi.RFObservation, error)
+}
+
+// EquipmentIdentityAdapter declares the fixed, read-only modem command used
+// to obtain the equipment identity. The raw identity never crosses the
+// hardware boundary; the Agent converts it to an instance-scoped fingerprint.
+type EquipmentIdentityAdapter interface {
+	Adapter
+	ReadEquipmentIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (string, error)
 }
 
 type Registry struct {
@@ -75,12 +136,19 @@ func (registry *Registry) Match(descriptor USBDescriptor) (Adapter, bool) {
 	if registry == nil {
 		return nil, false
 	}
+	var matched Adapter
 	for _, adapter := range registry.ordered {
-		if adapter.Matches(descriptor) {
-			return adapter, true
+		if !adapter.Matches(descriptor) {
+			continue
 		}
+		if matched != nil {
+			// Overlapping model rules are ambiguous. Fail closed instead of
+			// making adapter registration order part of hardware identity.
+			return nil, false
+		}
+		matched = adapter
 	}
-	return nil, false
+	return matched, matched != nil
 }
 
 func (registry *Registry) ForProfile(profile string) (Adapter, bool) {

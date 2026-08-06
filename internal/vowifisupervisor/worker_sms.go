@@ -195,7 +195,7 @@ func workerSMSHandler(service SMSAPI) http.Handler {
 	})
 	mux.HandleFunc("POST /list", func(w http.ResponseWriter, r *http.Request) {
 		var request SMSListRequest
-		if !decodeWorkerSMSRequest(w, r, &request) || !hardwareLinePattern.MatchString(request.LineID) {
+		if !decodeWorkerSMSRequest(w, r, &request) || !managedLinePattern.MatchString(request.LineID) {
 			writeWorkerSMSError(w, ErrRequestInvalid)
 			return
 		}
@@ -233,7 +233,7 @@ func workerSMSHandler(service SMSAPI) http.Handler {
 	})
 	mux.HandleFunc("POST /reports/list", func(w http.ResponseWriter, r *http.Request) {
 		var request SMSListRequest
-		if !decodeWorkerSMSRequest(w, r, &request) || !hardwareLinePattern.MatchString(request.LineID) {
+		if !decodeWorkerSMSRequest(w, r, &request) || !managedLinePattern.MatchString(request.LineID) {
 			writeWorkerSMSError(w, ErrRequestInvalid)
 			return
 		}

@@ -107,7 +107,7 @@ func TestAgentSourceMapsObservedHardwareWithoutClaimingUnverifiedVoiceOrSIMIdent
 	}
 }
 
-func TestAgentSourceMaterializesReadyRFOffSIMAsStableHardwareLine(t *testing.T) {
+func TestAgentSourceMaterializesReadySIMAsStableHardwareLineIndependentlyOfRF(t *testing.T) {
 	revision := strings.Repeat("c", 64)
 	fingerprint := strings.Repeat("d", 64)
 	instanceID := "12345678-1234-4234-8234-123456789abc"
@@ -122,13 +122,14 @@ func TestAgentSourceMaterializesReadyRFOffSIMAsStableHardwareLine(t *testing.T) 
 					{Capability: "rf-control", Status: agentapi.EvidenceObserved},
 					{Capability: "sim-access", Status: agentapi.EvidenceObserved},
 					{Capability: "sim-apdu", Status: agentapi.EvidenceObserved},
+					{Capability: "host-vowifi-auth", Status: agentapi.EvidenceObserved},
 				},
 			}},
 		},
 		probe: agentapi.ProbeResponse{
 			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID, SnapshotGeneration: 5, SnapshotRevision: revision,
 			Devices: []agentapi.DeviceProbe{{
-				DeviceID: "usb-1-3", State: agentapi.ProbeStateComplete, RF: agentapi.RFObservation{State: agentapi.RFStateOff},
+				DeviceID: "usb-1-3", State: agentapi.ProbeStateComplete, RF: agentapi.RFObservation{State: agentapi.RFStateOn},
 				SIM:           agentapi.SIMObservation{State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady, IdentityFingerprint: fingerprint, DisplayIdentityHint: "ICCID •••• 2115"},
 				SignalMetrics: agentapi.SignalObservation{State: agentapi.SignalStateUnknown}, Registrations: []agentapi.RegistrationObservation{},
 				CurrentNetwork: agentapi.NetworkObservation{SelectionMode: agentapi.NetworkSelectionUnknown}, ActiveCallCount: &zeroCalls,
@@ -143,10 +144,87 @@ func TestAgentSourceMaterializesReadyRFOffSIMAsStableHardwareLine(t *testing.T) 
 		t.Fatalf("materialized topology = %#v", topology)
 	}
 	line := topology.Lines[0]
-	if line.ID != "agent-line-"+fingerprint[:32] || !line.Capabilities.SIMAccess || !line.Capabilities.SIMAPDU || line.Capabilities.HostVoWiFiAuth {
+	if line.ID != "agent-line-"+fingerprint[:32] || !line.Capabilities.SIMAccess || !line.Capabilities.SIMAPDU || !line.Capabilities.HostVoWiFiAuth {
 		t.Fatalf("line = %#v", line)
 	}
 	if topology.SIMMedia[0].IdentityFingerprint != fingerprint || topology.SubscriptionProfiles[0].DisplayIdentityHint != "ICCID •••• 2115" {
 		t.Fatalf("identity topology = %#v", topology)
+	}
+}
+
+func TestAgentSourceBuildsSIMLineWithoutInventingRFControl(t *testing.T) {
+	revision := strings.Repeat("e", 64)
+	fingerprint := strings.Repeat("f", 64)
+	instanceID := "22345678-1234-4234-8234-123456789abc"
+	client := &fakeAgentClient{
+		snapshot: agentapi.Snapshot{
+			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID, Generation: 6,
+			Revision: revision, ObservedAt: time.Now().UTC(),
+			Devices: []agentapi.DeviceReport{{
+				ID: "usb-2-1", Generation: 6, DisplayName: "SIM-only fixture", Profile: "sim-only",
+				Capabilities: []agentapi.CapabilityEvidence{
+					{Capability: "at-control", Status: agentapi.EvidenceObserved},
+					{Capability: "sim-access", Status: agentapi.EvidenceObserved},
+					{Capability: "sim-presence", Status: agentapi.EvidenceObserved},
+					{Capability: "rf-control", Status: agentapi.EvidenceUnavailable},
+				},
+			}},
+		},
+		probe: agentapi.ProbeResponse{
+			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID,
+			SnapshotGeneration: 6, SnapshotRevision: revision,
+			Devices: []agentapi.DeviceProbe{{
+				DeviceID: "usb-2-1", State: agentapi.ProbeStateComplete,
+				SIM: agentapi.SIMObservation{
+					State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady,
+					IdentityFingerprint: fingerprint, DisplayIdentityHint: "ICCID •••• 1234",
+				},
+			}},
+		},
+	}
+	topology, err := NewAgentSource(client).Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topology.ModemFunctions) != 1 || len(topology.ResourceGroups) != 1 || len(topology.Lines) != 1 {
+		t.Fatalf("SIM-only topology = %#v", topology)
+	}
+	if topology.ModemFunctions[0].Capabilities.RFControl || topology.Lines[0].Capabilities.RFControl {
+		t.Fatalf("RF control was invented: function=%#v line=%#v", topology.ModemFunctions[0], topology.Lines[0])
+	}
+	for _, resource := range topology.ResourceGroups[0].Resources {
+		if resource == hardware.ResourceRadioControl {
+			t.Fatalf("RF resource was invented: %#v", topology.ResourceGroups[0])
+		}
+	}
+	if !topology.ModemFunctions[0].Capabilities.PrimarySIMLockState {
+		t.Fatalf("observed SIM presence did not map to the typed lock-state capability: %#v", topology.ModemFunctions[0])
+	}
+}
+
+func TestAgentSourceKeepsControlOnlyDeviceWithoutInventingSIMGraph(t *testing.T) {
+	revision := strings.Repeat("9", 64)
+	instanceID := "32345678-1234-4234-8234-123456789abc"
+	client := &fakeAgentClient{
+		snapshot: agentapi.Snapshot{
+			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID, Generation: 7,
+			Revision: revision, ObservedAt: time.Now().UTC(),
+			Devices: []agentapi.DeviceReport{{
+				ID: "usb-3-1", Generation: 7, DisplayName: "control-only fixture", Profile: "control-only",
+				Capabilities: []agentapi.CapabilityEvidence{{Capability: "at-control", Status: agentapi.EvidenceObserved}},
+			}},
+		},
+		probe: agentapi.ProbeResponse{
+			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID,
+			SnapshotGeneration: 7, SnapshotRevision: revision, Devices: []agentapi.DeviceProbe{},
+		},
+	}
+	topology, err := NewAgentSource(client).Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topology.Devices) != 1 || len(topology.ModemFunctions) != 1 || len(topology.SIMSlots) != 0 ||
+		len(topology.ResourceGroups) != 0 || len(topology.Lines) != 0 {
+		t.Fatalf("control-only device gained a SIM graph: %#v", topology)
 	}
 }

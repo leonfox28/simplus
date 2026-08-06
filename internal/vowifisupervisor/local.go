@@ -178,7 +178,7 @@ func (local *Local) Start(ctx context.Context, request StartRequest) (Status, er
 func (local *Local) workerCommand(current *instance, runtimeDir string) (io.ReadCloser, *exec.Cmd, error) {
 	command := exec.Command(local.Network.ipPath, "netns", "exec", current.plan.Namespace,
 		local.Executable, "--vowifi-worker", "--runtime-dir", runtimeDir,
-		"--line-id", current.request.LineID, "--egress-mode", current.request.EgressMode,
+		"--line-id", current.request.LineID, "--hardware-line-id", current.request.HardwareLineID, "--egress-mode", current.request.EgressMode,
 		"--country-code", current.request.CountryCode, "--link-address", current.plan.PeerAddress)
 	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/nonexistent"}
 	command.Stderr = io.Discard
@@ -245,7 +245,7 @@ func (local *Local) monitor(current *instance, runtimeDir string, stdout io.Read
 }
 
 func (local *Local) Stop(ctx context.Context, lineID string) (Status, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return Status{}, ErrRequestInvalid
 	}
 	local.mu.Lock()

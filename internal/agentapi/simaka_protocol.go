@@ -31,6 +31,7 @@ var (
 	simAKAExchangeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 	simAKAIMSI              = regexp.MustCompile(`^[0-9]{14,16}$`)
 	simAKAFingerprint       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	simIMSHomeDomain        = regexp.MustCompile(`^ims\.mnc([0-9]{3})\.mcc([0-9]{3})\.3gppnetwork\.org$`)
 )
 
 // SIMAKATarget fences a transient AKA exchange to the exact Agent process,
@@ -165,10 +166,11 @@ func validSIMIMSIdentityMaterial(material SIMIMSIdentityMaterial) bool {
 		material.ApplicationDiscovery == SIMIMSDiscoveryGenericAID && material.ApplicationCandidates != 1 {
 		return false
 	}
-	const domain = "ims.mnc015.mcc234.3gppnetwork.org"
-	if material.HomeDomain != domain || len(material.PrivateIdentity) < len(domain)+15 ||
-		len(material.PrivateIdentity) > 255 || !strings.HasSuffix(material.PrivateIdentity, "@"+domain) ||
+	if !IsValidIMSHomeDomain(material.HomeDomain) || !IsValidIMSPrivateIdentity(material.PrivateIdentity, material.HomeDomain) ||
 		len(material.PublicIdentities) == 0 || len(material.PublicIdentities) > 8 {
+		return false
+	}
+	if material.Source == SIMIMSIdentityDerived && !validDerivedIMSPrivateIdentity(material.PrivateIdentity, material.HomeDomain) {
 		return false
 	}
 	for _, value := range append([]string{material.PrivateIdentity, material.HomeDomain}, material.PublicIdentities...) {
@@ -190,6 +192,33 @@ func validSIMIMSIdentityMaterial(material SIMIMSIdentityMaterial) bool {
 		return false
 	}
 	return true
+}
+
+func IsValidIMSHomeDomain(domain string) bool {
+	return simIMSHomeDomain.MatchString(domain)
+}
+
+func IsValidIMSPrivateIdentity(identity, domain string) bool {
+	if !IsValidIMSHomeDomain(domain) || len(identity) < len(domain)+2 || len(identity) > 255 ||
+		strings.Count(identity, "@") != 1 || !strings.HasSuffix(identity, "@"+domain) {
+		return false
+	}
+	local := strings.TrimSuffix(identity, "@"+domain)
+	return local != "" && strings.IndexFunc(local, func(value rune) bool { return value < 0x21 || value > 0x7e }) < 0
+}
+
+func validDerivedIMSPrivateIdentity(identity, domain string) bool {
+	local := strings.TrimSuffix(identity, "@"+domain)
+	if !simAKAIMSI.MatchString(local) {
+		return false
+	}
+	parts := simIMSHomeDomain.FindStringSubmatch(domain)
+	if len(parts) != 3 || local[:3] != parts[2] {
+		return false
+	}
+	mnc := parts[1]
+	homeDigits := local[3:]
+	return strings.HasPrefix(homeDigits, mnc) || mnc[0] == '0' && strings.HasPrefix(homeDigits, mnc[1:])
 }
 
 func validSIMIMSSMSConfiguration(configuration SIMIMSSMSConfiguration) bool {

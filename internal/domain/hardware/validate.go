@@ -37,7 +37,9 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 	for _, device := range snapshot.Devices {
 		if !validID(device.ID) || !validLabel(device.DisplayName) || !validEntityGeneration(device.Generation, snapshot.Generation) ||
 			!oneOf(device.Transport, TransportUSB, TransportUART, TransportSimulated) ||
-			!oneOf(device.State, DeviceAvailable, DeviceUnavailable) {
+			!oneOf(device.State, DeviceAvailable, DeviceUnavailable) ||
+			(device.EquipmentIdentityFingerprint != "" && !fingerprintPattern.MatchString(device.EquipmentIdentityFingerprint)) ||
+			(device.USBSerialFingerprint != "" && !fingerprintPattern.MatchString(device.USBSerialFingerprint)) {
 			return Snapshot{}, ErrInvalidSnapshot
 		}
 		if _, duplicate := devices[device.ID]; duplicate {
@@ -212,7 +214,8 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 			group.PhysicalDeviceID != line.PhysicalDeviceID || !contains(group.ModemFunctionIDs, line.ModemFunctionID) ||
 			(profile.State != ProfileActive && profile.State != ProfileLocked) || !capabilitiesSubset(line.Capabilities, function.Capabilities) ||
 			(line.Capabilities.CellularVoice && !line.Capabilities.DigitalVoiceMedia) ||
-			!contains(group.Resources, ResourceRadioControl) || !contains(group.Resources, ResourceSIMAccess) ||
+			!contains(group.Resources, ResourceSIMAccess) ||
+			(line.Capabilities.RFControl && !contains(group.Resources, ResourceRadioControl)) ||
 			(line.Capabilities.SMS && !contains(group.Resources, ResourceSMSStorage)) ||
 			((line.Capabilities.CellularVoice || line.Capabilities.DigitalVoiceMedia) && !contains(group.Resources, ResourceVoiceMedia)) ||
 			(line.Capabilities.SIMAPDU && !contains(group.Resources, ResourceSIMAPDU)) ||

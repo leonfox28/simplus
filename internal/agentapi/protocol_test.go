@@ -45,6 +45,9 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 		{name: "missing devices array", mutate: func(response *ProbeResponse) { response.Devices = nil }},
 		{name: "invalid probe state", mutate: func(response *ProbeResponse) { response.Devices[0].State = "partial" }},
 		{name: "invalid RF state", mutate: func(response *ProbeResponse) { response.Devices[0].RF.State = "airplane" }},
+		{name: "raw equipment identity", mutate: func(response *ProbeResponse) {
+			response.Devices[0].Identity.EquipmentIdentityFingerprint = "490154203237518"
+		}},
 		{name: "missing primary lock state", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.PrimaryLockState = "" }},
 		{name: "invalid signal state", mutate: func(response *ProbeResponse) { response.Devices[0].SignalMetrics.State = "weak" }},
 		{name: "missing registrations array", mutate: func(response *ProbeResponse) { response.Devices[0].Registrations = nil }},

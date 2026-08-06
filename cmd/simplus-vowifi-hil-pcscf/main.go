@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/leonfox28/simplus/internal/agentapi"
 )
 
 const (
@@ -46,13 +48,14 @@ func main() {
 	flags := flag.NewFlagSet("simplus-vowifi-hil-pcscf", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	sourceText := flags.String("source", "", "ePDG-assigned private IPv4 address")
+	homeDomain := flags.String("home-domain", "", "SIM-provided IMS Home Domain")
 	var targets targetList
 	flags.Var(&targets, "target", "private P-CSCF IPv4 address; repeat up to four times")
 	if err := flags.Parse(os.Args[1:]); err != nil || flags.NArg() != 0 {
 		os.Exit(2)
 	}
 	source, err := privateIPv4(*sourceText)
-	if err != nil || len(targets) == 0 || len(targets) > 4 {
+	if err != nil || len(targets) == 0 || len(targets) > 4 || !agentapi.IsValidIMSHomeDomain(*homeDomain) {
 		fail("invalid bounded P-CSCF probe input")
 	}
 	parsedTargets := make([]netip.Addr, 0, len(targets))
@@ -80,7 +83,7 @@ func main() {
 		if probeTCP(source, target, 5061) {
 			state.TCP5061Open++
 		}
-		if status, ok := probeUDPOptions(source, target); ok {
+		if status, ok := probeUDPOptions(source, target, *homeDomain); ok {
 			state.UDP5060Responses++
 			state.UDPStatusClasses[strconv.Itoa(status/100)+"xx"]++
 		}
@@ -115,7 +118,7 @@ func probeTCP(source, target netip.Addr, port uint16) bool {
 	return true
 }
 
-func probeUDPOptions(source, target netip.Addr) (int, bool) {
+func probeUDPOptions(source, target netip.Addr, homeDomain string) (int, bool) {
 	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice())})
 	if err != nil {
 		return 0, false
@@ -132,16 +135,16 @@ func probeUDPOptions(source, target netip.Addr) (int, bool) {
 	}
 	id := hex.EncodeToString(token)
 	request := fmt.Sprintf(
-		"OPTIONS sip:ims.mnc015.mcc234.3gppnetwork.org SIP/2.0\r\n"+
+		"OPTIONS sip:%s SIP/2.0\r\n"+
 			"Via: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK%s\r\n"+
 			"Max-Forwards: 0\r\n"+
 			"From: <sip:anonymous@anonymous.invalid>;tag=%s\r\n"+
-			"To: <sip:ims.mnc015.mcc234.3gppnetwork.org>\r\n"+
+			"To: <sip:%s>\r\n"+
 			"Call-ID: %s@anonymous.invalid\r\n"+
 			"CSeq: 1 OPTIONS\r\n"+
 			"Contact: <sip:anonymous@%s:%d>\r\n"+
 			"Content-Length: 0\r\n\r\n",
-		source, local.Port, id, id, id, source, local.Port,
+		homeDomain, source, local.Port, id, id, homeDomain, id, source, local.Port,
 	)
 	if _, err := connection.WriteToUDP([]byte(request), &net.UDPAddr{IP: net.IP(target.AsSlice()), Port: 5060}); err != nil {
 		return 0, false

@@ -40,6 +40,31 @@ type LineEgressBinding struct {
 	UpdatedAtUtc string `json:"updated_at_utc"`
 }
 
+type ManagedLine struct {
+	ID                              string `json:"id"`
+	ManagedModemID                  string `json:"managed_modem_id"`
+	SimSlotIndex                    int64  `json:"sim_slot_index"`
+	SubscriptionIdentityFingerprint string `json:"subscription_identity_fingerprint"`
+	SubscriptionDisplayHint         string `json:"subscription_display_hint"`
+	DisplayName                     string `json:"display_name"`
+	AccessMode                      string `json:"access_mode"`
+	CreatedAtUtc                    string `json:"created_at_utc"`
+	UpdatedAtUtc                    string `json:"updated_at_utc"`
+}
+
+type ManagedModem struct {
+	ID                           string `json:"id"`
+	LegacyHardwareDeviceID       string `json:"legacy_hardware_device_id"`
+	EquipmentIdentityFingerprint string `json:"equipment_identity_fingerprint"`
+	UsbSerialFingerprint         string `json:"usb_serial_fingerprint"`
+	DisplayName                  string `json:"display_name"`
+	Model                        string `json:"model"`
+	Transport                    string `json:"transport"`
+	CapabilityMask               int64  `json:"capability_mask"`
+	CreatedAtUtc                 string `json:"created_at_utc"`
+	UpdatedAtUtc                 string `json:"updated_at_utc"`
+}
+
 type ManagementTl struct {
 	Singleton               int64          `json:"singleton"`
 	Mode                    string         `json:"mode"`
@@ -137,17 +162,17 @@ type SetupStorage struct {
 	ConfiguredAtUtc  string `json:"configured_at_utc"`
 }
 
+type SimulatorAccessPath struct {
+	LineID      string `json:"line_id"`
+	Mode        string `json:"mode"`
+	MihomoState string `json:"mihomo_state"`
+}
+
 type SimulatorEuiccProfile struct {
 	ProfileID           string `json:"profile_id"`
 	DisplayName         string `json:"display_name"`
 	DisplayIdentityHint string `json:"display_identity_hint"`
 	Active              int64  `json:"active"`
-}
-
-type SimulatorVowifiLine struct {
-	LineID      string `json:"line_id"`
-	Mode        string `json:"mode"`
-	MihomoState string `json:"mihomo_state"`
 }
 
 type SubscriptionProfileAccessMode struct {

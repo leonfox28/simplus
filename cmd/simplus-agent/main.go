@@ -64,7 +64,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	versionOnly := flags.Bool("version", false, "print version and exit")
 	socketPath := flags.String("socket", envOrDefault("SIMPLUS_AGENT_SOCKET", "/run/simplus/simplus-agent.sock"), "absolute Unix socket path")
-	simAKASocketPath := flags.String("sim-aka-socket", os.Getenv("SIMPLUS_AGENT_SIM_AKA_SOCKET"), "optional root-only Unix socket for the bounded ML307A SIM AKA HIL API")
+	simAKASocketPath := flags.String("sim-aka-socket", os.Getenv("SIMPLUS_AGENT_SIM_AKA_SOCKET"), "optional root-only Unix socket for the bounded SIM authentication API")
 	socketGID := flags.Int("socket-gid", -1, "group owner for the socket and parent directory")
 	scanInterval := flags.Duration("scan-interval", time.Second, "USB hotplug scan interval")
 	usbRoot := flags.String("sysfs-usb-root", "/sys/bus/usb/devices", "USB sysfs root")
@@ -122,6 +122,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			logger.Error("SIM identity key initialization failed", "error", keyErr)
 			return 1
 		}
+		scanner.Identities = identityKeyring
 		scanner.Querier = hardwareprobe.NewATQuerierWithIdentity(identityKeyring)
 	}
 	monitor := agentapi.NewMonitor(scanner)
@@ -137,8 +138,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logger.Error("agent socket bind failed", "path", *socketPath, "error", err)
 		return 1
 	}
+	rfService := agentapi.NewRFService(monitor, scanner)
 	server := &http.Server{
-		Handler: agentapi.NewReadOnlyHardwareHandler(monitor, logger), ReadHeaderTimeout: 3 * time.Second,
+		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, logger), ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	var simAKAServer *http.Server
@@ -170,7 +172,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if simAKAServer != nil {
 		go func() { serverErrors <- serverFailure{name: "SIM AKA HIL", err: simAKAServer.Serve(simAKAListener)} }()
 	}
-	logger.Info("read-only hardware agent listening", "socket", *socketPath, "protocol_version", agentapi.ProtocolVersion, "scan_interval", scanInterval.String())
+	logger.Info("typed hardware agent listening", "socket", *socketPath, "protocol_version", agentapi.ProtocolVersion, "scan_interval", scanInterval.String())
 	if simAKAServer != nil {
 		logger.Info("root-only SIM AKA HIL endpoint listening", "socket", *simAKASocketPath, "protocol_version", agentapi.ProtocolVersion)
 	}

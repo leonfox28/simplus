@@ -55,7 +55,7 @@ function isAccessMode(value: unknown): boolean {
   return value === 'cellular-native' || value === 'host-vowifi-only' || value === 'hold-rf-off'
 }
 
-function isCapabilities(value: unknown): value is HardwareCapabilities {
+export function isHardwareCapabilities(value: unknown): value is HardwareCapabilities {
   if (!isRecord(value)) return false
   const capabilityKeys = [
     'simAccess',
@@ -125,7 +125,7 @@ function isFunction(value: unknown): value is ModemFunctionDetail {
     isLabel(value.displayName) &&
     ['simulated', 'direct-at', 'direct-qmi', 'direct-mbim', 'modemmanager', 'pcsc'].includes(String(value.backend)) &&
     isGeneration(value.generation) &&
-    isCapabilities(value.capabilities)
+    isHardwareCapabilities(value.capabilities)
   )
 }
 
@@ -212,7 +212,7 @@ function isLine(value: unknown): value is HardwareLineDetail {
     isID(value.resourceGroupId) &&
     isLabel(value.displayName) &&
     isGeneration(value.generation) &&
-    isCapabilities(value.capabilities) &&
+    isHardwareCapabilities(value.capabilities) &&
     isAccessMode(value.accessMode) &&
     typeof value.accessModeConfigured === 'boolean' &&
     state &&

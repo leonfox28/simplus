@@ -5,16 +5,14 @@ import (
 	"fmt"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/modemadapter"
 )
 
 type simAKAQuerier interface {
-	ReadSIMAKAIdentity(context.Context, string, string, string) (string, error)
-	AuthenticateSIMAKA(context.Context, string, string, string, agentapi.SIMAKAChallenge) (agentapi.SIMAKAExecution, error)
-}
-
-type simIMSQuerier interface {
-	ProbeSIMIMSProfile(context.Context, string, string, string) (bool, error)
-	ReadSIMIMSIdentity(context.Context, string, string, string) (agentapi.SIMIMSIdentityMaterial, error)
+	ReadSIMAKAIdentity(context.Context, string, modemadapter.SIMAuthAdapter, string) (string, error)
+	AuthenticateSIMAKA(context.Context, string, modemadapter.SIMAuthAdapter, string, agentapi.SIMAKAChallenge) (agentapi.SIMAKAExecution, error)
+	ProbeSIMIMSProfile(context.Context, string, modemadapter.SIMAuthAdapter, string) (bool, error)
+	ReadSIMIMSIdentity(context.Context, string, modemadapter.SIMAuthAdapter, string) (agentapi.SIMIMSIdentityMaterial, error)
 }
 
 func (scanner *Scanner) ReadSIMAKAIdentity(ctx context.Context, snapshot agentapi.Snapshot, deviceID, identityFingerprint string) (string, error) {
@@ -23,11 +21,11 @@ func (scanner *Scanner) ReadSIMAKAIdentity(ctx context.Context, snapshot agentap
 	}
 	scanner.controlMu.Lock()
 	defer scanner.controlMu.Unlock()
-	device, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
+	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return "", err
 	}
-	return querier.ReadSIMAKAIdentity(ctx, endpoint, device.Profile, identityFingerprint)
+	return querier.ReadSIMAKAIdentity(ctx, endpoint, adapter, identityFingerprint)
 }
 
 func (scanner *Scanner) AuthenticateSIMAKA(ctx context.Context, snapshot agentapi.Snapshot, deviceID, identityFingerprint string, challenge agentapi.SIMAKAChallenge) (agentapi.SIMAKAExecution, error) {
@@ -36,11 +34,11 @@ func (scanner *Scanner) AuthenticateSIMAKA(ctx context.Context, snapshot agentap
 	}
 	scanner.controlMu.Lock()
 	defer scanner.controlMu.Unlock()
-	device, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
+	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return agentapi.SIMAKAExecution{}, err
 	}
-	return querier.AuthenticateSIMAKA(ctx, endpoint, device.Profile, identityFingerprint, challenge)
+	return querier.AuthenticateSIMAKA(ctx, endpoint, adapter, identityFingerprint, challenge)
 }
 
 func (scanner *Scanner) ProbeSIMIMSProfile(ctx context.Context, snapshot agentapi.Snapshot, deviceID, identityFingerprint string) (bool, error) {
@@ -49,15 +47,11 @@ func (scanner *Scanner) ProbeSIMIMSProfile(ctx context.Context, snapshot agentap
 	}
 	scanner.controlMu.Lock()
 	defer scanner.controlMu.Unlock()
-	device, endpoint, _, err := scanner.simAKATarget(snapshot, deviceID)
+	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return false, err
 	}
-	querier, ok := scanner.Querier.(simIMSQuerier)
-	if !ok || querier == nil {
-		return false, agentapi.ErrSIMAKAUnsupported
-	}
-	return querier.ProbeSIMIMSProfile(ctx, endpoint, device.Profile, identityFingerprint)
+	return querier.ProbeSIMIMSProfile(ctx, endpoint, adapter, identityFingerprint)
 }
 
 func (scanner *Scanner) ReadSIMIMSIdentity(ctx context.Context, snapshot agentapi.Snapshot, deviceID, identityFingerprint string) (agentapi.SIMIMSIdentityMaterial, error) {
@@ -66,18 +60,14 @@ func (scanner *Scanner) ReadSIMIMSIdentity(ctx context.Context, snapshot agentap
 	}
 	scanner.controlMu.Lock()
 	defer scanner.controlMu.Unlock()
-	device, endpoint, _, err := scanner.simAKATarget(snapshot, deviceID)
+	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return agentapi.SIMIMSIdentityMaterial{}, err
 	}
-	querier, ok := scanner.Querier.(simIMSQuerier)
-	if !ok || querier == nil {
-		return agentapi.SIMIMSIdentityMaterial{}, agentapi.ErrSIMAKAUnsupported
-	}
-	return querier.ReadSIMIMSIdentity(ctx, endpoint, device.Profile, identityFingerprint)
+	return querier.ReadSIMIMSIdentity(ctx, endpoint, adapter, identityFingerprint)
 }
 
-func (scanner *Scanner) simAKATarget(snapshot agentapi.Snapshot, deviceID string) (*agentapi.DeviceReport, string, simAKAQuerier, error) {
+func (scanner *Scanner) simAKATarget(snapshot agentapi.Snapshot, deviceID string) (modemadapter.SIMAuthAdapter, string, simAKAQuerier, error) {
 	var device *agentapi.DeviceReport
 	for index := range snapshot.Devices {
 		if snapshot.Devices[index].ID == deviceID {
@@ -88,16 +78,30 @@ func (scanner *Scanner) simAKATarget(snapshot agentapi.Snapshot, deviceID string
 	if device == nil {
 		return nil, "", nil, fmt.Errorf("%w: device is absent", agentapi.ErrSIMAKADeviceStale)
 	}
-	if device.Profile != agentapi.ProfileML307A {
+	adapter, ok := scanner.adapterRegistry().ForProfile(device.Profile)
+	if !ok {
 		return nil, "", nil, agentapi.ErrSIMAKAUnsupported
 	}
-	endpoint := scanner.preferredATEndpoint(*device)
-	if endpoint == "" {
+	auth, ok := adapter.(modemadapter.SIMAuthAdapter)
+	if !ok || !observedCapability(*device, "sim-auth") {
+		return nil, "", nil, agentapi.ErrSIMAKAUnsupported
+	}
+	endpoint, ok := auth.SIMAuthEndpoint(*device)
+	if !ok || endpoint.Node == "" {
 		return nil, "", nil, agentapi.ErrSIMAKAUnavailable
 	}
 	querier, ok := scanner.Querier.(simAKAQuerier)
 	if !ok || querier == nil {
 		return nil, "", nil, agentapi.ErrSIMAKAUnsupported
 	}
-	return device, endpoint, querier, nil
+	return auth, endpoint.Node, querier, nil
+}
+
+func observedCapability(device agentapi.DeviceReport, expected string) bool {
+	for _, capability := range device.Capabilities {
+		if capability.Capability == expected {
+			return capability.Status == agentapi.EvidenceObserved
+		}
+	}
+	return false
 }

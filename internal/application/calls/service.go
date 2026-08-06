@@ -27,7 +27,7 @@ var (
 
 var (
 	operationPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
-	linePattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	linePattern      = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
 	numberPattern    = regexp.MustCompile(`^\+?[0-9]{3,20}$`)
 	dtmfPattern      = regexp.MustCompile(`^[0-9*#A-D]{1,32}$`)
 )

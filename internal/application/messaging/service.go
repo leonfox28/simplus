@@ -42,7 +42,7 @@ var (
 
 var (
 	operationIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
-	lineIDPattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	lineIDPattern        = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
 	destinationPattern   = regexp.MustCompile(`^\+?[0-9]{3,20}$`)
 	remoteAddressPattern = regexp.MustCompile(`^(?:\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$`)
 	errorCodePattern     = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)

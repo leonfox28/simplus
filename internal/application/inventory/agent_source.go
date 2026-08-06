@@ -60,13 +60,19 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 		groupID := deviceID + "-resources"
 		controlObserved := observedCapability(device, "at-control") || observedCapability(device, "qmi-control")
 		capabilities := mapAgentCapabilities(device)
+		observation, observed := probeByDevice[device.ID]
+		equipmentIdentity := ""
+		if observed {
+			equipmentIdentity = observation.Identity.EquipmentIdentityFingerprint
+		}
 		backend := hardware.BackendDirectAT
 		if observedCapability(device, "qmi-control") {
 			backend = hardware.BackendDirectQMI
 		}
 		snapshot.Devices = append(snapshot.Devices, hardware.PhysicalDevice{
 			ID: deviceID, DisplayName: device.DisplayName, Transport: hardware.TransportUSB,
-			State: hardware.DeviceAvailable, Generation: device.Generation,
+			State: hardware.DeviceAvailable, EquipmentIdentityFingerprint: equipmentIdentity,
+			USBSerialFingerprint: device.USB.SerialFingerprint, Generation: device.Generation,
 		})
 		if !controlObserved {
 			// Keep descriptor-only candidates visible without inventing operable functions, slots or resources.
@@ -76,8 +82,12 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 			ID: functionID, PhysicalDeviceID: deviceID, DisplayName: device.DisplayName + " modem",
 			Backend: backend, Generation: device.Generation, Capabilities: capabilities,
 		})
+		if !capabilities.SIMAccess {
+			// A discovered control function remains visible as a modem, but the
+			// SIM/Line graph exists only when the adapter declares SIM access.
+			continue
+		}
 		presence := hardware.SlotUnknown
-		observation, observed := probeByDevice[device.ID]
 		if observed {
 			switch observation.SIM.State {
 			case agentapi.SIMStatePresent, agentapi.SIMStateLocked:
@@ -86,8 +96,7 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 				presence = hardware.SlotAbsent
 			}
 		}
-		identityReady := observed && observation.RF.State == agentapi.RFStateOff &&
-			observation.SIM.State == agentapi.SIMStatePresent && observation.SIM.PrimaryLockState == agentapi.PrimaryLockReady &&
+		identityReady := observed && observation.SIM.State == agentapi.SIMStatePresent && observation.SIM.PrimaryLockState == agentapi.PrimaryLockReady &&
 			len(observation.SIM.IdentityFingerprint) == 64 && observation.SIM.DisplayIdentityHint != ""
 		mediaID, profileID, lineID := "", "", ""
 		if identityReady {
@@ -99,7 +108,10 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 		snapshot.SIMSlots = append(snapshot.SIMSlots, hardware.SIMSlot{
 			ID: slotID, PhysicalDeviceID: deviceID, Index: 0, Presence: presence, ActiveMediaID: mediaID, Generation: device.Generation,
 		})
-		resources := []string{hardware.ResourceRadioControl, hardware.ResourceSIMAccess}
+		resources := []string{hardware.ResourceSIMAccess}
+		if capabilities.RFControl {
+			resources = append(resources, hardware.ResourceRadioControl)
+		}
 		if capabilities.SMS {
 			resources = append(resources, hardware.ResourceSMSStorage)
 		}
@@ -180,7 +192,7 @@ func mapAgentCapabilities(device agentapi.DeviceReport) hardware.Capabilities {
 		RFControl:              control && observedCapability(device, "rf-control"),
 		NetworkScan:            control && observedCapability(device, "operator-selection"),
 		ManualNetworkSelection: control && observedCapability(device, "operator-selection"),
-		PrimarySIMLockState:    control,
+		PrimarySIMLockState:    control && observedCapability(device, "sim-presence"),
 		PIN1Verify:             false,
 		PUK1Unblock:            false,
 		EUICCProfiles:          false,

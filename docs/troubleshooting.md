@@ -50,7 +50,7 @@
 ## 固定复查顺序
 
 1. 查看 Line 的 `state`、`stage`、`attempt`、`registeredAt`、`nextRefreshAt` 和稳定错误码；
-2. 确认目标模组唯一、SIM READY、RF Off、无活动呼叫，且硬件 generation/identity fence 未变化；
+2. 确认目标 Line 唯一解析到 SIM READY 的鉴权能力、无活动呼叫，且硬件 generation/identity fence 未变化；若要复现当前已验证基线，再单独确认 RF Off；
 3. 若使用 Mihomo，确认 selected 与 running 工件一致、目标国家组存在且 core 自检成功；
 4. 将 TCP、普通 UDP、DNS、STUN 和目标 ePDG UDP 分开验证，不根据节点配置字段推断；
 5. 进入 IMS 阶段后，区分“请求被拒绝”“无响应”“事务不匹配”和本地失败；

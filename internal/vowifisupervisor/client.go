@@ -62,7 +62,7 @@ func (client *Client) SendSMS(ctx context.Context, request SMSSendRequest) (SMSS
 }
 
 func (client *Client) ListSMS(ctx context.Context, lineID string) ([]SMSMessageReference, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return nil, ErrRequestInvalid
 	}
 	var response SMSListResponse
@@ -104,7 +104,7 @@ func (client *Client) AcknowledgeSMS(ctx context.Context, request SMSAcknowledge
 }
 
 func (client *Client) ListSMSSubmitReports(ctx context.Context, lineID string) (SMSSubmitReportListResponse, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return SMSSubmitReportListResponse{}, ErrRequestInvalid
 	}
 	var response SMSSubmitReportListResponse

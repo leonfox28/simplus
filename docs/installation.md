@@ -2,7 +2,7 @@
 
 ## 支持边界
 
-目标是单台 Debian Linux 主机、单管理员、可信 LAN。production Agent 固定为真实硬件只读及窄化 SIM-AKA owner：它只枚举 USB、执行白名单查询，并只为获准的 ML307A Host VoWiFi worker 提供类型化 AKA；不注册 RF、SMS、Call、eUICC mutation 或蜂窝数据连接路由。真实 Host VoWiFi 仅覆盖已验证的 ePDG/IMS 注册和保活，不代表真实短信、电话或媒体已经可用。
+目标是单台 Debian Linux 主机、单管理员、可信 LAN。production Agent 只枚举 USB、执行白名单查询，提供窄化的 SIM 鉴权能力，以及经过确认后才执行的 ML307A 运行时 RF 开关；不注册 SMS、Call、eUICC mutation 或蜂窝数据连接路由。真实 Host VoWiFi 仅覆盖已验证的 ePDG/IMS 注册和保活，不代表真实短信、电话或媒体已经可用。
 
 ## 构建 bundle
 
@@ -30,7 +30,7 @@ production Web/API 固定监听 `0.0.0.0:8080`，Mihomo 启动时其带密码 co
 
 `0.0.0.0` 会覆盖主机当前和以后出现的所有 IPv4 接口，包括 VPN 或误接入的公网接口。Simplus 仍只面向可信 LAN，管理员必须用路由和主机防火墙限制 `8080/tcp` 与 `19090/tcp`。controller 密码提供鉴权但不为普通 HTTP 加密，不能把通配监听理解为可安全暴露公网。开发命令默认仍只监听 `127.0.0.1`。
 
-首次访问直接使用安装器输出的账户登录，再确认本机存储目录即可进入后台。普通 HTTP 仅适用于可信局域网；可信 HTTPS 在“系统设置”维护，浏览器麦克风需要 HTTPS secure context。systemd unit 中的 `simplus-agent` 没有任何启用写操作的 flag。
+首次访问直接使用安装器输出的账户登录，再确认本机存储目录即可进入后台。普通 HTTP 仅适用于可信局域网；可信 HTTPS 在“系统设置”维护，浏览器麦克风需要 HTTPS secure context。systemd unit 不通过 flag 开放任意硬件写入；唯一的 ML307A RF 路径是编译期固定的类型化接口。
 
 `simplusd` 没有网络管理 capability。root `simplus-netd.service` 是 Mihomo 和 Host VoWiFi 网络状态的唯一 owner；两者通过 `/run/simplus-netd/mihomo.sock` 的固定 lifecycle 协议通信。激活真实 Line 时，`simplus-netd` 只按内部派生计划创建该 Line 的 namespace、veth、策略路由、nftables、strongSwan 和 XFRM，不接受 Web 提交底层路径或命令；停用和进程退出会清理这些临时对象。
 
@@ -39,9 +39,9 @@ production Web/API 固定监听 `0.0.0.0:8080`，Mihomo 启动时其带密码 co
 - Agent 看不到模组：检查 ModemManager 是否仍在占用端点、USB 枚举和 `dialout` 权限；不要用任意 AT 命令绕过 Agent。
 - Agent socket 创建失败：确认 unit 以 `User=simplus-agent`、`Group=simplus` 创建 RuntimeDirectory，不能通过增加 `CAP_CHOWN` 绕过组配置。
 - Agent socket 只允许 root 维护工具和 `simplus` 服务 UID；不要加入普通交互用户或改成 `0666`。
-- ML307A 未物化真实 Line：确认 `2ecc:3012` 的 Interface `02` 已由安装器绑定、SIM 为 READY 且 RF 保持 Off；不要手工打开 tty 绕过 Agent。
+- ML307A 未出现在候选列表：确认 `2ecc:3012` 的 Interface `02` 已由安装器绑定且 SIM 为 READY；RF 是独立模组状态，不影响候选发现或添加。不要手工打开 tty 绕过 Agent。
 - Host VoWiFi 无法激活：先在线路页检查接入方式、当前订阅、国家出口和 Mihomo 状态；`mihomo-country` 不可用时不会回退 direct。
-- Hardware 页面业务按钮不可用：这是 V1 read-only policy，不得通过 Simulator fallback 伪装成功。
+- Hardware 页面业务按钮不可用：先确认模组在线且声明对应的证据化能力；不支持的能力不得通过 Simulator fallback 伪装成功。
 - 数据位于 `/var/lib/simplus`；普通卸载保留该目录。
 
 ## 卸载

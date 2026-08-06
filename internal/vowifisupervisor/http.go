@@ -64,7 +64,7 @@ func NewHandler(supervisor API, logger *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("POST /sms/list", func(w http.ResponseWriter, r *http.Request) {
 		var request SMSListRequest
-		if sms == nil || !decodeRequest(w, r, &request) || !hardwareLinePattern.MatchString(request.LineID) {
+		if sms == nil || !decodeRequest(w, r, &request) || !managedLinePattern.MatchString(request.LineID) {
 			writeError(w, logger, chooseSMSRequestError(sms))
 			return
 		}
@@ -102,7 +102,7 @@ func NewHandler(supervisor API, logger *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("POST /sms/reports/list", func(w http.ResponseWriter, r *http.Request) {
 		var request SMSListRequest
-		if sms == nil || !decodeRequest(w, r, &request) || !hardwareLinePattern.MatchString(request.LineID) {
+		if sms == nil || !decodeRequest(w, r, &request) || !managedLinePattern.MatchString(request.LineID) {
 			writeError(w, logger, chooseSMSRequestError(sms))
 			return
 		}

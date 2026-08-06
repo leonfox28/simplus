@@ -23,9 +23,11 @@ import (
 	"github.com/leonfox28/simplus/internal/application/euicc"
 	"github.com/leonfox28/simplus/internal/application/health"
 	"github.com/leonfox28/simplus/internal/application/inventory"
+	lineapp "github.com/leonfox28/simplus/internal/application/line"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	"github.com/leonfox28/simplus/internal/application/messaging"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
+	modemapp "github.com/leonfox28/simplus/internal/application/modem"
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	"github.com/leonfox28/simplus/internal/application/setup"
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
@@ -79,6 +81,7 @@ func run() int {
 		return 1
 	}
 	var inventoryService *inventory.Service
+	var hardwareAgentClient *agentapi.Client
 	var messageSender messaging.Sender
 	var messageInbox messaging.Inbox
 	mihomoSupervisorSocket := os.Getenv("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET")
@@ -116,12 +119,13 @@ func run() int {
 			_ = stores.Close()
 			return 1
 		}
-		if policyErr := requireReadOnlyAgent(hello); policyErr != nil {
-			logger.Error("hardware Agent does not satisfy the read-only V1 policy", "error", policyErr)
+		if policyErr := requireTypedHardwareAgent(hello); policyErr != nil {
+			logger.Error("hardware Agent does not satisfy the typed capability policy", "error", policyErr)
 			_ = stores.Close()
 			return 1
 		}
 		inventoryService = inventory.New(inventory.NewAgentSource(agentClient), stores)
+		hardwareAgentClient = agentClient
 		if mihomoSupervisorSocket != "" {
 			voWiFiSupervisor, clientErr = vowifisupervisor.NewClient(mihomoSupervisorSocket)
 			if clientErr != nil {
@@ -146,7 +150,22 @@ func run() int {
 		_ = stores.Close()
 		return 2
 	}
-	messageService, err := messaging.NewService(ctx, stores, inventoryService, messageSender, messageInbox)
+	managedModemService, err := modemapp.New(stores, inventoryService)
+	if err != nil {
+		logger.Error("managed modem initialization failed", "error", err)
+		_ = stores.Close()
+		return 1
+	}
+	if hardwareAgentClient != nil {
+		managedModemService.UseRFController(modemapp.NewAgentRFController(hardwareAgentClient))
+	}
+	managedLineService, err := lineapp.New(stores, inventoryService)
+	if err != nil {
+		logger.Error("managed line initialization failed", "error", err)
+		_ = stores.Close()
+		return 1
+	}
+	messageService, err := messaging.NewService(ctx, stores, managedLineService, messageSender, messageInbox)
 	if err != nil {
 		logger.Error("messaging initialization failed", "error", err)
 		_ = stores.Close()
@@ -162,7 +181,7 @@ func run() int {
 	var euiccService *euicc.Service
 	var accessPathService *accesspath.Service
 	if cfg.Runtime.Backend == config.BackendSimulator {
-		callService, err = calls.New(ctx, stores, inventoryService)
+		callService, err = calls.New(ctx, stores, managedLineService)
 		if err != nil {
 			logger.Error("calls initialization failed", "error", err)
 			_ = stores.Close()
@@ -174,7 +193,7 @@ func run() int {
 			_ = stores.Close()
 			return 1
 		}
-		accessPathService, err = accesspath.New(stores)
+		accessPathService, err = accesspath.New(stores, managedLineService)
 		if err != nil {
 			logger.Error("access paths initialization failed", "error", err)
 			_ = stores.Close()
@@ -215,10 +234,10 @@ func run() int {
 	}
 	mihomoSubscriptionService := mihomoapp.NewSubscriptionService(stores, secretKeyring, mihomoConfigManager)
 	mihomoEgressService := mihomoapp.NewEgressService(stores, mihomoCoreManager)
-	lineEgressService := lineegressapp.New(stores, inventoryService, mihomoRuntimeManager)
+	lineEgressService := lineegressapp.New(stores, managedLineService, mihomoRuntimeManager)
 	var voWiFiService *vowifiapp.Service
 	if cfg.Runtime.Backend == config.BackendHardware && voWiFiSupervisor != nil {
-		voWiFiService, err = vowifiapp.New(stores, inventoryService, lineEgressService, mihomoRuntimeManager, voWiFiSupervisor)
+		voWiFiService, err = vowifiapp.New(stores, managedLineService, lineEgressService, mihomoRuntimeManager, voWiFiSupervisor)
 		if err != nil {
 			logger.Error("Host VoWiFi service configuration failed", "error", err)
 			_ = stores.Close()
@@ -231,6 +250,8 @@ func run() int {
 	}
 	go runSMSSync(ctx, messageService, notificationService, logger, 2*time.Second)
 	apiServer := httpapi.New(health.New(stores, cfg.Runtime.Backend), setupService, inventoryService, logger, authService, messageService, contactService)
+	apiServer = httpapi.WithManagedModems(apiServer, managedModemService)
+	apiServer = httpapi.WithManagedLines(apiServer, managedLineService)
 	if callService != nil {
 		apiServer = httpapi.WithCalls(apiServer, callService)
 	}
@@ -439,18 +460,18 @@ func managementListenerNetwork(address string) string {
 	return "tcp6"
 }
 
-func requireReadOnlyAgent(hello agentapi.Hello) error {
-	readOnly := false
+func requireTypedHardwareAgent(hello agentapi.Hello) error {
+	rfControl := false
 	for _, feature := range hello.Features {
 		switch feature {
-		case agentapi.FeatureHardwareReadOnly:
-			readOnly = true
+		case agentapi.FeatureRFControl:
+			rfControl = true
 		case agentapi.FeatureSMS, agentapi.CommandRadioEnsureOff, "durable-command-outcomes":
 			return fmt.Errorf("Agent advertises forbidden mutation feature %q", feature)
 		}
 	}
-	if !readOnly {
-		return errors.New("Agent does not advertise hardware-read-only-policy-v1")
+	if !rfControl {
+		return errors.New("Agent does not advertise rf-control-v1")
 	}
 	return nil
 }

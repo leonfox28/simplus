@@ -1,0 +1,387 @@
+package line
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/leonfox28/simplus/internal/application/inventory"
+	modemapp "github.com/leonfox28/simplus/internal/application/modem"
+	"github.com/leonfox28/simplus/internal/domain/accessmode"
+	"github.com/leonfox28/simplus/internal/domain/hardware"
+	domain "github.com/leonfox28/simplus/internal/domain/line"
+	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
+)
+
+var (
+	ErrCandidateNotFound = errors.New("line candidate was not found")
+	ErrCandidateInvalid  = errors.New("line candidate is invalid")
+	ErrAlreadyManaged    = errors.New("line candidate is already managed")
+	ErrRequestInvalid    = errors.New("managed line request is invalid")
+)
+
+var (
+	lineIDPattern      = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
+	candidateIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+type Repository interface {
+	ListManagedLines(context.Context) ([]domain.Record, error)
+	CreateManagedLine(context.Context, domain.Record) error
+	UpdateManagedLine(context.Context, string, string, accessmode.Mode, time.Time) error
+	ListManagedModems(context.Context) ([]modemdomain.Record, error)
+}
+
+type Inventory interface {
+	Topology(context.Context) (inventory.Topology, error)
+}
+
+type Service struct {
+	repository Repository
+	inventory  Inventory
+	random     io.Reader
+	now        func() time.Time
+
+	mu sync.Mutex
+}
+
+func New(repository Repository, inventoryService Inventory) (*Service, error) {
+	if repository == nil || inventoryService == nil {
+		return nil, errors.New("managed line service is not configured")
+	}
+	return &Service{repository: repository, inventory: inventoryService, random: rand.Reader, now: time.Now}, nil
+}
+
+func (service *Service) List(ctx context.Context) ([]domain.View, error) {
+	records, modems, topology, err := service.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return views(records, modems, topology), nil
+}
+
+func (service *Service) Candidates(ctx context.Context) ([]domain.Candidate, error) {
+	records, modems, topology, err := service.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	observed := candidateObservations(records, modems, topology)
+	result := make([]domain.Candidate, 0, len(observed))
+	for _, candidate := range observed {
+		result = append(result, candidate.Candidate)
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].ManagedModemDisplayName == result[right].ManagedModemDisplayName {
+			return result[left].SubscriptionDisplayHint < result[right].SubscriptionDisplayHint
+		}
+		return result[left].ManagedModemDisplayName < result[right].ManagedModemDisplayName
+	})
+	return result, nil
+}
+
+func (service *Service) Add(ctx context.Context, candidateID, displayName string, mode accessmode.Mode) (domain.View, error) {
+	if !candidateIDPattern.MatchString(candidateID) || !validDisplayName(displayName) || !mode.Valid() {
+		return domain.View{}, ErrRequestInvalid
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	records, modems, topology, err := service.load(ctx)
+	if err != nil {
+		return domain.View{}, err
+	}
+	observed := candidateObservations(records, modems, topology)
+	candidate, exists := observed[candidateID]
+	if !exists {
+		for _, record := range records {
+			if candidateID == candidateIDFor(record.ManagedModemID, record.SubscriptionIdentityFingerprint) {
+				return domain.View{}, ErrAlreadyManaged
+			}
+		}
+		return domain.View{}, ErrCandidateNotFound
+	}
+	if !candidate.Addable {
+		return domain.View{}, ErrCandidateInvalid
+	}
+	id, err := service.newID()
+	if err != nil {
+		return domain.View{}, fmt.Errorf("create managed line id: %w", err)
+	}
+	now := service.now().UTC()
+	record := domain.Record{
+		ID: id, ManagedModemID: candidate.ManagedModemID, SIMSlotIndex: candidate.slotIndex,
+		SubscriptionIdentityFingerprint: candidate.identityFingerprint,
+		SubscriptionDisplayHint:         candidate.SubscriptionDisplayHint,
+		DisplayName:                     strings.TrimSpace(displayName), AccessMode: mode, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := service.repository.CreateManagedLine(ctx, record); err != nil {
+		return domain.View{}, fmt.Errorf("persist managed line: %w", err)
+	}
+	return viewFor(record, modems, topology), nil
+}
+
+func (service *Service) Update(ctx context.Context, lineID, displayName string, mode accessmode.Mode) (domain.View, error) {
+	if !lineIDPattern.MatchString(lineID) || !validDisplayName(displayName) || !mode.Valid() {
+		return domain.View{}, ErrRequestInvalid
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	records, modems, topology, err := service.load(ctx)
+	if err != nil {
+		return domain.View{}, err
+	}
+	var selected *domain.Record
+	for index := range records {
+		if records[index].ID == lineID {
+			selected = &records[index]
+			break
+		}
+	}
+	if selected == nil {
+		return domain.View{}, domain.ErrNotFound
+	}
+	selected.DisplayName = strings.TrimSpace(displayName)
+	selected.AccessMode = mode
+	selected.UpdatedAt = service.now().UTC()
+	if err := service.repository.UpdateManagedLine(ctx, selected.ID, selected.DisplayName, selected.AccessMode, selected.UpdatedAt); err != nil {
+		return domain.View{}, err
+	}
+	return viewFor(*selected, modems, topology), nil
+}
+
+// Topology implements the business Line catalog. Hardware inventory remains
+// the observation source, while only administrator-created Lines are exposed
+// to SMS, calls, egress and Host VoWiFi consumers.
+func (service *Service) Topology(ctx context.Context) (inventory.Topology, error) {
+	records, modems, topology, err := service.load(ctx)
+	if err != nil {
+		return inventory.Topology{}, err
+	}
+	topology.Lines = resolvedLines(records, modems, topology)
+	revision, err := inventory.Revision(topology)
+	if err != nil {
+		return inventory.Topology{}, fmt.Errorf("digest managed line topology: %w", err)
+	}
+	topology.Revision = revision
+	return topology, nil
+}
+
+func (service *Service) load(ctx context.Context) ([]domain.Record, []modemdomain.Record, inventory.Topology, error) {
+	records, err := service.repository.ListManagedLines(ctx)
+	if err != nil {
+		return nil, nil, inventory.Topology{}, fmt.Errorf("list managed lines: %w", err)
+	}
+	modems, err := service.repository.ListManagedModems(ctx)
+	if err != nil {
+		return nil, nil, inventory.Topology{}, fmt.Errorf("list managed modems for lines: %w", err)
+	}
+	topology, err := service.inventory.Topology(ctx)
+	if err != nil {
+		return nil, nil, inventory.Topology{}, fmt.Errorf("read hardware topology for lines: %w", err)
+	}
+	return records, modems, topology, nil
+}
+
+type candidateObservation struct {
+	domain.Candidate
+	identityFingerprint string
+	slotIndex           int
+}
+
+func candidateObservations(records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) map[string]candidateObservation {
+	managed := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		managed[candidateIDFor(record.ManagedModemID, record.SubscriptionIdentityFingerprint)] = struct{}{}
+	}
+	modemByID := make(map[string]modemdomain.Record, len(modems))
+	for _, modem := range modems {
+		modemByID[modem.ID] = modem
+	}
+	physicalByModem := modemapp.ResolveManagedModemDevices(modems, topology)
+	modemByPhysical := make(map[string]string, len(physicalByModem))
+	for modemID, physicalID := range physicalByModem {
+		if modemByPhysical[physicalID] == "" {
+			modemByPhysical[physicalID] = modemID
+		} else {
+			modemByPhysical[physicalID] = "-conflict-"
+		}
+	}
+	profiles := profileObservations(topology)
+	result := make(map[string]candidateObservation)
+	for _, line := range topology.Lines {
+		modemID := modemByPhysical[line.PhysicalDeviceID]
+		profile, ok := profiles[line.SubscriptionProfileID]
+		if modemID == "" || modemID == "-conflict-" || !ok || !fingerprintPattern.MatchString(profile.identityFingerprint) {
+			continue
+		}
+		candidateID := candidateIDFor(modemID, profile.identityFingerprint)
+		if _, exists := managed[candidateID]; exists {
+			continue
+		}
+		modem := modemByID[modemID]
+		result[candidateID] = candidateObservation{
+			Candidate: domain.Candidate{
+				CandidateID: candidateID, ManagedModemID: modemID, ManagedModemDisplayName: modem.DisplayName,
+				SubscriptionDisplayHint: profile.displayHint, Capabilities: line.Capabilities,
+				Addable: line.Capabilities.SIMAccess && profile.active,
+			},
+			identityFingerprint: profile.identityFingerprint, slotIndex: profile.slotIndex,
+		}
+	}
+	return result
+}
+
+type profileObservation struct {
+	identityFingerprint string
+	displayHint         string
+	slotIndex           int
+	active              bool
+}
+
+func profileObservations(topology inventory.Topology) map[string]profileObservation {
+	mediaByID := make(map[string]hardware.SIMMedia, len(topology.SIMMedia))
+	for _, media := range topology.SIMMedia {
+		mediaByID[media.ID] = media
+	}
+	slotsByID := make(map[string]hardware.SIMSlot, len(topology.SIMSlots))
+	for _, slot := range topology.SIMSlots {
+		slotsByID[slot.ID] = slot
+	}
+	result := make(map[string]profileObservation, len(topology.SubscriptionProfiles))
+	for _, profile := range topology.SubscriptionProfiles {
+		media, mediaOK := mediaByID[profile.SIMMediaID]
+		slot, slotOK := slotsByID[media.SIMSlotID]
+		if !mediaOK || !slotOK {
+			continue
+		}
+		result[profile.ID] = profileObservation{
+			identityFingerprint: profile.IdentityFingerprint, displayHint: profile.DisplayIdentityHint,
+			slotIndex: slot.Index, active: profile.State == hardware.ProfileActive,
+		}
+	}
+	return result
+}
+
+func views(records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) []domain.View {
+	result := make([]domain.View, 0, len(records))
+	for _, record := range records {
+		result = append(result, viewFor(record, modems, topology))
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].CreatedAt.Equal(result[right].CreatedAt) {
+			return result[left].ID < result[right].ID
+		}
+		return result[left].CreatedAt.Before(result[right].CreatedAt)
+	})
+	return result
+}
+
+func viewFor(record domain.Record, modems []modemdomain.Record, topology inventory.Topology) domain.View {
+	modemByID := make(map[string]modemdomain.Record, len(modems))
+	for _, modem := range modems {
+		modemByID[modem.ID] = modem
+	}
+	state := domain.StateModemOffline
+	capabilities := modemByID[record.ManagedModemID].Capabilities
+	physicalByModem := modemapp.ResolveManagedModemDevices(modems, topology)
+	if physicalByModem[record.ManagedModemID] != "" {
+		state = domain.StateSIMUnavailable
+	}
+	if resolved, ok := resolveLine(record, physicalByModem[record.ManagedModemID], topology); ok {
+		state, capabilities = domain.StateReady, resolved.Capabilities
+	}
+	return domain.View{
+		ID: record.ID, DisplayName: record.DisplayName, ManagedModemID: record.ManagedModemID,
+		ManagedModemDisplayName: modemByID[record.ManagedModemID].DisplayName,
+		SubscriptionDisplayHint: record.SubscriptionDisplayHint, AccessMode: record.AccessMode,
+		State: state, Capabilities: capabilities, CreatedAt: record.CreatedAt,
+	}
+}
+
+func resolvedLines(records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) []inventory.Line {
+	physicalByModem := modemapp.ResolveManagedModemDevices(modems, topology)
+	modemByID := make(map[string]modemdomain.Record, len(modems))
+	for _, modem := range modems {
+		modemByID[modem.ID] = modem
+	}
+	result := make([]inventory.Line, 0, len(records))
+	for _, record := range records {
+		line := inventory.Line{
+			ID: record.ID, ManagedModemID: record.ManagedModemID, DisplayName: record.DisplayName,
+			AccessMode: record.AccessMode, AccessModeConfigured: true, State: inventory.LineUnavailable,
+			RFSafety: inventory.RFSafetyOff, Capabilities: modemByID[record.ManagedModemID].Capabilities,
+		}
+		if current, ok := resolveLine(record, physicalByModem[record.ManagedModemID], topology); ok {
+			line.RuntimeLineID = current.ID
+			line.PhysicalDeviceID = current.PhysicalDeviceID
+			line.ModemFunctionID = current.ModemFunctionID
+			line.SubscriptionProfileID = current.SubscriptionProfileID
+			line.ResourceGroupID = current.ResourceGroupID
+			line.Generation = current.Generation
+			line.Capabilities = current.Capabilities
+			line.State = inventory.LineReady
+		}
+		result = append(result, line)
+	}
+	return result
+}
+
+func resolveLine(record domain.Record, physicalDeviceID string, topology inventory.Topology) (inventory.Line, bool) {
+	if physicalDeviceID == "" {
+		return inventory.Line{}, false
+	}
+	profiles := profileObservations(topology)
+	matches := []inventory.Line{}
+	for _, line := range topology.Lines {
+		profile, exists := profiles[line.SubscriptionProfileID]
+		if line.PhysicalDeviceID == physicalDeviceID && line.State != inventory.LineUnavailable && exists && profile.slotIndex == record.SIMSlotIndex &&
+			profile.identityFingerprint == record.SubscriptionIdentityFingerprint && profile.active {
+			matches = append(matches, line)
+		}
+	}
+	if len(matches) != 1 {
+		return inventory.Line{}, false
+	}
+	return matches[0], true
+}
+
+func candidateIDFor(modemID, fingerprint string) string {
+	if !fingerprintPattern.MatchString(fingerprint) || modemID == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(modemID + "\x00" + fingerprint))
+	return "line-candidate-" + hex.EncodeToString(digest[:16])
+}
+
+func validDisplayName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 120 || len(value) > 480 {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
+}
+
+func (service *Service) newID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := io.ReadFull(service.random, value); err != nil {
+		return "", err
+	}
+	return "line_" + base64.RawURLEncoding.EncodeToString(value), nil
+}

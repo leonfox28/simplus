@@ -19,7 +19,7 @@ var (
 	ErrInvalidBinding = errors.New("line egress binding is invalid")
 	ErrLineNotFound   = errors.New("line was not found")
 	ErrLineMode       = errors.New("line is not configured for Host VoWiFi")
-	lineIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	lineIDPattern     = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
 	countryPattern    = regexp.MustCompile(`^[A-Z]{2}$`)
 )
 

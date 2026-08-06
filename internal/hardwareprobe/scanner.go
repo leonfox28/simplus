@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,23 +17,20 @@ import (
 	"github.com/leonfox28/simplus/internal/modemadapter"
 )
 
+var fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 type ModemQuerier interface {
-	Probe(context.Context, string, string) agentapi.DeviceProbe
+	Probe(context.Context, string, modemadapter.Adapter) agentapi.DeviceProbe
 }
 
-type IdentityPseudonymizer interface {
-	Pseudonym(string, []byte) (string, error)
-}
-
-type radioOffEnsurer interface {
-	EnsureRadioOff(context.Context, string, string) agentapi.RadioEnsureOffExecution
-}
+type IdentityPseudonymizer = modemadapter.IdentityPseudonymizer
 
 type Scanner struct {
-	USBRoot  string
-	DevRoot  string
-	Querier  ModemQuerier
-	Adapters *modemadapter.Registry
+	USBRoot    string
+	DevRoot    string
+	Querier    ModemQuerier
+	Adapters   *modemadapter.Registry
+	Identities IdentityPseudonymizer
 
 	controlMu sync.Mutex
 }
@@ -132,62 +130,49 @@ func (scanner *Scanner) probeLocked(ctx context.Context, snapshot agentapi.Snaps
 			CurrentNetwork: agentapi.NetworkObservation{SelectionMode: agentapi.NetworkSelectionUnknown},
 		}
 		endpoint := scanner.preferredATEndpoint(device)
-		if endpoint == "" || scanner.Querier == nil {
-			if device.Profile == agentapi.ProfileQDC507 {
-				result.State = agentapi.ProbeStateUnavailable
-				result.Error = &agentapi.ProbeError{Layer: agentapi.ErrorLayerDevice, Code: agentapi.ErrorControlEndpointMissing, Retryable: true}
-				result.ErrorCode = agentapi.ErrorControlEndpointMissing
-				result.ErrorDetail = "preferred AT endpoint is unavailable"
-			}
+		if endpoint == "" {
+			result.State = agentapi.ProbeStateUnavailable
+			result.Error = &agentapi.ProbeError{Layer: agentapi.ErrorLayerDevice, Code: agentapi.ErrorControlEndpointMissing, Retryable: true}
+			result.ErrorCode = agentapi.ErrorControlEndpointMissing
+			result.ErrorDetail = "preferred AT endpoint is unavailable"
 			results = append(results, result)
 			continue
 		}
-		result = scanner.Querier.Probe(ctx, endpoint, device.Profile)
+		if scanner.Querier == nil {
+			result.State = agentapi.ProbeStateUnavailable
+			result.Error = &agentapi.ProbeError{Layer: agentapi.ErrorLayerPlatform, Code: agentapi.ErrorPlatformUnsupported}
+			result.ErrorCode = agentapi.ErrorPlatformUnsupported
+			result.ErrorDetail = "AT probing is unavailable on this platform"
+			results = append(results, result)
+			continue
+		}
+		base, adapterOK := scanner.adapterRegistry().ForProfile(device.Profile)
+		if !adapterOK {
+			result.State = agentapi.ProbeStateUnavailable
+			result.Error = &agentapi.ProbeError{Layer: agentapi.ErrorLayerPlatform, Code: agentapi.ErrorPlatformUnsupported}
+			result.ErrorCode = agentapi.ErrorPlatformUnsupported
+			result.ErrorDetail = "modem adapter is unavailable"
+			results = append(results, result)
+			continue
+		}
+		result = scanner.Querier.Probe(ctx, endpoint, base)
 		result.DeviceID = device.ID
 		results = append(results, result)
 	}
 	return results, nil
 }
 
-func (scanner *Scanner) EnsureRadioOff(ctx context.Context, snapshot agentapi.Snapshot, deviceID string) (agentapi.RadioEnsureOffExecution, error) {
-	if scanner == nil {
-		return agentapi.RadioEnsureOffExecution{}, errors.New("hardware scanner is unavailable")
-	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
-	var device *agentapi.DeviceReport
-	for index := range snapshot.Devices {
-		if snapshot.Devices[index].ID == deviceID {
-			device = &snapshot.Devices[index]
-			break
-		}
-	}
-	if device == nil {
-		return agentapi.RadioEnsureOffExecution{}, fmt.Errorf("device %q is not present in snapshot generation %d", deviceID, snapshot.Generation)
-	}
-	result := agentapi.RadioEnsureOffExecution{
-		Observation: agentapi.RadioEnsureOffObservation{RF: agentapi.RFObservation{State: agentapi.RFStateUnknown}},
-	}
-	endpoint := scanner.preferredATEndpoint(*device)
-	if endpoint == "" {
-		result.Error = &agentapi.ProbeError{
-			Layer: agentapi.ErrorLayerDevice, Code: agentapi.ErrorControlEndpointMissing, Retryable: true,
-		}
-		return result, nil
-	}
-	ensurer, ok := scanner.Querier.(radioOffEnsurer)
-	if !ok {
-		result.Error = &agentapi.ProbeError{
-			Layer: agentapi.ErrorLayerPlatform, Code: agentapi.ErrorPlatformUnsupported, Retryable: false,
-		}
-		return result, nil
-	}
-	return ensurer.EnsureRadioOff(ctx, endpoint, device.Profile), nil
-}
-
 func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapter, vendorID, productID, manufacturer, product string) (agentapi.DeviceReport, error) {
 	bcdDevice, _ := readAttribute(path, "bcdDevice", 16)
-	_, serialErr := os.Stat(filepath.Join(path, "serial"))
+	serial, serialErr := readAttribute(path, "serial", 128)
+	serialPresent := serialErr == nil && serial != ""
+	serialFingerprint := ""
+	if serialPresent && scanner.Identities != nil {
+		value := adapter.Profile() + "\x00" + vendorID + ":" + productID + "\x00" + serial
+		if fingerprint, fingerprintErr := scanner.Identities.Pseudonym("modem-usb-serial-v1", []byte(value)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
+			serialFingerprint = fingerprint
+		}
+	}
 	configurationText, _ := readAttribute(path, "bConfigurationValue", 16)
 	configuration, _ := strconv.Atoi(configurationText)
 	interfaces, err := scanner.scanInterfaces(name, configuration)
@@ -198,7 +183,8 @@ func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapt
 		ID: stableDeviceID(name), PhysicalPath: name, Profile: adapter.Profile(), DisplayName: adapter.DisplayName(),
 		USB: agentapi.USBIdentity{
 			VendorID: vendorID, ProductID: productID, BCDDevice: strings.ToLower(bcdDevice),
-			Manufacturer: safeText(manufacturer, 128), Product: safeText(product, 128), SerialPresent: serialErr == nil,
+			Manufacturer: safeText(manufacturer, 128), Product: safeText(product, 128),
+			SerialPresent: serialPresent, SerialFingerprint: serialFingerprint,
 			Configuration: configuration, InterfaceCount: len(interfaces),
 		},
 		Interfaces: interfaces,

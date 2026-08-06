@@ -81,11 +81,11 @@ make dev-hardware
 make dev-hardware-lan
 ```
 
-硬件 backend 与 Simulator 使用不同数据目录，服务或协议不兼容时不会回退 Simulator。production Agent 不提供任意命令、RF、短信、电话、eUICC mutation 或蜂窝数据入口。
+硬件 backend 与 Simulator 使用不同数据目录，服务或协议不兼容时不会回退 Simulator。production Agent 不提供任意命令、短信、电话、eUICC mutation 或蜂窝数据入口；ML307A 运行时 RF 控制只接受布尔目标状态并要求读回确认。
 
 ## 4. 受控 Host VoWiFi HIL
 
-Host VoWiFi HIL 使用真实 SIM AKA 和网络连接，不是日常测试。只有唯一目标模组、SIM READY、RF Off、无活动呼叫且已经取得明确授权时才能运行。
+Host VoWiFi HIL 使用真实 SIM AKA 和网络连接，不是日常测试。现有 runner 只按已经验收的 RF Off 基线运行：要求唯一目标模组、SIM READY、RF Off、无活动呼叫且已经取得明确授权。RF On 共存验证必须另行设计和授权，不能从产品解耦直接推断兼容。
 
 先构建固定 helper 和协议测试：
 

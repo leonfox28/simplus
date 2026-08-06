@@ -2,12 +2,12 @@ package sqlite
 
 import (
 	"context"
-	"fmt"
+
 	"github.com/leonfox28/simplus/internal/domain/accesspath"
 )
 
 func (set *Set) ListAccessPathConfigurations(ctx context.Context) ([]accesspath.Configuration, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT line_id,mode,mihomo_state FROM simulator_vowifi_lines ORDER BY line_id`)
+	rows, err := set.Core.QueryContext(ctx, `SELECT line_id,mode,mihomo_state FROM simulator_access_paths ORDER BY line_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -23,13 +23,7 @@ func (set *Set) ListAccessPathConfigurations(ctx context.Context) ([]accesspath.
 	return values, rows.Err()
 }
 func (set *Set) PutAccessPathConfiguration(ctx context.Context, value accesspath.Configuration) error {
-	result, err := set.Core.ExecContext(ctx, `UPDATE simulator_vowifi_lines SET mode=?,mihomo_state=? WHERE line_id=?`, value.Mode, value.MihomoState, value.LineID)
-	if err != nil {
-		return fmt.Errorf("update access path: %w", err)
-	}
-	changed, _ := result.RowsAffected()
-	if changed != 1 {
-		return fmt.Errorf("access path line not found")
-	}
-	return nil
+	_, err := set.Core.ExecContext(ctx, `INSERT INTO simulator_access_paths(line_id,mode,mihomo_state) VALUES(?,?,?)
+		ON CONFLICT(line_id) DO UPDATE SET mode=excluded.mode,mihomo_state=excluded.mihomo_state`, value.LineID, value.Mode, value.MihomoState)
+	return err
 }

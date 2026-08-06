@@ -51,6 +51,8 @@ type SubscriptionProfile struct {
 
 type Line struct {
 	ID                    string
+	ManagedModemID        string
+	RuntimeLineID         string
 	PhysicalDeviceID      string
 	ModemFunctionID       string
 	SubscriptionProfileID string
@@ -277,7 +279,8 @@ func (simulator simulatorSource) Snapshot(ctx context.Context) (hardware.Snapsho
 		hint := fmt.Sprintf("%04d", 100+index)
 		snapshot.Devices = append(snapshot.Devices, hardware.PhysicalDevice{
 			ID: deviceID, DisplayName: "Simulator modem " + suffix, Transport: hardware.TransportSimulated,
-			State: hardware.DeviceAvailable, Generation: 1,
+			State: hardware.DeviceAvailable, EquipmentIdentityFingerprint: fmt.Sprintf("%064x", 1000+index),
+			USBSerialFingerprint: fmt.Sprintf("%064x", 2000+index), Generation: 1,
 		})
 		snapshot.ModemFunctions = append(snapshot.ModemFunctions, hardware.ModemFunction{
 			ID: functionID, PhysicalDeviceID: deviceID, DisplayName: "Simulator cellular function " + suffix,

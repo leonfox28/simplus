@@ -40,7 +40,7 @@ func (local *Local) SendSMS(ctx context.Context, request SMSSendRequest) (SMSSen
 }
 
 func (local *Local) ListSMS(ctx context.Context, lineID string) ([]SMSMessageReference, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return nil, ErrRequestInvalid
 	}
 	socket, err := local.smsWorkerSocket(lineID)
@@ -130,7 +130,7 @@ func (local *Local) AcknowledgeSMS(ctx context.Context, request SMSAcknowledgeRe
 }
 
 func (local *Local) ListSMSSubmitReports(ctx context.Context, lineID string) (SMSSubmitReportListResponse, error) {
-	if !hardwareLinePattern.MatchString(lineID) {
+	if !managedLinePattern.MatchString(lineID) {
 		return SMSSubmitReportListResponse{}, ErrRequestInvalid
 	}
 	socket, err := local.smsWorkerSocket(lineID)

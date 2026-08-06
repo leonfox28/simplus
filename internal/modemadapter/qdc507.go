@@ -1,13 +1,23 @@
 package modemadapter
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/attransport"
+	"github.com/leonfox28/simplus/internal/modemadapter/standardat"
 )
 
 type QDC507 struct{}
+
+var (
+	_ ATProbeAdapter     = QDC507{}
+	_ SIMPresenceAdapter = QDC507{}
+)
 
 func (QDC507) Profile() string { return agentapi.ProfileQDC507 }
 
@@ -36,11 +46,28 @@ func (QDC507) Endpoint(device agentapi.DeviceReport, role EndpointRole) (agentap
 	}
 }
 
+func (QDC507) ATProbePlan() (standardat.ProbePlan, bool) {
+	return standardat.Standard3GPPProbePlan(), true
+}
+
+func (QDC507) ReadSIMPresence(ctx context.Context, query attransport.Query) (agentapi.SIMObservation, error) {
+	unknown := agentapi.SIMObservation{State: agentapi.SIMStateUnknown, PrimaryLockState: agentapi.PrimaryLockUnknown}
+	if query == nil {
+		return unknown, errors.New("SIM presence is unavailable")
+	}
+	lockState, err := query(ctx, "AT+CPIN?", 1500*time.Millisecond)
+	if err != nil || !attransport.HasTerminalResponse(lockState) {
+		return unknown, errors.New("SIM presence query failed")
+	}
+	presenceState, _ := query(ctx, "AT+QSIMSTAT?", 1500*time.Millisecond)
+	return standardat.SIMObservation(lockState, presenceState), nil
+}
+
 func (QDC507) Capabilities(device agentapi.DeviceReport) []agentapi.CapabilityEvidence {
 	hasAT := hasEndpoint(device, agentapi.EndpointTTY, 2)
 	hasQMI := hasEndpoint(device, agentapi.EndpointQMI, 4)
 	hasUAC := hasEndpoint(device, agentapi.EndpointALSA, -1)
-	result := make([]agentapi.CapabilityEvidence, 0, 10)
+	result := make([]agentapi.CapabilityEvidence, 0, 11)
 	add := func(capability, status string, evidence ...string) {
 		result = append(result, agentapi.CapabilityEvidence{Capability: capability, Status: status, Evidence: evidence})
 	}
@@ -61,6 +88,11 @@ func (QDC507) Capabilities(device agentapi.DeviceReport) []agentapi.CapabilityEv
 	}
 	if hasAT || hasQMI {
 		add("rf-control", agentapi.EvidenceObserved, "QDC507 control path accepted in prior RF-off HIL")
+		if hasAT {
+			add("sim-presence", agentapi.EvidenceObserved, "fixed CPIN and QSIMSTAT read-only status queries")
+		} else {
+			add("sim-presence", agentapi.EvidenceUnavailable, "primary AT endpoint required for SIM presence queries")
+		}
 		add("sim-access", agentapi.EvidenceObserved, "fixed CPIN status query available")
 		add("sms-control", agentapi.EvidenceDocumented, "requires designated-SIM HIL")
 		add("operator-selection", agentapi.EvidenceDocumented, "requires RF-armed HIL")
@@ -83,6 +115,7 @@ func normalizedUSBIdentity(descriptor USBDescriptor) string {
 
 func addUnavailableControlCapabilities(add func(string, string, ...string)) {
 	add("rf-control", agentapi.EvidenceUnavailable, "no supported control endpoint")
+	add("sim-presence", agentapi.EvidenceUnavailable, "no supported control endpoint")
 	add("sim-access", agentapi.EvidenceUnavailable, "no supported control endpoint")
 	add("sms-control", agentapi.EvidenceUnavailable, "no supported control endpoint")
 	add("operator-selection", agentapi.EvidenceUnavailable, "no supported control endpoint")

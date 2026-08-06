@@ -47,17 +47,17 @@ func TestInboundSMSRetryDelayBacksOffAndCaps(t *testing.T) {
 	}
 }
 
-func TestHardwareRuntimeRequiresReadOnlyAgentAndRejectsMutationFeatures(t *testing.T) {
-	if err := requireReadOnlyAgent(agentapi.Hello{Features: []string{agentapi.FeatureHardwareReadOnly}}); err != nil {
-		t.Fatalf("read-only Agent rejected: %v", err)
+func TestHardwareRuntimeRequiresTypedRFControlAndRejectsUnapprovedMutationFeatures(t *testing.T) {
+	if err := requireTypedHardwareAgent(agentapi.Hello{Features: []string{agentapi.FeatureRFControl}}); err != nil {
+		t.Fatalf("typed RF Agent rejected: %v", err)
 	}
 	for _, features := range [][]string{
 		{},
-		{agentapi.FeatureSMS, agentapi.FeatureHardwareReadOnly},
-		{agentapi.CommandRadioEnsureOff, agentapi.FeatureHardwareReadOnly},
-		{"durable-command-outcomes", agentapi.FeatureHardwareReadOnly},
+		{agentapi.FeatureSMS, agentapi.FeatureRFControl},
+		{agentapi.CommandRadioEnsureOff, agentapi.FeatureRFControl},
+		{"durable-command-outcomes", agentapi.FeatureRFControl},
 	} {
-		if err := requireReadOnlyAgent(agentapi.Hello{Features: features}); err == nil {
+		if err := requireTypedHardwareAgent(agentapi.Hello{Features: features}); err == nil {
 			t.Fatalf("unsafe Agent features accepted: %#v", features)
 		}
 	}

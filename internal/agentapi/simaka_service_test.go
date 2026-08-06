@@ -54,6 +54,8 @@ func newSIMAKAServiceFixture(t *testing.T) (*SIMAKAService, *fakeSIMAKABackend, 
 			Capabilities: []CapabilityEvidence{
 				{Capability: "at-control", Status: EvidenceObserved},
 				{Capability: "sim-apdu", Status: EvidenceObserved},
+				{Capability: "sim-auth", Status: EvidenceObserved},
+				{Capability: "host-vowifi-auth", Status: EvidenceObserved},
 			},
 		}},
 		probes: []DeviceProbe{validCompleteProbeFixture("usb-1-3", SIMObservation{
@@ -87,7 +89,36 @@ func newSIMAKAServiceFixture(t *testing.T) (*SIMAKAService, *fakeSIMAKABackend, 
 	return NewSIMAKAService(monitor, backend), backend, target, scanner
 }
 
-func TestSIMAKAServiceFencesIdentityAndAuthenticationToReadyRFOffSIM(t *testing.T) {
+func TestSIMIMSIdentityValidationAcceptsDynamicHomeNetworks(t *testing.T) {
+	valid := SIMIMSIdentityMaterial{
+		Source:               SIMIMSIdentityDerived,
+		PrivateIdentity:      "310260123456789@ims.mnc260.mcc310.3gppnetwork.org",
+		HomeDomain:           "ims.mnc260.mcc310.3gppnetwork.org",
+		PublicIdentities:     []string{"sip:310260123456789@ims.mnc260.mcc310.3gppnetwork.org"},
+		ApplicationDiscovery: SIMIMSDiscoveryGenericAID, ApplicationCandidates: 1,
+	}
+	if !validSIMIMSIdentityMaterial(valid) || !IsValidIMSHomeDomain(valid.HomeDomain) ||
+		!IsValidIMSPrivateIdentity(valid.PrivateIdentity, valid.HomeDomain) {
+		t.Fatalf("valid alternate IMS identity was rejected: %#v", valid)
+	}
+	for _, mutate := range []func(*SIMIMSIdentityMaterial){
+		func(material *SIMIMSIdentityMaterial) { material.HomeDomain = "ims.example.invalid" },
+		func(material *SIMIMSIdentityMaterial) {
+			material.PrivateIdentity = "310260123456789@ims.mnc999.mcc310.3gppnetwork.org"
+		},
+		func(material *SIMIMSIdentityMaterial) {
+			material.PrivateIdentity = "234150123456789@" + material.HomeDomain
+		},
+	} {
+		candidate := valid
+		mutate(&candidate)
+		if validSIMIMSIdentityMaterial(candidate) {
+			t.Fatalf("invalid dynamic IMS identity was accepted: %#v", candidate)
+		}
+	}
+}
+
+func TestSIMAKAServiceFencesIdentityAndAuthenticationToReadySIM(t *testing.T) {
 	service, backend, target, _ := newSIMAKAServiceFixture(t)
 	identity, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target})
 	if err != nil {
@@ -128,6 +159,36 @@ func TestSIMAKAServiceFencesIdentityAndAuthenticationToReadyRFOffSIM(t *testing.
 	}
 }
 
+func TestSIMAKAServiceDependsOnSIMAuthCapabilityNotHostVoWiFi(t *testing.T) {
+	service, backend, target, _ := newSIMAKAServiceFixture(t)
+	service.monitor.mu.Lock()
+	service.monitor.snapshot.Devices[0].Capabilities = []CapabilityEvidence{
+		{Capability: "at-control", Status: EvidenceObserved},
+		{Capability: "sim-auth", Status: EvidenceObserved},
+	}
+	service.monitor.mu.Unlock()
+
+	if _, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target}); err != nil {
+		t.Fatalf("standalone SIM auth capability was rejected: %v", err)
+	}
+	if backend.identityCalls != 1 {
+		t.Fatalf("identity calls = %d, want 1", backend.identityCalls)
+	}
+
+	service.monitor.mu.Lock()
+	service.monitor.snapshot.Devices[0].Capabilities = []CapabilityEvidence{
+		{Capability: "at-control", Status: EvidenceObserved},
+		{Capability: "host-vowifi-auth", Status: EvidenceObserved},
+	}
+	service.monitor.mu.Unlock()
+	if _, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target}); !errors.Is(err, ErrSIMAKAUnsupported) {
+		t.Fatalf("business capability without SIM auth error = %v", err)
+	}
+	if backend.identityCalls != 1 {
+		t.Fatalf("backend called after SIM auth capability removal: %d", backend.identityCalls)
+	}
+}
+
 func TestSIMAKAServiceFailsClosedBeforeBackend(t *testing.T) {
 	service, backend, target, scanner := newSIMAKAServiceFixture(t)
 	tests := []struct {
@@ -150,11 +211,15 @@ func TestSIMAKAServiceFailsClosedBeforeBackend(t *testing.T) {
 		})
 	}
 	scanner.probes[0].RF.State = RFStateOn
-	if _, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target}); !errors.Is(err, ErrSIMAKARFNotOff) {
-		t.Fatalf("RF-on error = %v", err)
+	if _, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target}); err != nil {
+		t.Fatalf("RF-on SIM authentication was coupled to RF state: %v", err)
 	}
-	if backend.identityCalls != 0 || backend.authCalls != 0 {
-		t.Fatalf("backend called after rejected target: identity=%d auth=%d", backend.identityCalls, backend.authCalls)
+	scanner.probes[0].SIM.PrimaryLockState = PrimaryLockPIN1Required
+	if _, err := service.Identity(t.Context(), SIMAKAIdentityRequest{SIMAKATarget: target}); !errors.Is(err, ErrSIMAKASIMNotReady) {
+		t.Fatalf("not-ready SIM error = %v", err)
+	}
+	if backend.identityCalls != 1 || backend.authCalls != 0 {
+		t.Fatalf("backend calls after RF-on and rejected SIM: identity=%d auth=%d", backend.identityCalls, backend.authCalls)
 	}
 }
 

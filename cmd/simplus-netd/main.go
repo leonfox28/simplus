@@ -130,7 +130,8 @@ func runVoWiFiWorker(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("simplus-netd --vowifi-worker", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	runtimeDir := flags.String("runtime-dir", "", "fixed private runtime directory")
-	lineID := flags.String("line-id", "", "fixed hardware Line ID")
+	lineID := flags.String("line-id", "", "stable managed Line ID")
+	hardwareLineID := flags.String("hardware-line-id", "", "current hardware Line target")
 	egressMode := flags.String("egress-mode", "", "direct or mihomo-country")
 	countryCode := flags.String("country-code", "", "ISO country code for Mihomo egress")
 	linkAddress := flags.String("link-address", "", "fixed namespace link address")
@@ -140,7 +141,7 @@ func runVoWiFiWorker(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	err := vowifisupervisor.RunWorker(ctx, vowifisupervisor.WorkerConfig{
-		LineID: *lineID, RuntimeDir: *runtimeDir, LinkAddress: *linkAddress,
+		LineID: *lineID, HardwareLineID: *hardwareLineID, RuntimeDir: *runtimeDir, LinkAddress: *linkAddress,
 		EgressMode: *egressMode, CountryCode: *countryCode,
 		CharonPath: "/usr/sbin/charon-systemd", IPPath: "/usr/sbin/ip",
 	}, stdout)

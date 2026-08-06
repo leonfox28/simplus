@@ -16,7 +16,10 @@ import (
 	"github.com/leonfox28/simplus/internal/vowifisupervisor"
 )
 
-const testLineID = "agent-line-0123456789abcdef0123456789abcdef"
+const (
+	testLineID         = "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	testHardwareLineID = "agent-line-0123456789abcdef0123456789abcdef"
+)
 
 type memoryStore struct{ desires map[string]domain.Desire }
 
@@ -117,8 +120,8 @@ func (fake *fakeSupervisor) Stop(_ context.Context, lineID string) (vowifisuperv
 
 func readyFixture() (*Service, *memoryStore, *fakeSupervisor) {
 	line := inventory.Line{
-		ID: testLineID, AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
-		State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
+		ID: testLineID, RuntimeLineID: testHardwareLineID, AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
+		State: inventory.LineReady, RFSafety: "unknown",
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
 	}
 	store := &memoryStore{desires: make(map[string]domain.Desire)}
@@ -140,7 +143,7 @@ func TestActivatePersistsIntentAndStartsCountryGroup(t *testing.T) {
 		t.Fatalf("state=%#v starts=%#v", state, supervisor.starts)
 	}
 	request := supervisor.starts[0]
-	if request.EgressMode != vowifisupervisor.EgressMihomoCountry || request.CountryCode != "GB" {
+	if request.HardwareLineID != testHardwareLineID || request.EgressMode != vowifisupervisor.EgressMihomoCountry || request.CountryCode != "GB" {
 		t.Fatalf("request=%#v", request)
 	}
 	if desire := store.desires[testLineID]; !desire.DesiredActive || desire.UpdatedAt.IsZero() {

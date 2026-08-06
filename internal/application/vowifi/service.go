@@ -106,7 +106,7 @@ func (service *Service) Activate(ctx context.Context, lineID string) (domain.Sta
 	if err := service.Store.PutVoWiFiDesire(ctx, domain.Desire{LineID: lineID, DesiredActive: true, UpdatedAt: service.Now().UTC()}); err != nil {
 		return domain.State{}, err
 	}
-	request := supervisorRequest(lineID, *egress)
+	request := supervisorRequest(*line, *egress)
 	status, err := service.Supervisor.Start(ctx, request)
 	if errors.Is(err, vowifisupervisor.ErrAlreadyRunning) {
 		statuses, listErr := service.Supervisor.List(ctx)
@@ -195,12 +195,12 @@ func (service *Service) Reconcile(ctx context.Context) error {
 		if !desired {
 			continue
 		}
-		_, egress, ready := environment.readyLine(lineID)
+		line, egress, ready := environment.readyLine(lineID)
 		if !ready {
 			continue
 		}
 		existing := environment.runtimeByLine[lineID]
-		request := supervisorRequest(lineID, *egress)
+		request := supervisorRequest(*line, *egress)
 		if existing != nil && existing.State != vowifisupervisor.StateStopped && existing.State != vowifisupervisor.StateFailed {
 			if existing.EgressMode == request.EgressMode && existing.CountryCode == request.CountryCode {
 				continue
@@ -306,23 +306,24 @@ func (environment runtimeEnvironment) readyLine(lineID string) (*inventory.Line,
 	if line == nil || egress == nil {
 		return line, egress, false
 	}
-	ready := line.AccessModeConfigured && line.AccessMode == accessmode.HostVoWiFiOnly && line.State == inventory.LineReady &&
-		line.RFSafety == inventory.RFSafetyOff && line.Capabilities.HostVoWiFiAuth && egress.Ready
+	ready := hardwareReady(*line) && egress.Ready
 	return line, egress, ready
 }
 
-func supervisorRequest(lineID string, egress lineegressapp.View) vowifisupervisor.StartRequest {
+func supervisorRequest(line inventory.Line, egress lineegressapp.View) vowifisupervisor.StartRequest {
 	mode := vowifisupervisor.EgressDirect
 	country := ""
 	if egress.Mode == lineegressdomain.ModeMihomoCountry {
 		mode, country = vowifisupervisor.EgressMihomoCountry, egress.CountryCode
 	}
-	return vowifisupervisor.StartRequest{LineID: lineID, EgressMode: mode, CountryCode: country}
+	return vowifisupervisor.StartRequest{
+		LineID: line.ID, HardwareLineID: line.RuntimeLineID, EgressMode: mode, CountryCode: country,
+	}
 }
 
 func hardwareReady(line inventory.Line) bool {
-	return line.AccessModeConfigured && line.AccessMode == accessmode.HostVoWiFiOnly && line.State == inventory.LineReady &&
-		line.RFSafety == inventory.RFSafetyOff && line.Capabilities.HostVoWiFiAuth
+	return line.RuntimeLineID != "" && line.AccessModeConfigured && line.AccessMode == accessmode.HostVoWiFiOnly && line.State == inventory.LineReady &&
+		line.Capabilities.HostVoWiFiAuth
 }
 
 func requiresMihomoRecovery(egress lineegressapp.View) bool {
@@ -348,7 +349,7 @@ func stateFor(line inventory.Line, desired bool, egress lineegressapp.View, runt
 	}
 	if !line.AccessModeConfigured || line.AccessMode != accessmode.HostVoWiFiOnly {
 		state.ReadinessCode = "LINE_NOT_HOST_VOWIFI"
-	} else if line.State != inventory.LineReady || line.RFSafety != inventory.RFSafetyOff || !line.Capabilities.HostVoWiFiAuth {
+	} else if line.State != inventory.LineReady || !line.Capabilities.HostVoWiFiAuth {
 		state.ReadinessCode = "LINE_HARDWARE_NOT_READY"
 	}
 	if runtime != nil {
