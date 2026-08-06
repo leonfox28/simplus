@@ -83,7 +83,24 @@ make dev-hardware-lan
 
 硬件 backend 与 Simulator 使用不同数据目录，服务或协议不兼容时不会回退 Simulator。production Agent 不提供任意命令、短信、电话、eUICC mutation 或蜂窝数据入口；ML307A 运行时 RF 控制只接受布尔目标状态并要求读回确认。
 
-## 4. 受控 Host VoWiFi HIL
+## 4. strongSwan 插件发布包
+
+普通 Go/Web 开发和 Simulator 不需要 strongSwan 源码。只有发布插件包时，在
+Debian 13/amd64 普通用户会话执行：
+
+```bash
+make build-strongswan-plugins-deb
+make test-strongswan-plugins-package
+```
+
+构建器按 [`0020`](decisions/0020-strongswan-plugin-package.md) 使用仓库锁定的
+Debian source 与运行 ABI 输入，在临时目录和 sysroot 中构建，不写 `/usr`、不要求
+root，也不读取主机已安装库作为链接输入。首次构建需要网络下载，之后使用被 Git
+忽略的 `.dev/cache/strongswan-plugins`；所有下载都先校验 SHA-256。输出位于
+`.dev/packages/strongswan-plugins`，包含 Debian 包、对应源码归档、摘要和 manifest。
+不要提交这些生成物，也不要把任意 source/build 路径重新引入 release 接口。
+
+## 5. 受控 Host VoWiFi HIL
 
 Host VoWiFi HIL 使用真实 SIM AKA 和网络连接，不是日常测试。现有 runner 只按已经验收的 RF Off 基线运行：要求唯一目标模组、SIM READY、RF Off、无活动呼叫且已经取得明确授权。RF On 共存验证必须另行设计和授权，不能从产品解耦直接推断兼容。
 
@@ -94,13 +111,15 @@ make build-vowifi-hil
 bash scripts/dev/test-simplus-simaka-c.sh
 ```
 
-自定义 strongSwan 插件必须针对主机实际安装的版本与 build tree 构建。一次性 runner 只接受内部固定路径和类型化输入；节点配置必须为 root-owned mode `0600`，不得打印或提交。
+正式 bundle 只安装经过锁定输入构建和验证的 `simplus-strongswan-plugins` 包；HIL
+主机不现场编译插件，也不接受手工 source/build tree。一次性 runner 只接受内部固定
+路径和类型化输入；节点配置必须为 root-owned mode `0600`，不得打印或提交。
 
 正式安装后的日常路径不运行一次性 runner。管理员在线路页为具备 Host VoWiFi 鉴权能力的 Line 明确保存 `direct` 或 Mihomo 国家出口，再使用“激活 VoWiFi”与“停用 VoWiFi”。新 Line 的未配置出口不能激活；服务只恢复此前明确保存的激活意图。
 
 出现连接、注册或刷新故障时按 [`troubleshooting.md`](troubleshooting.md) 的稳定错误码和复查顺序定位。公开问题中只能提供脱敏状态，不能附加真实订阅、节点、内网拓扑、SIM 身份、SIP 鉴权头或原始日志。
 
-## 5. 数据与发布边界
+## 6. 数据与发布边界
 
 - `.dev/`、`.tools/`、数据库、日志、录音、抓包和本机配置都不得提交；
 - 原始 HIL 与逐次排错记录应进入仓库外的私有记录系统；

@@ -2,8 +2,11 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-source_dir="$root/third_party/strongswan/simplus_simaka"
-output="${TMPDIR:-/tmp}/simplus-simaka-agent-test"
+source_dir="$root/components/strongswan-simplus-simaka"
+work=$(mktemp -d "${TMPDIR:-/tmp}/simplus-simaka-agent-test.XXXXXX")
+cleanup() { [[ -d $work ]] && rm -rf -- "$work"; }
+trap cleanup EXIT HUP INT TERM
+output="$work/agent-test"
 
 cc -std=c11 -Wall -Wextra -Werror -Wpedantic -DSIMPLUS_SIMAKA_TEST \
   -I"$source_dir" \

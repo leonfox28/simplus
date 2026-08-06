@@ -2,8 +2,43 @@
 set -euo pipefail
 [[ $(id -u) == 0 ]] || { printf 'run as root\n' >&2; exit 2; }
 bundle=$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-[[ -x $bundle/bin/simplusd && -x $bundle/bin/simplus-agent && -x $bundle/bin/simplus-netd && -x $bundle/bin/simplusctl && -x $bundle/helpers/bind-ml307a && -f $bundle/helpers/libstrongswan-simplus-simaka.so && -f $bundle/helpers/libstrongswan-p-cscf.so && -f $bundle/web/index.html && -f $bundle/zashboard/dist/index.html && -f $bundle/zashboard/LICENSE ]] || { printf 'incomplete Simplus bundle\n' >&2; exit 1; }
-[[ $(dpkg-query -W -f='${Version}' strongswan-libcharon 2>/dev/null || true) == 6.0.1-* ]] || { printf 'Simplus Host VoWiFi requires strongSwan 6.0.1\n' >&2; exit 1; }
+package_manifest="$bundle/packages/strongswan-plugins.manifest"
+[[ -x $bundle/bin/simplusd && -x $bundle/bin/simplus-agent && -x $bundle/bin/simplus-netd && -x $bundle/bin/simplusctl && -x $bundle/helpers/bind-ml307a && -f $package_manifest && -f $bundle/web/index.html && -f $bundle/zashboard/dist/index.html && -f $bundle/zashboard/LICENSE ]] || { printf 'incomplete Simplus bundle\n' >&2; exit 1; }
+manifest_value() {
+  local key=$1 value
+  value=$(sed -n "s/^${key}=//p" "$package_manifest")
+  [[ -n $value && $(grep -c "^${key}=" "$package_manifest") == 1 ]] || {
+    printf 'invalid strongSwan package manifest field: %s\n' "$key" >&2
+    exit 1
+  }
+  printf '%s' "$value"
+}
+[[ $(manifest_value FORMAT) == 1 && $(manifest_value PACKAGE_NAME) == simplus-strongswan-plugins ]] || { printf 'unsupported strongSwan package manifest\n' >&2; exit 1; }
+plugin_package_version=$(manifest_value PACKAGE_VERSION)
+plugin_package_arch=$(manifest_value TARGET_ARCH)
+strongswan_source_version=$(manifest_value STRONGSWAN_SOURCE_VERSION)
+strongswan_upstream_abi=$(manifest_value STRONGSWAN_UPSTREAM_ABI)
+strongswan_abi_upper_bound=$(manifest_value STRONGSWAN_ABI_UPPER_BOUND)
+plugin_deb_name=$(manifest_value DEB_FILENAME)
+plugin_deb_sha256=$(manifest_value DEB_SHA256)
+plugin_source_name=$(manifest_value SOURCE_FILENAME)
+plugin_source_sha256=$(manifest_value SOURCE_SHA256)
+[[ $plugin_deb_name =~ ^[A-Za-z0-9._+-]+\.deb$ && $plugin_source_name =~ ^[A-Za-z0-9._+-]+\.source\.tar\.xz$ && $plugin_deb_sha256 =~ ^[0-9a-f]{64}$ && $plugin_source_sha256 =~ ^[0-9a-f]{64}$ ]] || { printf 'unsafe strongSwan package manifest\n' >&2; exit 1; }
+plugin_deb="$bundle/packages/$plugin_deb_name"
+plugin_source="$bundle/packages/$plugin_source_name"
+[[ -f $plugin_deb && -f $plugin_source ]] || { printf 'strongSwan package artifacts are missing\n' >&2; exit 1; }
+printf '%s  %s\n' "$plugin_deb_sha256" "$plugin_deb" | sha256sum --check --status || { printf 'strongSwan plugin package checksum mismatch\n' >&2; exit 1; }
+printf '%s  %s\n' "$plugin_source_sha256" "$plugin_source" | sha256sum --check --status || { printf 'strongSwan corresponding-source checksum mismatch\n' >&2; exit 1; }
+[[ $(dpkg-deb --field "$plugin_deb" Package) == simplus-strongswan-plugins && $(dpkg-deb --field "$plugin_deb" Version) == "$plugin_package_version" && $(dpkg-deb --field "$plugin_deb" Architecture) == "$plugin_package_arch" && $(dpkg-deb --field "$plugin_deb" Built-Using) == "strongswan (= $strongswan_source_version)" && $plugin_package_arch == "$(dpkg --print-architecture)" ]] || { printf 'strongSwan plugin package identity mismatch\n' >&2; exit 1; }
+for strongswan_package in libstrongswan strongswan-libcharon libcharon-extra-plugins charon-systemd; do
+  installed_version=$(dpkg-query -W -f='${Version}' "$strongswan_package" 2>/dev/null || true)
+  if [[ -z $installed_version ]] ||
+    ! dpkg --compare-versions "$installed_version" ge "$strongswan_source_version" ||
+    ! dpkg --compare-versions "$installed_version" lt "$strongswan_abi_upper_bound"; then
+    printf 'Simplus Host VoWiFi requires %s >= %s and < %s (reviewed ABI %s)\n' "$strongswan_package" "$strongswan_source_version" "$strongswan_abi_upper_bound" "$strongswan_upstream_abi" >&2
+    exit 1
+  fi
+done
 for required_path in /usr/sbin/ip /usr/sbin/nft /usr/sbin/charon-systemd /usr/lib/ipsec/plugins/libstrongswan-eap-aka.so; do
   [[ -e $required_path ]] || { printf 'missing Host VoWiFi dependency: %s\n' "$required_path" >&2; exit 1; }
 done
@@ -13,6 +48,8 @@ for conflicting_service in ModemManager.service simplus-agent-dev.service; do
     exit 1
   fi
 done
+dpkg --install "$plugin_deb" >/dev/null
+[[ -f /usr/lib/ipsec/plugins/libstrongswan-simplus-simaka.so && -f /usr/lib/ipsec/plugins/libstrongswan-p-cscf.so ]] || { printf 'strongSwan plugin package installation failed\n' >&2; exit 1; }
 getent group simplus >/dev/null || groupadd --system simplus
 getent passwd simplus >/dev/null || useradd --system --gid simplus --home-dir /nonexistent --shell /usr/sbin/nologin simplus
 getent passwd simplus-agent >/dev/null || useradd --system --user-group --home-dir /nonexistent --shell /usr/sbin/nologin simplus-agent
@@ -23,8 +60,6 @@ install -o root -g root -m 0755 "$bundle/bin/simplus-agent" /usr/local/libexec/s
 install -o root -g root -m 0755 "$bundle/bin/simplus-netd" /usr/local/libexec/simplus/simplus-netd
 install -o root -g root -m 0755 "$bundle/helpers/bind-ml307a" /usr/local/libexec/simplus/bind-ml307a
 install -o root -g root -m 0755 "$bundle/bin/simplusctl" /usr/local/bin/simplusctl
-install -o root -g root -m 0644 "$bundle/helpers/libstrongswan-simplus-simaka.so" /usr/lib/ipsec/plugins/libstrongswan-simplus-simaka.so
-install -o root -g root -m 0644 "$bundle/helpers/libstrongswan-p-cscf.so" /usr/lib/ipsec/plugins/libstrongswan-p-cscf.so
 cp -a "$bundle/web/." /usr/local/share/simplus/web/
 chown -R root:root /usr/local/share/simplus/web
 find /usr/local/share/simplus/web -type d -exec chmod 0755 {} +

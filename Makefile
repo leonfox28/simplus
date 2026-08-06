@@ -12,6 +12,7 @@ WEB_HOST ?= 127.0.0.1
 LAN_DATA_ROOT ?= $(HOME)/.simplus-dev/data
 HARDWARE_DATA_ROOT ?= $(HOME)/.simplus-hardware-dev/data
 AGENT_SOCKET ?= /run/simplus-agent-dev/simplus-agent.sock
+STRONGSWAN_PLUGIN_PACKAGE_DIR ?= $(CURDIR)/.dev/packages/strongswan-plugins
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 COMMANDS := simplusd simplus-agent simplus-netd simplusctl
@@ -36,7 +37,7 @@ endif
 
 export GOTOOLCHAIN GOFLAGS VERSION COMMIT PNPM_HOME
 
-.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs format check-format lint test test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
+.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs format check-format lint test test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
 
 doctor:
 	@set -eu; \
@@ -154,6 +155,13 @@ build-vowifi-hil:
 	for cmd in $(VOWIFI_HIL_COMMANDS); do \
 		$(GO) build -buildvcs=false -trimpath -o "$(BIN_DIR)/$$cmd" "./cmd/$$cmd"; \
 	done
+
+build-strongswan-plugins-deb:
+	@packaging/strongswan-plugins/build-deb.sh "$(STRONGSWAN_PLUGIN_PACKAGE_DIR)"
+
+test-strongswan-plugins-package: build-strongswan-plugins-deb
+	@bash scripts/dev/test-simplus-simaka-c.sh
+	@scripts/dev/test-strongswan-plugins-package.sh "$(STRONGSWAN_PLUGIN_PACKAGE_DIR)"
 
 dev-toolchain:
 	scripts/dev/setup-toolchain.sh

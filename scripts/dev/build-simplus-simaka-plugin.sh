@@ -10,7 +10,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source_root=$(readlink -f "$1")
 build_root=$(readlink -f "$2")
 output=$(readlink -m "$3")
-plugin_source="$root/third_party/strongswan/simplus_simaka"
+plugin_source="$root/components/strongswan-simplus-simaka"
+library_dir=${SIMPLUS_STRONGSWAN_LIBDIR:-/usr/lib/ipsec}
+
+[[ $library_dir == /* ]] || {
+  echo "SIMPLUS_STRONGSWAN_LIBDIR must be an absolute path" >&2
+  exit 2
+}
 
 if [[ ! -f "$source_root/src/libsimaka/simaka_card.h" || ! -f "$build_root/config.h" ]]; then
   echo "strongSwan source or configured build tree is incomplete" >&2
@@ -20,14 +26,15 @@ if ! grep -Fq 'AC_INIT([strongSwan],[6.0.1])' "$source_root/configure.ac"; then
   echo "only the reviewed strongSwan 6.0.1 ABI is supported" >&2
   exit 1
 fi
-installed_version=$(dpkg-query -W -f='${Version}' strongswan-libcharon 2>/dev/null || true)
-if [[ "$installed_version" != 6.0.1-* ]]; then
-  echo "installed strongSwan ABI is not 6.0.1: ${installed_version:-missing}" >&2
-  exit 1
-fi
+for library in libsimaka.so libcharon.so libstrongswan.so; do
+  [[ -e "$library_dir/$library" ]] || {
+    echo "missing strongSwan build input: $library_dir/$library" >&2
+    exit 1
+  }
+done
 
 object_dir=$(mktemp -d "${TMPDIR:-/tmp}/simplus-simaka-build.XXXXXX")
-cleanup() { rm -rf "$object_dir"; }
+cleanup() { [[ -d $object_dir ]] && rm -rf -- "$object_dir"; }
 trap cleanup EXIT
 
 common=(
@@ -47,7 +54,7 @@ cc "${common[@]}" -c "$plugin_source/simplus_simaka_plugin.c" -o "$object_dir/pl
 mkdir -p "$(dirname "$output")"
 cc -shared -Wl,-z,relro,-z,now,-z,defs,-z,noexecstack \
   -o "$output" "$object_dir/agent.o" "$object_dir/card.o" "$object_dir/apn.o" "$object_dir/plugin.o" \
-  -L/usr/lib/ipsec -Wl,-rpath,/usr/lib/ipsec -lsimaka -lcharon -lstrongswan -pthread
+  -L"$library_dir" -Wl,-rpath,/usr/lib/ipsec -lsimaka -lcharon -lstrongswan -pthread
 
 if ! nm -D "$output" | grep -q ' T simplus_simaka_plugin_create$'; then
   echo "plugin constructor is missing" >&2

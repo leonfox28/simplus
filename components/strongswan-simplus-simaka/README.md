@@ -19,7 +19,10 @@ The IMSI-derived EAP identity must never be written under `/etc` or `/var`,
 printed on a command line, or logged. Agent responses and authentication
 material are cleared from plugin-owned buffers after use.
 
-This directory contains source only. `scripts/dev/test-simplus-simaka-c.sh`
-runs the dependency-free protocol/parser tests. The HIL build compiles the
-plugin against the exact installed Debian strongSwan source/version so its
-private plugin ABI is not guessed.
+This independently licensed component contains source only.
+`scripts/dev/test-simplus-simaka-c.sh` runs the dependency-free
+protocol/parser tests. The release pipeline builds it together with the
+upstream `p-cscf` plugin into `simplus-strongswan-plugins.deb` against the
+locked Debian source and runtime-library inputs under
+`packaging/strongswan-plugins/`. Neither installation nor ordinary Go/Web
+development requires a strongSwan source or build tree.

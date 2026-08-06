@@ -1,0 +1,26 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Simplus strongSwan plugins
+Source: https://github.com/leonfox28/simplus
+
+Files: libstrongswan-simplus-simaka.so
+Copyright: 2026 Simplus contributors
+License: GPL-2+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 2 of the License, or (at your option)
+ any later version.
+ .
+ On Debian systems, the complete text of version 2 is available at
+ /usr/share/common-licenses/GPL-2.
+
+Files: libstrongswan-p-cscf.so
+Copyright: 2016 Tobias Brunner
+           secunet Security Networks AG
+License: GPL-2+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 2 of the License, or (at your option)
+ any later version.
+ .
+ On Debian systems, the complete text of version 2 is available at
+ /usr/share/common-licenses/GPL-2.

@@ -66,6 +66,8 @@ SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信�
 - 管理界面以 React、Ant Design Pro、Pro Components 和 Umi Max 为唯一前端栈；
 - 移动端使用响应式布局和抽屉导航，桌面端保持常驻侧边栏；
 - Debian `linux/amd64` bundle、全新初始化、升级、默认保留数据卸载和显式 purge 已有自动化或 smoke 证据；
+- Debian 13/amd64 的 `simplus-strongswan-plugins` 已从锁定 source/runtime ABI 输入完成普通用户构建，并自动验证 Debian 包身份、依赖范围、导出构造符、动态依赖、固定 runpath、权限、ABI 元数据、SHA-256 manifest 与对应源码完整性；这是包级 Fixture 证据，不是 ePDG/IMS 运行证据；
+- 新的 `dpkg` 插件安装路径尚未在 clean VM 完成完整 bundle 安装、升级和卸载 smoke；旧版手工复制插件的 smoke 不能替代该项；
 - ARM64、其他发行版和签名发布链仍不是已承诺支持面。
 
 新的兼容性声明必须写清证据等级。原始证据进入私有记录系统，公开仓库只保留可以由代码、测试或脱敏结论支撑的摘要。

@@ -6,7 +6,14 @@ rm -f /etc/systemd/system/simplusd.service /etc/systemd/system/simplus-netd.serv
 rm -f /etc/systemd/system/simplus-netd.service.d/20-vowifi-capabilities.conf /etc/systemd/system/simplus-agent.service.d/10-sim-aka-hil.conf
 rm -f /usr/local/libexec/simplus/simplusd /usr/local/libexec/simplus/simplus-netd /usr/local/libexec/simplus/simplus-agent /usr/local/libexec/simplus/bind-ml307a
 rm -f /usr/local/bin/simplusctl
-rm -f /usr/lib/ipsec/plugins/libstrongswan-simplus-simaka.so /usr/lib/ipsec/plugins/libstrongswan-p-cscf.so /etc/sysctl.d/90-simplus-vowifi.conf
+if dpkg-query -W -f='${Status}' simplus-strongswan-plugins 2>/dev/null | grep -Fq 'install ok installed'; then
+  dpkg --remove simplus-strongswan-plugins >/dev/null
+else
+  # Upgrade compatibility for installations created before the plugins were
+  # owned by a Debian package.
+  rm -f /usr/lib/ipsec/plugins/libstrongswan-simplus-simaka.so /usr/lib/ipsec/plugins/libstrongswan-p-cscf.so
+fi
+rm -f /etc/sysctl.d/90-simplus-vowifi.conf
 rm -rf /usr/local/share/simplus/web
 systemctl daemon-reload
 if [[ ${1:-} == --purge-data ]]; then rm -rf /var/lib/simplus; else printf 'Preserved /var/lib/simplus (pass --purge-data to remove it).\n'; fi

@@ -13,7 +13,7 @@
 - 单管理员 setup、登录、CSRF、会话撤销和修改密码；
 - React、Ant Design Pro、Pro Components 与 Umi Max 后台；
 - 概览、模组、线路、短信、语音、Mihomo、通知和系统设置页面；
-- Debian bundle、安装/卸载脚本，以及 `simplus-agent`、`simplus-netd`、`simplusd` 三个受限 systemd 服务；
+- Debian bundle、安装/卸载脚本，以及 `simplus-agent`、`simplus-netd`、`simplusd` 三个受限 systemd 服务；Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布，不再要求用户或普通开发者提供 strongSwan 源码树；
 - 全新实例由安装器生成随机管理员密码，升级不覆盖凭据。
 
 ### Simulator 业务纵切
@@ -65,6 +65,7 @@
 - 动态 IMS Home Domain 已在一张无可用 ISIM 应用的真实 SIM 上完成只读 HIL-0，确认会读取 EF_AD 后派生；两位/三位 MNC 组合另有 Fixture。真实 Host VoWiFi 业务 HIL 仍只覆盖首个已验证运营商的接入 profile，ePDG FQDN、IKE responder identity 和远端选择尚未通用化；
 - Mihomo 配置中的协议字段、URL-Test 或普通 UDP 成功不能替代目标业务的真实 UDP/ePDG 探针；
 - 项目只面向可信 LAN，不应直接暴露到公网。
+- 新 strongSwan 插件包已经通过静态包内容与可复现输入验证；切换到 `dpkg` 管理后的 clean-VM 安装、升级、卸载和完整 bundle smoke 尚待补充，不能沿用旧裸 `.so` 安装证据代替。
 
 更细的能力等级见 [`compatibility.md`](compatibility.md)，运行故障按 [`troubleshooting.md`](troubleshooting.md) 处理。原始硬件日志、订阅节点、真实拓扑和逐次排错记录不属于公开仓库。
 
@@ -72,7 +73,7 @@
 
 1. 基于稳定 Line 接入第一个真实模组原生蜂窝短信 transport，保持短信业务与具体型号驱动分离；
 2. Host VoWiFi 短信纵切已达到当前可用测试条件；在具备合适测试号码时补充其他收件人互通；
-3. 跟踪 Umi 传递依赖审计告警并继续复核发布产物的第三方许可证材料；
+3. 在 clean Debian 13/amd64 VM 验证新的 `simplus-strongswan-plugins` 包随完整 bundle 安装、升级与卸载；继续跟踪 Umi 传递依赖审计告警和发布材料许可证；
 4. ML307A 运行时 RF 控制已有类型化实现与 fixture；真正执行 HIL 仍需明确授权。电话、媒体或 eUICC 写能力继续分别设计。
 5. QDC507 专项工作开始时，先完成稳定设备身份 HIL，再统一其能力证据与实际 adapter 实现；在此之前保持候选不可添加。
 

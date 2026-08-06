@@ -12,7 +12,15 @@
 scripts/release/build-debian-bundle.sh "$PWD/.dev/release/debian"
 ```
 
-产物包含 `simplusd`、`simplus-agent`、受限 Mihomo/Host VoWiFi supervisor `simplus-netd`、固定 strongSwan 插件、Zashboard、生产 Web 资源以及安装/卸载脚本。
+产物包含 `simplusd`、`simplus-agent`、受限 Mihomo/Host VoWiFi supervisor
+`simplus-netd`、Zashboard、生产 Web 资源以及安装/卸载脚本。Host VoWiFi 所需的
+Simplus SIM AKA bridge 和 strongSwan 上游 `p-cscf` 会从仓库锁定的 Debian 输入
+独立构建成 `simplus-strongswan-plugins` 包；bundle 还包含与该二进制对应的完整
+源码归档、摘要和 manifest。构建过程不要求 root，不写主机 `/usr`，也不要求调用者
+提供 strongSwan source/build tree；第一次构建需要网络下载并校验锁定的 SHA-256。
+
+当前插件包构建目标只覆盖 Debian 13/amd64。其他架构或发行版必须先提供独立输入
+锁、原生 CI 和安装证据，不能复用该包。
 
 ## 安装
 
@@ -33,6 +41,10 @@ production Web/API 固定监听 `0.0.0.0:8080`，Mihomo 启动时其带密码 co
 首次访问直接使用安装器输出的账户登录，再确认本机存储目录即可进入后台。普通 HTTP 仅适用于可信局域网；可信 HTTPS 在“系统设置”维护，浏览器麦克风需要 HTTPS secure context。systemd unit 不通过 flag 开放任意硬件写入；唯一的 ML307A RF 路径是编译期固定的类型化接口。
 
 `simplusd` 没有网络管理 capability。root `simplus-netd.service` 是 Mihomo 和 Host VoWiFi 网络状态的唯一 owner；两者通过 `/run/simplus-netd/mihomo.sock` 的固定 lifecycle 协议通信。激活真实 Line 时，`simplus-netd` 只按内部派生计划创建该 Line 的 namespace、veth、策略路由、nftables、strongSwan 和 XFRM，不接受 Web 提交底层路径或命令；停用和进程退出会清理这些临时对象。
+
+安装器先按 manifest 校验插件包及对应源码摘要，再确认主机 strongSwan 属于受支持
+的上游 ABI 系列，并使用 `dpkg` 安装 `simplus-strongswan-plugins`。用户不需要安装
+编译器或源码；卸载时也由 `dpkg` 删除插件文件。
 
 ## 故障恢复
 

@@ -1,0 +1,55 @@
+name: strongswan-plugins
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/strongswan-plugins.yml
+      - components/strongswan-simplus-simaka/**
+      - packaging/strongswan-plugins/**
+      - scripts/dev/build-simplus-simaka-plugin.sh
+      - scripts/dev/build-strongswan-p-cscf-plugin.sh
+      - scripts/dev/test-simplus-simaka-c.sh
+      - scripts/dev/test-strongswan-plugins-package.sh
+      - scripts/release/build-debian-bundle.sh
+      - scripts/release/install-debian.sh
+      - scripts/release/uninstall-debian.sh
+      - Makefile
+  pull_request:
+    paths:
+      - .github/workflows/strongswan-plugins.yml
+      - components/strongswan-simplus-simaka/**
+      - packaging/strongswan-plugins/**
+      - scripts/dev/build-simplus-simaka-plugin.sh
+      - scripts/dev/build-strongswan-p-cscf-plugin.sh
+      - scripts/dev/test-simplus-simaka-c.sh
+      - scripts/dev/test-strongswan-plugins-package.sh
+      - scripts/release/build-debian-bundle.sh
+      - scripts/release/install-debian.sh
+      - scripts/release/uninstall-debian.sh
+      - Makefile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debian-13-amd64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: debian:13-slim
+    steps:
+      - name: Install isolated package-builder prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            bash binutils build-essential bzip2 ca-certificates curl \
+            dpkg-dev git make patch sed tar xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build and verify the independently packaged plugins
+        run: make test-strongswan-plugins-package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simplus-strongswan-plugins-debian13-amd64
+          path: .dev/packages/strongswan-plugins/*
+          if-no-files-found: error

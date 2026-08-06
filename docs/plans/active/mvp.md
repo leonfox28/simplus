@@ -33,6 +33,7 @@
 | 22：已添加模组与能力适配层 | 动态发现与持久模组分离、IMEI 指纹稳定绑定，以及 ML307A 最小鉴权/RF 能力边界 |
 | 23：持久线路层 | 管理员显式创建稳定 Line，运行时解析硬件目标，业务消费者不再依赖自动 Line |
 | 24：线路与通信路径解耦 | Line 只表达稳定身份；RF、VoWiFi、出口和 transport 独立配置，新 Line 出口默认未配置 |
+| 25：strongSwan 插件发布边界 | 同仓库独立 GPL 组件、锁定 Debian 输入、独立 `.deb`、对应源码和隔离 CI |
 
 ## Milestone 22：已添加模组与能力适配层
 
@@ -68,6 +69,15 @@
 - [x] 短信与电话移除接入方式分支，依据实际装配 transport、Line 能力和所需运行状态 fail closed；
 - [x] 线路页改为 ProTable、候选单选表格和响应式配置抽屉，名称、出口与 VoWiFi 意图分别保存，未配置出口时禁用激活；
 - [x] OpenAPI 和 Web 严格校验不返回身份指纹、运行时设备目标或设备路径，并覆盖过期候选、重复添加、SIM 更换、离线、端口变化、身份冲突与旧库迁移。
+
+## Milestone 25：strongSwan 插件发布边界
+
+- [x] 将 Simplus SIM AKA bridge 移入同仓库独立 GPL-2.0-or-later 组件，保持与根项目 PolyForm 许可边界；
+- [x] 为 Debian 13/amd64 锁定精确 strongSwan source、运行 ABI `.deb`、下载地址与 SHA-256，不读取主机安装树作为隐式构建输入；
+- [x] 在普通用户的临时 source tree/sysroot 中构建 Simplus bridge 与上游 `p-cscf`，产出由 `dpkg` 管理的 `simplus-strongswan-plugins` 包；
+- [x] 同时生成包含全部锁定输入的对应源码归档、摘要和机器可读 manifest；bundle 安装/卸载不再复制裸 `.so`，也不再接受人工 source/build 路径；
+- [x] 增加独立 CI 与包级验证，检查导出构造符、动态依赖、固定 runpath、文件权限、ABI 元数据、manifest 和对应源码完整性；
+- [ ] 在新的 Debian 13/amd64 clean VM 上补充 `dpkg` 安装、升级、卸载与完整 bundle smoke；ARM64 和其他发行版仍需各自锁、原生构建及安装证据。
 
 ## Milestone 20：公开源码准备
 

@@ -126,6 +126,22 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - 订阅本身使用随机 128-bit `subscription_...` ID 作为稳定唯一身份；显示名称只供用户识别，可重复且可编辑，新建时默认为由内部随机 ID 派生的 6 位易读标识。
 - 当前订阅按实际国家预生成固定 localhost TPROXY listener。新 Line 的出口固定从 `unconfigured` 开始，只有管理员显式选择后才保存 `direct` 或一个国家 listener；该绑定不进入订阅 YAML，因此增删改 Line 不触发 Mihomo 配置重写或重启。`unconfigured` 只会出现在读取响应中，不能作为写入模式，也不能激活 Host VoWiFi。
 
+#### strongSwan 插件构建边界
+
+Host VoWiFi 运行时继续依赖发行版提供的 `charon-systemd`、`libcharon`、
+`libsimaka` 与 `eap-aka`。Simplus 自有的 SIM AKA bridge 是同仓库内独立的
+GPL-2.0-or-later 组件；它与 strongSwan 上游 `p-cscf` 插件只在发布流水线中
+编译成 `simplus-strongswan-plugins` Debian 包。普通 Go/Web 开发、bundle 安装
+和服务运行都不接收或查找 strongSwan source/build tree，也不手工复制裸 `.so`。
+
+插件构建必须从发行版/架构专用锁取得精确 Debian source 和运行 ABI 输入，校验
+SHA-256 后在临时 source tree 与 sysroot 中以普通用户完成。二进制记录精确 source
+revision，运行依赖限制在已经评审的上游 ABI 系列；当前只支持 Debian 13/amd64。
+发布同时生成包含全部锁定输入的对应源码归档、摘要和 manifest，安装/卸载只通过
+`dpkg` 管理。该构建隔离不改变运行期信任边界：C 插件仍只桥接固定 SIM AKA
+socket，`simplus-netd` 仍通过 VICI 与固定 worker 生命周期控制 charon。完整决策见
+[`0020`](decisions/0020-strongswan-plugin-package.md)。
+
 ### 分阶段启用的组件
 
 - V1 的媒体交互先由 Simulator 验证，不为真实硬件启动 Asterisk 或其他媒体进程；
