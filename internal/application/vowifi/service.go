@@ -10,7 +10,6 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	lineegressdomain "github.com/leonfox28/simplus/internal/domain/lineegress"
 	domain "github.com/leonfox28/simplus/internal/domain/vowifi"
 	"github.com/leonfox28/simplus/internal/vowifisupervisor"
@@ -63,7 +62,7 @@ func (service *Service) List(ctx context.Context) ([]domain.State, error) {
 	return service.listLocked(ctx)
 }
 
-// Available implements the messaging fail-closed access-path guard. SMS is
+// Available implements the messaging transport availability contract. SMS is
 // dispatched only while the exact Line has an online registered Host VoWiFi
 // worker; desired or reconnecting states are not sufficient.
 func (service *Service) Available(ctx context.Context, lineID string) bool {
@@ -150,13 +149,13 @@ func (service *Service) Deactivate(ctx context.Context, lineID string) (domain.S
 	}
 	egress := environment.egressByLine[lineID]
 	if egress == nil {
-		egress = &lineegressapp.View{LineID: lineID, Mode: lineegressdomain.ModeDirect}
+		egress = &lineegressapp.View{LineID: lineID, Mode: lineegressdomain.ModeUnconfigured, ReadinessReason: "EGRESS_NOT_CONFIGURED"}
 	}
 	return stateFor(*line, false, *egress, runtime), nil
 }
 
 // Reconcile makes persistent administrator intent match the privileged runtime
-// fact. It never changes a Line's configured access mode or egress selection.
+// fact. It never changes a Line's identity binding or egress selection.
 func (service *Service) Reconcile(ctx context.Context) error {
 	service.mu.Lock()
 	defer service.mu.Unlock()
@@ -246,7 +245,7 @@ func (service *Service) listLocked(ctx context.Context) ([]domain.State, error) 
 	for lineID, line := range environment.lineByID {
 		egress := environment.egressByLine[lineID]
 		if egress == nil {
-			egress = &lineegressapp.View{LineID: lineID, Mode: lineegressdomain.ModeDirect}
+			egress = &lineegressapp.View{LineID: lineID, Mode: lineegressdomain.ModeUnconfigured, ReadinessReason: "EGRESS_NOT_CONFIGURED"}
 		}
 		states = append(states, stateFor(*line, environment.desiredByLine[lineID], *egress, environment.runtimeByLine[lineID]))
 	}
@@ -322,8 +321,7 @@ func supervisorRequest(line inventory.Line, egress lineegressapp.View) vowifisup
 }
 
 func hardwareReady(line inventory.Line) bool {
-	return line.RuntimeLineID != "" && line.AccessModeConfigured && line.AccessMode == accessmode.HostVoWiFiOnly && line.State == inventory.LineReady &&
-		line.Capabilities.HostVoWiFiAuth
+	return line.RuntimeLineID != "" && line.State == inventory.LineReady && line.Capabilities.HostVoWiFiAuth
 }
 
 func requiresMihomoRecovery(egress lineegressapp.View) bool {
@@ -347,14 +345,15 @@ func stateFor(line inventory.Line, desired bool, egress lineegressapp.View, runt
 		Eligible:      hardwareReady(line) && egress.Ready,
 		ReadinessCode: egress.ReadinessReason, State: vowifisupervisor.StateStopped,
 	}
-	if !line.AccessModeConfigured || line.AccessMode != accessmode.HostVoWiFiOnly {
-		state.ReadinessCode = "LINE_NOT_HOST_VOWIFI"
-	} else if line.State != inventory.LineReady || !line.Capabilities.HostVoWiFiAuth {
+	if !line.Capabilities.HostVoWiFiAuth {
+		state.ReadinessCode = "LINE_VOWIFI_UNSUPPORTED"
+	} else if line.State != inventory.LineReady || line.RuntimeLineID == "" {
 		state.ReadinessCode = "LINE_HARDWARE_NOT_READY"
 	}
 	if runtime != nil {
 		state.State, state.Stage, state.Online = runtime.State, runtime.Stage, runtime.Online
 		state.RegisteredAt, state.NextRefreshAt = runtime.RegisteredAt, runtime.NextRefresh
+		state.PhoneNumber = runtime.PhoneNumber
 		state.Attempt, state.LastErrorCode = runtime.Attempt, runtime.ErrorCode
 	}
 	return state

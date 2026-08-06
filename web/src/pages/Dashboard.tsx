@@ -14,7 +14,6 @@ export default function Dashboard() {
     {error && <Alert type="error" message={error} />}
     {!health ? <Spin /> : <StatisticCard.Group direction={compact ? 'column' : 'row'}>
       <StatisticCard statistic={{ title: '系统状态', value: health.status }} />
-      <StatisticCard statistic={{ title: '射频安全', value: health.rfSafety }} />
       <StatisticCard statistic={{ title: '后端', value: health.backend }} />
       <StatisticCard statistic={{ title: '模组', value: topology?.devices.length ?? 0 }} />
       <StatisticCard statistic={{ title: '线路', value: topology?.lines.length ?? 0 }} />

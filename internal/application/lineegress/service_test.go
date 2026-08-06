@@ -2,12 +2,12 @@ package lineegress
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	domain "github.com/leonfox28/simplus/internal/domain/lineegress"
 	mihomodomain "github.com/leonfox28/simplus/internal/domain/mihomo"
@@ -52,6 +52,12 @@ func (runtime staticRuntime) Status(context.Context) (mihomoapp.RuntimeStatus, e
 	return mihomoapp.RuntimeStatus{State: runtime.state}, nil
 }
 
+type failingRuntime struct{}
+
+func (failingRuntime) Status(context.Context) (mihomoapp.RuntimeStatus, error) {
+	return mihomoapp.RuntimeStatus{}, errors.New("Mihomo status unavailable")
+}
+
 func TestCountryBindingUsesCurrentSubscriptionWithoutRewritingMihomo(t *testing.T) {
 	store := &memoryStore{
 		bindings: map[string]domain.Binding{}, selected: "subscription_AAAAAAAAAAAAAAAAAAAAAA", running: "subscription_AAAAAAAAAAAAAAAAAAAAAA",
@@ -60,7 +66,7 @@ func TestCountryBindingUsesCurrentSubscriptionWithoutRewritingMihomo(t *testing.
 			"subscription_BBBBBBBBBBBBBBBBBBBBBB": {{CountryCode: "US", CountryName: "美国"}},
 		},
 	}
-	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", AccessMode: accessmode.HostVoWiFiOnly, Capabilities: hardware.Capabilities{SIMAccess: true}}
+	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", Capabilities: hardware.Capabilities{SIMAccess: true, HostVoWiFiAuth: true}}
 	service := New(store, staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}, staticRuntime{state: "running"})
 	service.Now = func() time.Time { return time.Unix(100, 0).UTC() }
 
@@ -85,18 +91,26 @@ func TestCountryBindingUsesCurrentSubscriptionWithoutRewritingMihomo(t *testing.
 	}
 }
 
-func TestLineEgressFailsClosedOutsideHostVoWiFiAndWhenMihomoStops(t *testing.T) {
+func TestLineEgressFailsClosedWhenUnsupportedUnconfiguredOrMihomoStops(t *testing.T) {
 	store := &memoryStore{
 		bindings: map[string]domain.Binding{}, selected: "subscription_AAAAAAAAAAAAAAAAAAAAAA", running: "subscription_AAAAAAAAAAAAAAAAAAAAAA",
 		nodes: map[string][]mihomodomain.Node{"subscription_AAAAAAAAAAAAAAAAAAAAAA": {{CountryCode: "GB", CountryName: "英国"}}},
 	}
-	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", AccessMode: accessmode.HoldRFOff, Capabilities: hardware.Capabilities{SIMAccess: true}}
+	line := inventory.Line{ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", Capabilities: hardware.Capabilities{SIMAccess: true}}
 	service := New(store, staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}, staticRuntime{state: "stopped"})
-	if _, err := service.Put(context.Background(), line.ID, domain.ModeMihomoCountry, "GB"); err != ErrLineMode {
-		t.Fatalf("non-Host VoWiFi put error = %v", err)
+	items, err := service.List(context.Background())
+	if err != nil || len(items) != 1 || items[0].ReadinessReason != "LINE_VOWIFI_UNSUPPORTED" || items[0].Mode != domain.ModeUnconfigured {
+		t.Fatalf("unsupported listing = %#v, error = %v", items, err)
 	}
-	line.AccessMode = accessmode.HostVoWiFiOnly
+	if _, err := service.Put(context.Background(), line.ID, domain.ModeMihomoCountry, "GB"); err != ErrLineUnsupported {
+		t.Fatalf("unsupported put error = %v", err)
+	}
+	line.Capabilities.HostVoWiFiAuth = true
 	service.Inventory = staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}
+	items, err = service.List(context.Background())
+	if err != nil || items[0].Ready || items[0].ReadinessReason != "EGRESS_NOT_CONFIGURED" || items[0].Mode != domain.ModeUnconfigured {
+		t.Fatalf("unconfigured listing = %#v, error = %v", items, err)
+	}
 	item, err := service.Put(context.Background(), line.ID, domain.ModeMihomoCountry, "GB")
 	if err != nil {
 		t.Fatal(err)
@@ -107,5 +121,22 @@ func TestLineEgressFailsClosedOutsideHostVoWiFiAndWhenMihomoStops(t *testing.T) 
 	direct, err := service.Put(context.Background(), line.ID, domain.ModeDirect, "")
 	if err != nil || !direct.Ready || direct.ReadinessReason != "READY" {
 		t.Fatalf("direct binding = %#v, err = %v", direct, err)
+	}
+}
+
+func TestDirectAndUnconfiguredEgressDoNotDependOnMihomoRuntime(t *testing.T) {
+	store := &memoryStore{bindings: map[string]domain.Binding{}, nodes: map[string][]mihomodomain.Node{}}
+	line := inventory.Line{
+		ID:           "line_AQEBAQEBAQEBAQEBAQEBAQ",
+		Capabilities: hardware.Capabilities{SIMAccess: true, HostVoWiFiAuth: true},
+	}
+	service := New(store, staticInventory{topology: inventory.Topology{Lines: []inventory.Line{line}}}, failingRuntime{})
+	items, err := service.List(t.Context())
+	if err != nil || len(items) != 1 || items[0].Mode != domain.ModeUnconfigured || items[0].ReadinessReason != "EGRESS_NOT_CONFIGURED" {
+		t.Fatalf("unconfigured items=%#v error=%v", items, err)
+	}
+	direct, err := service.Put(t.Context(), line.ID, domain.ModeDirect, "")
+	if err != nil || !direct.Ready || direct.Mode != domain.ModeDirect {
+		t.Fatalf("direct=%#v error=%v", direct, err)
 	}
 }

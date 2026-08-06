@@ -9,12 +9,9 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/call"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
 )
-
-type accessGuard bool
 
 const testManagedLineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
 
@@ -34,8 +31,6 @@ func (source managedCallLineSource) Topology(ctx context.Context) (inventory.Top
 	return topology, nil
 }
 
-func (guard accessGuard) Available(context.Context, string) bool { return bool(guard) }
-
 func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
 	t.Helper()
 	ctx := context.Background()
@@ -43,10 +38,7 @@ func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stores.PutSubscriptionProfileAccessMode(ctx, "simulator-profile-1", accessmode.CellularNative); err != nil {
-		t.Fatal(err)
-	}
-	service, err := New(ctx, stores, managedCallLineSource{source: inventory.NewSimulator(stores)})
+	service, err := New(ctx, stores, managedCallLineSource{source: inventory.NewSimulator()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +88,7 @@ func TestRestartReconcilesUnfinishedCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := New(context.Background(), stores, managedCallLineSource{source: inventory.NewSimulator(stores)})
+	restarted, err := New(context.Background(), stores, managedCallLineSource{source: inventory.NewSimulator()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,20 +98,5 @@ func TestRestartReconcilesUnfinishedCall(t *testing.T) {
 	}
 	if len(values) != 1 || values[0].ID != inbound.ID || values[0].State != call.StateFailed || values[0].EndReason != ErrorInterruptedByRestart {
 		t.Fatalf("reconciled = %#v", values)
-	}
-}
-
-func TestHostVoWiFiCallRequiresOnlineFailClosedAccessPath(t *testing.T) {
-	service, stores := newCallService(t)
-	if err := stores.PutSubscriptionProfileAccessMode(context.Background(), "simulator-profile-1", accessmode.HostVoWiFiOnly); err != nil {
-		t.Fatal(err)
-	}
-	service.UseAccessPathGuard(accessGuard(false))
-	if _, _, err := service.Dial(context.Background(), "operation-vowifi-call-01", testManagedLineID, "13800138000"); !errors.Is(err, ErrLineUnavailable) {
-		t.Fatalf("offline error=%v", err)
-	}
-	service.UseAccessPathGuard(accessGuard(true))
-	if value, _, err := service.Dial(context.Background(), "operation-vowifi-call-02", testManagedLineID, "13800138000"); err != nil || value.State != call.StateActive {
-		t.Fatalf("online=%#v err=%v", value, err)
 	}
 }

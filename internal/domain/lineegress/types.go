@@ -3,6 +3,7 @@ package lineegress
 import "time"
 
 const (
+	ModeUnconfigured  = "unconfigured"
 	ModeDirect        = "direct"
 	ModeMihomoCountry = "mihomo-country"
 )

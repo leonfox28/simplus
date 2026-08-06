@@ -10,7 +10,10 @@ import (
 	"unicode/utf8"
 )
 
-var simIdentityHintPattern = regexp.MustCompile(`^ICCID •••• [0-9]{4}$`)
+var (
+	simIdentityHintPattern  = regexp.MustCompile(`^ICCID •••• [0-9]{4}$`)
+	homeOperatorCodePattern = regexp.MustCompile(`^[0-9]{3}-[0-9]{2,3}$`)
+)
 
 // validateProbeResponse validates the typed wire contract. ProbeStateComplete
 // means the RF state, a terminal SIM query, and active-call count were read;
@@ -77,12 +80,16 @@ func validateDeviceProbe(device DeviceProbe) error {
 		return errors.New("attemptsRemaining requires a nonnegative value and source")
 	}
 	if device.SIM.IdentityFingerprint == "" {
-		if device.SIM.DisplayIdentityHint != "" {
-			return errors.New("displayIdentityHint requires an identity fingerprint")
+		if device.SIM.DisplayIdentityHint != "" || device.SIM.HomeOperatorName != "" || device.SIM.HomeOperatorCode != "" {
+			return errors.New("SIM profile metadata requires an identity fingerprint")
 		}
 	} else if !isSHA256Hex(device.SIM.IdentityFingerprint) || !simIdentityHintPattern.MatchString(device.SIM.DisplayIdentityHint) ||
 		device.SIM.State != SIMStatePresent || device.SIM.PrimaryLockState != PrimaryLockReady {
 		return errors.New("SIM identity requires a ready present SIM, keyed fingerprint, and masked hint")
+	}
+	if !validOptionalProbeText(device.SIM.HomeOperatorName, 64) ||
+		(device.SIM.HomeOperatorCode != "" && !homeOperatorCodePattern.MatchString(device.SIM.HomeOperatorCode)) {
+		return errors.New("SIM home operator metadata is invalid")
 	}
 	if !oneOf(device.SignalMetrics.State, SignalStateMeasured, SignalStateUnavailable, SignalStateUnknown) {
 		return fmt.Errorf("invalid signal state %q", device.SignalMetrics.State)

@@ -21,6 +21,7 @@ type State struct {
 	CountryName   string
 	RegisteredAt  time.Time
 	NextRefreshAt time.Time
+	PhoneNumber   string
 	Attempt       int
 	LastErrorCode string
 }

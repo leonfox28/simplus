@@ -76,19 +76,23 @@ func (ML307A) ReadEquipmentIdentity(ctx context.Context, query attransport.Query
 	return imei, nil
 }
 
-func (ML307A) ReadSIMIdentity(ctx context.Context, query attransport.Query, identities IdentityPseudonymizer) (string, string, error) {
+func (ML307A) ReadSIMIdentity(ctx context.Context, query attransport.Query, identities IdentityPseudonymizer) (SIMProfileIdentity, error) {
 	if query == nil || identities == nil {
-		return "", "", errors.New("SIM identity is unavailable")
+		return SIMProfileIdentity{}, errors.New("SIM identity is unavailable")
 	}
 	lines, err := query(ctx, "AT+MCCID", 2*time.Second)
 	if err != nil {
-		return "", "", errors.New("SIM identity query failed")
+		return SIMProfileIdentity{}, errors.New("SIM identity query failed")
 	}
 	fingerprint, hint := pseudonymizedICCID(lines, "+MCCID:", identities)
 	if fingerprint == "" || hint == "" {
-		return "", "", errors.New("SIM identity response is invalid")
+		return SIMProfileIdentity{}, errors.New("SIM identity response is invalid")
 	}
-	return fingerprint, hint, nil
+	operatorName, operatorCode := readML307AHomeOperator(ctx, query)
+	return SIMProfileIdentity{
+		Fingerprint: fingerprint, DisplayHint: hint,
+		HomeOperatorName: operatorName, HomeOperatorCode: operatorCode,
+	}, nil
 }
 
 func (ML307A) SetRFState(ctx context.Context, query attransport.Query, enabled bool) (agentapi.RFObservation, error) {

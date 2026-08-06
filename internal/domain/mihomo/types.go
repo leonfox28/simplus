@@ -26,16 +26,3 @@ type Node struct {
 	CountryCode    string
 	CountryName    string
 }
-
-type EgressProfile struct {
-	ID                   string
-	DisplayName          string
-	SubscriptionID       string
-	LineID               string
-	SelectionType        string
-	SelectedNodeID       string
-	SelectedCountryCode  string
-	SourceCIDR           string
-	Enabled              bool
-	CreatedAt, UpdatedAt time.Time
-}

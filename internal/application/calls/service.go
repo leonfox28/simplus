@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/call"
 )
 
@@ -41,23 +40,12 @@ type Repository interface {
 type LineSource interface {
 	Topology(context.Context) (inventory.Topology, error)
 }
-type AccessPathGuard interface {
-	Available(context.Context, string) bool
-}
-
 type Service struct {
-	repository  Repository
-	lines       LineSource
-	random      io.Reader
-	now         func() time.Time
-	mu          sync.Mutex
-	accessPaths AccessPathGuard
-}
-
-func (service *Service) UseAccessPathGuard(guard AccessPathGuard) {
-	if service != nil {
-		service.accessPaths = guard
-	}
+	repository Repository
+	lines      LineSource
+	random     io.Reader
+	now        func() time.Time
+	mu         sync.Mutex
 }
 
 func New(ctx context.Context, repository Repository, lines LineSource) (*Service, error) {
@@ -185,9 +173,6 @@ func (service *Service) requireLine(ctx context.Context, id string) error {
 	}
 	for _, line := range topology.Lines {
 		if line.ID == id && line.State == inventory.LineReady && line.Capabilities.CellularVoice {
-			if line.AccessMode == accessmode.HostVoWiFiOnly && (service.accessPaths == nil || !service.accessPaths.Available(ctx, id)) {
-				return ErrLineUnavailable
-			}
 			return nil
 		}
 	}

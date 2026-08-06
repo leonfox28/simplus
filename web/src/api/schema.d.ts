@@ -338,42 +338,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/mihomo/egress-profiles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Host VoWiFi-only egress selections */
-        get: operations["listMihomoEgressProfiles"];
-        put?: never;
-        /** Create an egress profile without starting Mihomo */
-        post: operations["createMihomoEgressProfile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/mihomo/egress-profiles/{profileId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put: operations["updateMihomoEgressProfile"];
-        post?: never;
-        delete: operations["deleteMihomoEgressProfile"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/line-egress-bindings": {
         parameters: {
             query?: never;
@@ -381,7 +345,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List effective direct or Mihomo-country bindings for current Lines */
+        /** List explicit direct, Mihomo-country, or unconfigured egress state for current Lines */
         get: operations["listLineEgressBindings"];
         put?: never;
         post?: never;
@@ -401,7 +365,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Persist a Line egress choice without rewriting or restarting Mihomo */
+        /** Persist an explicit direct or Mihomo-country Line egress choice without rewriting or restarting Mihomo */
         put: operations["putLineEgressBinding"];
         post?: never;
         delete?: never;
@@ -532,40 +496,6 @@ export interface paths {
         put?: never;
         /** Persist and send one SMS on a selected line */
         post: operations["sendMessage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/access-paths": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Simulator Host VoWiFi and egress states */
-        get: operations["listAccessPaths"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/access-paths/{lineId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Configure Simulator direct or mihomo-required egress */
-        put: operations["configureAccessPath"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -797,7 +727,10 @@ export interface paths {
         /** List administrator-created Lines and their resolved runtime state */
         get: operations["listManagedLines"];
         put?: never;
-        /** Create a stable Line from one current managed-modem SIM/Profile candidate */
+        /**
+         * Create only a stable Line identity from one current managed-modem SIM/Profile candidate
+         * @description Revalidates the transient candidate and persists its immutable binding plus display name; does not change RF, Mihomo, Host VoWiFi, SMS, or calls.
+         */
         post: operations["addManagedLine"];
         delete?: never;
         options?: never;
@@ -812,7 +745,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List current SIM/Profile candidates on administrator-added modems */
+        /**
+         * List current Line candidates and typed readiness for every administrator-added modem
+         * @description Candidate IDs are transient observations. Responses contain bounded display metadata and capabilities, never SIM identity fingerprints, runtime hardware targets, sysfs paths, or device nodes.
+         */
         get: operations["listLineCandidates"];
         put?: never;
         post?: never;
@@ -832,7 +768,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update a Line display name and access mode without rebinding hardware */
+        /** Update a Line display name without rebinding hardware */
         put: operations["updateManagedLine"];
         post?: never;
         delete?: never;
@@ -869,23 +805,6 @@ export interface paths {
         put?: never;
         /** Read one online managed modem's IMEI on explicit administrator request */
         post: operations["readManagedModemEquipmentIdentity"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/subscription-profiles/{profileId}/access-mode": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Persist the administrator-selected access mode for one subscription profile */
-        put: operations["putSubscriptionProfileAccessMode"];
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1062,23 +981,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/setup/subscription-profiles/{profileId}/access-mode": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Persist a setup-time access mode without enabling RF */
-        put: operations["putSetupSubscriptionProfileAccessMode"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/setup/hardware/confirm": {
         parameters: {
             query?: never;
@@ -1088,7 +990,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirm the current RF-Off inventory and all per-profile access modes */
+        /** Confirm the current read-only hardware inventory */
         post: operations["confirmSetupHardware"];
         delete?: never;
         options?: never;
@@ -1206,20 +1108,13 @@ export interface components {
             hardwareInventoryDigest: string;
         };
         /** @enum {string} */
-        RFSafetyState: "off" | "not-present" | "unknown";
-        /** @enum {string} */
         BackendKind: "simulator" | "hardware" | "replay";
         /** @enum {string} */
         DeviceTransport: "simulated" | "usb" | "uart";
         /** @enum {string} */
         PhysicalDeviceState: "available" | "unavailable";
         /** @enum {string} */
-        AccessMode: "cellular-native" | "host-vowifi-only" | "hold-rf-off";
-        /** @enum {string} */
-        LineState: "awaiting-access-mode" | "ready" | "unavailable";
-        PutAccessModeRequest: {
-            accessMode: components["schemas"]["AccessMode"];
-        };
+        LineState: "ready" | "unavailable";
         PhysicalDeviceSummary: {
             id: string;
             displayName: string;
@@ -1236,10 +1131,7 @@ export interface components {
             physicalDeviceId: string;
             subscriptionProfileId: string;
             displayName: string;
-            accessMode: components["schemas"]["AccessMode"];
-            accessModeConfigured: boolean;
             state: components["schemas"]["LineState"];
-            rfSafety: components["schemas"]["RFSafetyState"];
             /** Format: int64 */
             generation: number;
         };
@@ -1310,8 +1202,11 @@ export interface components {
             displayName: string;
             managedModemId: string;
             managedModemDisplayName: string;
+            /** @description Current bounded AT model result; empty when unavailable and displayed as read failure by the Web UI */
+            managedModemModel: string;
+            /** @description Current bounded USB Serial; empty when unavailable and displayed as read failure by the Web UI */
+            managedModemSerialNumber: string;
             subscriptionDisplayHint: string;
-            accessMode: components["schemas"]["AccessMode"];
             state: components["schemas"]["ManagedLineState"];
             capabilities: components["schemas"]["HardwareCapabilities"];
             /** Format: date-time */
@@ -1321,12 +1216,22 @@ export interface components {
             lines: components["schemas"]["ManagedLine"][];
         };
         LineCandidate: {
+            /** @description Transient opaque observation token revalidated at create time */
             candidateId: string;
             managedModemId: string;
             managedModemDisplayName: string;
+            managedModemModel: string;
+            managedModemSerialNumber: string;
             subscriptionDisplayHint: string;
+            /** @description Bounded EF_SPN name for the active profile; empty when unavailable */
+            homeOperatorName: string;
+            /** @description Home MCC-MNC derived inside the Agent without exposing IMSI */
+            homeOperatorCode: string;
+            simPresence: components["schemas"]["ManagedModemSIMPresence"];
             capabilities: components["schemas"]["HardwareCapabilities"];
             addable: boolean;
+            /** @enum {string} */
+            readinessReason: "READY" | "MODEM_OFFLINE" | "SIM_ABSENT" | "SIM_UNAVAILABLE" | "ALREADY_ADDED" | "BINDING_CONFLICT";
         };
         LineCandidateList: {
             candidates: components["schemas"]["LineCandidate"][];
@@ -1334,11 +1239,9 @@ export interface components {
         AddManagedLineRequest: {
             candidateId: string;
             displayName: string;
-            accessMode: components["schemas"]["AccessMode"];
         };
         UpdateManagedLineRequest: {
             displayName: string;
-            accessMode: components["schemas"]["AccessMode"];
         };
         ModemCandidate: {
             candidateId: string;
@@ -1401,8 +1304,6 @@ export interface components {
             state: components["schemas"]["SubscriptionProfileState"];
             displayIdentityHint: string;
             generation: components["schemas"]["HardwareGeneration"];
-            accessMode: components["schemas"]["AccessMode"];
-            accessModeConfigured: boolean;
         };
         ResourceGroupDetail: {
             id: string;
@@ -1424,10 +1325,7 @@ export interface components {
             displayName: string;
             generation: components["schemas"]["HardwareGeneration"];
             capabilities: components["schemas"]["HardwareCapabilities"];
-            accessMode: components["schemas"]["AccessMode"];
-            accessModeConfigured: boolean;
             state: components["schemas"]["LineState"];
-            rfSafety: components["schemas"]["RFSafetyState"];
         };
         HardwareTopologyResponse: {
             generation: components["schemas"]["HardwareGeneration"];
@@ -1489,32 +1387,6 @@ export interface components {
         EUICCState: {
             eidHint: string;
             profiles: components["schemas"]["EUICCProfile"][];
-        };
-        AccessPathState: {
-            lineId: string;
-            /** @enum {string} */
-            mode: "direct" | "mihomo-required";
-            /** @enum {string} */
-            mihomoState: "running" | "stopped" | "failed";
-            /** @enum {string} */
-            lineState: "online" | "offline";
-            /** @enum {string} */
-            authentication: "simulated-aka-complete";
-            /** @enum {string} */
-            epdg: "connected" | "blocked";
-            /** @enum {string} */
-            ims: "registered" | "offline";
-            /** @enum {boolean} */
-            directFallback: false;
-        };
-        AccessPathRequest: {
-            /** @enum {string} */
-            mode: "direct" | "mihomo-required";
-            /** @enum {string} */
-            mihomoState: "running" | "stopped" | "failed";
-        };
-        AccessPathListResponse: {
-            lines: components["schemas"]["AccessPathState"][];
         };
         CallListResponse: {
             calls: components["schemas"]["Call"][];
@@ -1583,7 +1455,6 @@ export interface components {
             /** @enum {string} */
             apiVersion: "v1";
             installationState: components["schemas"]["InstallationState"];
-            rfSafety: components["schemas"]["RFSafetyState"];
             backend: components["schemas"]["BackendKind"];
             databaseCount: number;
         };
@@ -1656,46 +1527,16 @@ export interface components {
             subscription: components["schemas"]["MihomoSubscription"];
             nodes: components["schemas"]["MihomoNode"][];
         };
-        MihomoEgressProfile: {
-            id: string;
-            displayName: string;
-            subscriptionId: string;
-            lineId: string;
-            /** @enum {string} */
-            selectionType: "node" | "country";
-            selectedNodeId: string;
-            selectedNodeName: string;
-            selectedCountryCode: string;
-            selectedCountryName: string;
-            sourceCidr: string;
-            enabled: boolean;
-            ready: boolean;
-            /** @enum {string} */
-            readinessReason: "READY" | "PROFILE_DISABLED" | "CORE_NOT_INSTALLED" | "SUBSCRIPTION_DISABLED" | "SUBSCRIPTION_NOT_READY" | "NODE_NOT_FOUND" | "COUNTRY_NOT_FOUND";
-        };
-        MihomoEgressProfileMutation: {
-            displayName: string;
-            subscriptionId: string;
-            lineId: string;
-            /** @enum {string} */
-            selectionType: "node" | "country";
-            selectedNodeId: string;
-            selectedCountryCode: string;
-            enabled: boolean;
-        };
-        MihomoEgressProfileList: {
-            profiles: components["schemas"]["MihomoEgressProfile"][];
-        };
         LineEgressBinding: {
             lineId: string;
             /** @enum {string} */
-            mode: "direct" | "mihomo-country";
+            mode: "unconfigured" | "direct" | "mihomo-country";
             countryCode: string;
             countryName: string;
             listenerPort: number;
             ready: boolean;
             /** @enum {string} */
-            readinessReason: "READY" | "LINE_NOT_HOST_VOWIFI" | "SUBSCRIPTION_NOT_SELECTED" | "COUNTRY_NOT_FOUND" | "MIHOMO_NOT_RUNNING" | "MIHOMO_RESTART_REQUIRED";
+            readinessReason: "READY" | "EGRESS_NOT_CONFIGURED" | "LINE_VOWIFI_UNSUPPORTED" | "SUBSCRIPTION_NOT_SELECTED" | "COUNTRY_NOT_FOUND" | "MIHOMO_NOT_RUNNING" | "MIHOMO_RESTART_REQUIRED";
         };
         LineEgressBindingMutation: {
             /** @enum {string} */
@@ -1710,17 +1551,19 @@ export interface components {
             desiredActive: boolean;
             eligible: boolean;
             /** @enum {string} */
-            readinessCode: "READY" | "LINE_NOT_HOST_VOWIFI" | "LINE_HARDWARE_NOT_READY" | "SUBSCRIPTION_NOT_SELECTED" | "COUNTRY_NOT_FOUND" | "MIHOMO_NOT_RUNNING" | "MIHOMO_RESTART_REQUIRED";
+            readinessCode: "READY" | "EGRESS_NOT_CONFIGURED" | "LINE_VOWIFI_UNSUPPORTED" | "LINE_HARDWARE_NOT_READY" | "SUBSCRIPTION_NOT_SELECTED" | "COUNTRY_NOT_FOUND" | "MIHOMO_NOT_RUNNING" | "MIHOMO_RESTART_REQUIRED";
             /** @enum {string} */
             state: "stopped" | "starting" | "connecting" | "registering" | "online" | "reconnecting" | "stopping" | "failed";
             stage: string;
             online: boolean;
             /** @enum {string} */
-            egressMode: "direct" | "mihomo-country";
+            egressMode: "unconfigured" | "direct" | "mihomo-country";
             countryCode: string;
             countryName: string;
             registeredAt: string;
             nextRefreshAt: string;
+            /** @description E.164 phone number authorized by IMS registration; empty when unavailable */
+            phoneNumber: string;
             attempt: number;
             lastErrorCode: string;
         };
@@ -2671,123 +2514,6 @@ export interface operations {
             };
         };
     };
-    listMihomoEgressProfiles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Egress profiles */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MihomoEgressProfileList"];
-                };
-            };
-        };
-    };
-    createMihomoEgressProfile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MihomoEgressProfileMutation"];
-            };
-        };
-        responses: {
-            /** @description Created profile */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MihomoEgressProfile"];
-                };
-            };
-            /** @description Invalid selection */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    updateMihomoEgressProfile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MihomoEgressProfileMutation"];
-            };
-        };
-        responses: {
-            /** @description Updated profile */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MihomoEgressProfile"];
-                };
-            };
-            /** @description Profile not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    deleteMihomoEgressProfile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Profile not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     listLineEgressBindings: {
         parameters: {
             query?: never;
@@ -2850,7 +2576,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Line is not configured for Host VoWiFi */
+            /** @description Line does not support Host VoWiFi */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2919,7 +2645,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Line, SIM, RF or egress is not ready */
+            /** @description Line, SIM/Profile capability, or explicit egress is not ready */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3324,115 +3050,6 @@ export interface operations {
             };
             /** @description The request exceeded the bounded control-plane deadline */
             504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    listAccessPaths: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Per-line states */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccessPathListResponse"];
-                };
-            };
-            /** @description No administrator session */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Instance not ready */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Access paths unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    configureAccessPath: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lineId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccessPathRequest"];
-            };
-        };
-        responses: {
-            /** @description Persisted fail-closed state */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccessPathState"];
-                };
-            };
-            /** @description Invalid state */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description No administrator session */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Instance not ready */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Access paths unavailable */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4417,7 +4034,7 @@ export interface operations {
                     "application/json": components["schemas"]["ManagedLine"];
                 };
             };
-            /** @description Candidate, name, or access mode is invalid */
+            /** @description Candidate or name is invalid */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4473,7 +4090,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Current unadded Line candidates */
+            /** @description Current addable and unavailable Line candidates */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4535,7 +4152,7 @@ export interface operations {
                     "application/json": components["schemas"]["ManagedLine"];
                 };
             };
-            /** @description Name or access mode is invalid */
+            /** @description Name is invalid */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4712,86 +4329,6 @@ export interface operations {
             };
             /** @description Equipment identity is temporarily unavailable */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    putSubscriptionProfileAccessMode: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutAccessModeRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated inventory snapshot */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InventoryResponse"];
-                };
-            };
-            /** @description The request body or access mode is invalid */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The subscription profile is not present in the current inventory */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The instance has not completed setup or is not ready for business APIs */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The HTTP authority is not a permitted loopback host */
-            421: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The access mode could not be persisted */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The request exceeded the bounded control-plane deadline */
-            504: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5498,95 +5035,6 @@ export interface operations {
             };
         };
     };
-    putSetupSubscriptionProfileAccessMode: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profileId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PutAccessModeRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated setup inventory remains RF Off */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InventoryResponse"];
-                };
-            };
-            /** @description Access mode is invalid */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description No live setup session is present */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Subscription profile was not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description HTTPS setup is incomplete or setup is unavailable */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The HTTP authority is not a permitted loopback host */
-            421: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Access mode could not be persisted */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description The request exceeded the bounded control-plane deadline */
-            504: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     confirmSetupHardware: {
         parameters: {
             query?: never;
@@ -5605,7 +5053,7 @@ export interface operations {
                     "application/json": components["schemas"]["SetupSessionResponse"];
                 };
             };
-            /** @description A line lacks an access mode or is not RF Off */
+            /** @description The current hardware topology is invalid */
             400: {
                 headers: {
                     [name: string]: unknown;

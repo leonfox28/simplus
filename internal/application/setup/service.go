@@ -168,9 +168,6 @@ type HardwareLine struct {
 	ID                    string
 	PhysicalDeviceID      string
 	SubscriptionProfileID string
-	AccessMode            string
-	AccessModeConfigured  bool
-	RFSafety              string
 }
 
 type HardwareDevice struct {
@@ -763,15 +760,10 @@ func hardwareDigest(input HardwareReviewInput) (string, error) {
 	}
 	for _, line := range lines {
 		if !hardwareIdentifierPattern.MatchString(line.ID) || !hardwareIdentifierPattern.MatchString(line.PhysicalDeviceID) ||
-			!hardwareIdentifierPattern.MatchString(line.SubscriptionProfileID) || !line.AccessModeConfigured || line.RFSafety != "off" {
+			!hardwareIdentifierPattern.MatchString(line.SubscriptionProfileID) {
 			return "", ErrHardwareReviewInvalid
 		}
 		if _, present := seenDevices[line.PhysicalDeviceID]; !present {
-			return "", ErrHardwareReviewInvalid
-		}
-		switch line.AccessMode {
-		case "cellular-native", "host-vowifi-only", "hold-rf-off":
-		default:
 			return "", ErrHardwareReviewInvalid
 		}
 		if _, duplicate := seenLines[line.ID]; duplicate {
@@ -782,7 +774,7 @@ func hardwareDigest(input HardwareReviewInput) (string, error) {
 		}
 		seenLines[line.ID] = struct{}{}
 		seenProfiles[line.SubscriptionProfileID] = struct{}{}
-		fmt.Fprintf(&canonical, "line=%q device=%q profile=%q mode=%q rf=%q\n", line.ID, line.PhysicalDeviceID, line.SubscriptionProfileID, line.AccessMode, line.RFSafety)
+		fmt.Fprintf(&canonical, "line=%q device=%q profile=%q\n", line.ID, line.PhysicalDeviceID, line.SubscriptionProfileID)
 	}
 	digest := sha256.Sum256([]byte(canonical.String()))
 	return fmt.Sprintf("%x", digest), nil

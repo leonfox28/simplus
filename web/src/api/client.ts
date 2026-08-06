@@ -13,8 +13,6 @@ export type MihomoSubscriptionCreateRequest = components['schemas']['MihomoSubsc
 export type MihomoSubscriptionMutation = components['schemas']['MihomoSubscriptionMutation']
 export type MihomoNode = components['schemas']['MihomoNode']
 export type MihomoSubscriptionRefresh = components['schemas']['MihomoSubscriptionRefresh']
-export type MihomoEgressProfile = components['schemas']['MihomoEgressProfile']
-export type MihomoEgressProfileMutation = components['schemas']['MihomoEgressProfileMutation']
 export type LineEgressBinding = components['schemas']['LineEgressBinding']
 export type LineEgressBindingMutation = components['schemas']['LineEgressBindingMutation']
 export type VoWiFiLineState = components['schemas']['VoWiFiLineState']
@@ -31,7 +29,6 @@ export type SetupRootCertificateResponse = components['schemas']['SetupRootCerti
 export type SetupCompletionResponse = components['schemas']['SetupCompletionResponse']
 export type SetupFlow = components['schemas']['SetupFlow']
 export type InventoryResponse = components['schemas']['InventoryResponse']
-export type AccessMode = components['schemas']['AccessMode']
 export type LineSummary = components['schemas']['LineSummary']
 export type ManagedModem = components['schemas']['ManagedModem']
 export type ModemCandidate = components['schemas']['ModemCandidate']
@@ -50,9 +47,6 @@ export type CallListResponse = components['schemas']['CallListResponse']
 export type CallStartRequest = components['schemas']['CallStartRequest']
 export type CallActionRequest = components['schemas']['CallActionRequest']
 export type EUICCState = components['schemas']['EUICCState']
-export type AccessPathState = components['schemas']['AccessPathState']
-export type AccessPathRequest = components['schemas']['AccessPathRequest']
-export type AccessPathListResponse = components['schemas']['AccessPathListResponse']
 export type { HardwareTopologyResponse }
 type ApiError = components['schemas']['ApiError']
 type PhysicalDeviceSummary = components['schemas']['PhysicalDeviceSummary']
@@ -70,14 +64,15 @@ const remoteAddressPattern = /^(?:\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$
 const contactIdPattern = /^contact_[A-Za-z0-9_-]{16,120}$/
 const callIdPattern = /^call_[A-Za-z0-9_-]{16,120}$/
 
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && keys.every((key) => expected.includes(key))
+}
+
 function isApiError(value: unknown): value is ApiError {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Partial<ApiError>
   return typeof candidate.code === 'string' && /^[A-Z0-9_]+$/.test(candidate.code) && typeof candidate.retryable === 'boolean'
-}
-
-export function isAccessMode(value: unknown): value is AccessMode {
-  return value === 'cellular-native' || value === 'host-vowifi-only' || value === 'hold-rf-off'
 }
 
 function cookieValue(name: string): string {
@@ -244,7 +239,6 @@ function isHealthResponse(value: unknown): value is HealthResponse {
     (candidate.installationState === 'uninitialized' ||
       candidate.installationState === 'ready' ||
       candidate.installationState === 'maintenance') &&
-    (candidate.rfSafety === 'off' || candidate.rfSafety === 'not-present' || candidate.rfSafety === 'unknown') &&
     (candidate.backend === 'simulator' || candidate.backend === 'hardware' || candidate.backend === 'replay') &&
     Number.isInteger(candidate.databaseCount) &&
     (candidate.databaseCount ?? -1) >= 0
@@ -282,25 +276,13 @@ function isLine(value: unknown): value is LineSummary {
     idPattern.test(candidate.physicalDeviceId) &&
     typeof candidate.subscriptionProfileId === 'string' &&
     idPattern.test(candidate.subscriptionProfileId)
-  const stateIsValid =
-    candidate.state === 'awaiting-access-mode' || candidate.state === 'ready' || candidate.state === 'unavailable'
-  const rfIsValid = candidate.rfSafety === 'off' || candidate.rfSafety === 'not-present' || candidate.rfSafety === 'unknown'
-  const configurationIsConsistent =
-    typeof candidate.accessModeConfigured === 'boolean' &&
-    (candidate.accessModeConfigured
-      ? candidate.state !== 'awaiting-access-mode'
-      : candidate.accessMode === 'hold-rf-off' && candidate.state === 'awaiting-access-mode')
-
   return (
     identityIsValid &&
     typeof candidate.displayName === 'string' &&
     candidate.displayName.length > 0 &&
     Number.isSafeInteger(candidate.generation) &&
     (candidate.generation ?? 0) > 0 &&
-    isAccessMode(candidate.accessMode) &&
-    stateIsValid &&
-    rfIsValid &&
-    configurationIsConsistent
+    (candidate.state === 'ready' || candidate.state === 'unavailable')
   )
 }
 
@@ -644,14 +626,10 @@ export async function updateMihomoSubscription(id:string,request:MihomoSubscript
 export async function deleteMihomoSubscription(id:string,signal?:AbortSignal):Promise<void>{await requestJSON(`/api/v1/mihomo/subscriptions/${encodeURIComponent(id)}`,signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_SUBSCRIPTION_RESPONSE_INVALID','MIHOMO_SUBSCRIPTION_DELETE',{method:'DELETE'})}
 export async function refreshMihomoSubscription(id:string,signal?:AbortSignal):Promise<MihomoSubscriptionRefresh>{const response=await requestJSON(`/api/v1/mihomo/subscriptions/${encodeURIComponent(id)}/refresh`,signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_SUBSCRIPTION_RESPONSE_INVALID','MIHOMO_SUBSCRIPTION_REFRESH',{method:'POST'});if(typeof response!=='object'||response===null)throw new Error('MIHOMO_SUBSCRIPTION_RESPONSE_INVALID');const item=response as Partial<MihomoSubscriptionRefresh>;if(!isMihomoSubscription(item.subscription)||!Array.isArray(item.nodes)||!item.nodes.every(isMihomoNode))throw new Error('MIHOMO_SUBSCRIPTION_RESPONSE_INVALID');return item as MihomoSubscriptionRefresh}
 export async function listMihomoSubscriptionNodes(id:string,signal?:AbortSignal):Promise<MihomoNode[]>{const response=await requestJSON(`/api/v1/mihomo/subscriptions/${encodeURIComponent(id)}/nodes`,signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_NODES_RESPONSE_INVALID','MIHOMO_NODES');if(typeof response!=='object'||response===null)throw new Error('MIHOMO_NODES_RESPONSE_INVALID');const nodes=(response as {nodes?:unknown}).nodes;if(!Array.isArray(nodes)||!nodes.every(isMihomoNode))throw new Error('MIHOMO_NODES_RESPONSE_INVALID');return nodes}
-function isMihomoEgressProfile(value:unknown):value is MihomoEgressProfile{if(typeof value!=='object'||value===null)return false;const item=value as Partial<MihomoEgressProfile>;return typeof item.id==='string'&&/^egress_[A-Za-z0-9_-]{22}$/.test(item.id)&&typeof item.displayName==='string'&&typeof item.subscriptionId==='string'&&typeof item.lineId==='string'&&item.lineId.length>0&&(item.selectionType==='node'||item.selectionType==='country')&&typeof item.selectedNodeId==='string'&&typeof item.selectedNodeName==='string'&&typeof item.selectedCountryCode==='string'&&typeof item.selectedCountryName==='string'&&typeof item.sourceCidr==='string'&&typeof item.enabled==='boolean'&&typeof item.ready==='boolean'&&typeof item.readinessReason==='string'}
-export async function listMihomoEgressProfiles(signal?:AbortSignal):Promise<MihomoEgressProfile[]>{const response=await requestJSON('/api/v1/mihomo/egress-profiles',signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_EGRESS_RESPONSE_INVALID','MIHOMO_EGRESS');if(typeof response!=='object'||response===null)throw new Error('MIHOMO_EGRESS_RESPONSE_INVALID');const profiles=(response as {profiles?:unknown}).profiles;if(!Array.isArray(profiles)||!profiles.every(isMihomoEgressProfile))throw new Error('MIHOMO_EGRESS_RESPONSE_INVALID');return profiles}
-export async function createMihomoEgressProfile(request:MihomoEgressProfileMutation,signal?:AbortSignal):Promise<MihomoEgressProfile>{const response=await requestJSON('/api/v1/mihomo/egress-profiles',signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_EGRESS_RESPONSE_INVALID','MIHOMO_EGRESS_CREATE',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!isMihomoEgressProfile(response))throw new Error('MIHOMO_EGRESS_RESPONSE_INVALID');return response}
-export async function deleteMihomoEgressProfile(id:string,signal?:AbortSignal):Promise<void>{await requestJSON(`/api/v1/mihomo/egress-profiles/${encodeURIComponent(id)}`,signal,'MIHOMO_NETWORK_UNAVAILABLE','MIHOMO_EGRESS_RESPONSE_INVALID','MIHOMO_EGRESS_DELETE',{method:'DELETE'})}
-function isLineEgressBinding(value:unknown):value is LineEgressBinding{if(typeof value!=='object'||value===null)return false;const item=value as Partial<LineEgressBinding>;return typeof item.lineId==='string'&&businessLineIdPattern.test(item.lineId)&&(item.mode==='direct'||item.mode==='mihomo-country')&&typeof item.countryCode==='string'&&(/^$|^[A-Z]{2}$/).test(item.countryCode)&&typeof item.countryName==='string'&&typeof item.listenerPort==='number'&&Number.isInteger(item.listenerPort)&&item.listenerPort>=0&&item.listenerPort<=65535&&typeof item.ready==='boolean'&&['READY','LINE_NOT_HOST_VOWIFI','SUBSCRIPTION_NOT_SELECTED','COUNTRY_NOT_FOUND','MIHOMO_NOT_RUNNING','MIHOMO_RESTART_REQUIRED'].includes(item.readinessReason??'')}
+function isLineEgressBinding(value:unknown):value is LineEgressBinding{if(typeof value!=='object'||value===null||!hasExactKeys(value,['lineId','mode','countryCode','countryName','listenerPort','ready','readinessReason']))return false;const item=value as Partial<LineEgressBinding>;return typeof item.lineId==='string'&&businessLineIdPattern.test(item.lineId)&&(item.mode==='unconfigured'||item.mode==='direct'||item.mode==='mihomo-country')&&typeof item.countryCode==='string'&&(item.mode==='mihomo-country'?/^[A-Z]{2}$/.test(item.countryCode):item.countryCode==='')&&typeof item.countryName==='string'&&typeof item.listenerPort==='number'&&Number.isInteger(item.listenerPort)&&item.listenerPort>=0&&item.listenerPort<=65535&&typeof item.ready==='boolean'&&['READY','EGRESS_NOT_CONFIGURED','LINE_VOWIFI_UNSUPPORTED','SUBSCRIPTION_NOT_SELECTED','COUNTRY_NOT_FOUND','MIHOMO_NOT_RUNNING','MIHOMO_RESTART_REQUIRED'].includes(item.readinessReason??'')}
 export async function listLineEgressBindings(signal?:AbortSignal):Promise<LineEgressBinding[]>{const response=await requestJSON('/api/v1/line-egress-bindings',signal,'LINE_EGRESS_NETWORK_UNAVAILABLE','LINE_EGRESS_RESPONSE_INVALID','LINE_EGRESS');if(typeof response!=='object'||response===null)throw new Error('LINE_EGRESS_RESPONSE_INVALID');const bindings=(response as {bindings?:unknown}).bindings;if(!Array.isArray(bindings)||!bindings.every(isLineEgressBinding))throw new Error('LINE_EGRESS_RESPONSE_INVALID');return bindings}
-export async function putLineEgressBinding(lineId:string,request:LineEgressBindingMutation,signal?:AbortSignal):Promise<LineEgressBinding>{if(!businessLineIdPattern.test(lineId)||(request.mode==='direct'&&request.countryCode!=='')||(request.mode==='mihomo-country'&&!/^[A-Z]{2}$/.test(request.countryCode)))throw new Error('LINE_EGRESS_REQUEST_INVALID');const response=await requestJSON(`/api/v1/lines/${encodeURIComponent(lineId)}/egress`,signal,'LINE_EGRESS_NETWORK_UNAVAILABLE','LINE_EGRESS_RESPONSE_INVALID','LINE_EGRESS',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!isLineEgressBinding(response))throw new Error('LINE_EGRESS_RESPONSE_INVALID');return response}
-function isVoWiFiLineState(value:unknown):value is VoWiFiLineState{if(typeof value!=='object'||value===null)return false;const item=value as Partial<VoWiFiLineState>;return typeof item.lineId==='string'&&businessLineIdPattern.test(item.lineId)&&typeof item.desiredActive==='boolean'&&typeof item.eligible==='boolean'&&['READY','LINE_NOT_HOST_VOWIFI','LINE_HARDWARE_NOT_READY','SUBSCRIPTION_NOT_SELECTED','COUNTRY_NOT_FOUND','MIHOMO_NOT_RUNNING','MIHOMO_RESTART_REQUIRED'].includes(item.readinessCode??'')&&['stopped','starting','connecting','registering','online','reconnecting','stopping','failed'].includes(item.state??'')&&typeof item.stage==='string'&&item.stage.length<=64&&typeof item.online==='boolean'&&item.online===(item.state==='online')&&(item.egressMode==='direct'||item.egressMode==='mihomo-country')&&typeof item.countryCode==='string'&&(item.egressMode==='direct'?item.countryCode==='':/^[A-Z]{2}$/.test(item.countryCode))&&typeof item.countryName==='string'&&typeof item.registeredAt==='string'&&typeof item.nextRefreshAt==='string'&&typeof item.attempt==='number'&&Number.isInteger(item.attempt)&&item.attempt>=0&&item.attempt<=1000000&&typeof item.lastErrorCode==='string'&&/^[A-Z0-9_-]*$/.test(item.lastErrorCode)}
+export async function putLineEgressBinding(lineId:string,request:LineEgressBindingMutation,signal?:AbortSignal):Promise<LineEgressBinding>{if(!businessLineIdPattern.test(lineId)||!request||!hasExactKeys(request,['mode','countryCode'])||(request.mode!=='direct'&&request.mode!=='mihomo-country')||(request.mode==='direct'&&request.countryCode!=='')||(request.mode==='mihomo-country'&&!/^[A-Z]{2}$/.test(request.countryCode)))throw new Error('LINE_EGRESS_REQUEST_INVALID');const response=await requestJSON(`/api/v1/lines/${encodeURIComponent(lineId)}/egress`,signal,'LINE_EGRESS_NETWORK_UNAVAILABLE','LINE_EGRESS_RESPONSE_INVALID','LINE_EGRESS',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!isLineEgressBinding(response))throw new Error('LINE_EGRESS_RESPONSE_INVALID');return response}
+function isVoWiFiLineState(value:unknown):value is VoWiFiLineState{if(typeof value!=='object'||value===null||!hasExactKeys(value,['lineId','desiredActive','eligible','readinessCode','state','stage','online','egressMode','countryCode','countryName','registeredAt','nextRefreshAt','phoneNumber','attempt','lastErrorCode']))return false;const item=value as Partial<VoWiFiLineState>;return typeof item.lineId==='string'&&businessLineIdPattern.test(item.lineId)&&typeof item.desiredActive==='boolean'&&typeof item.eligible==='boolean'&&['READY','EGRESS_NOT_CONFIGURED','LINE_VOWIFI_UNSUPPORTED','LINE_HARDWARE_NOT_READY','SUBSCRIPTION_NOT_SELECTED','COUNTRY_NOT_FOUND','MIHOMO_NOT_RUNNING','MIHOMO_RESTART_REQUIRED'].includes(item.readinessCode??'')&&['stopped','starting','connecting','registering','online','reconnecting','stopping','failed'].includes(item.state??'')&&typeof item.stage==='string'&&item.stage.length<=64&&typeof item.online==='boolean'&&item.online===(item.state==='online')&&(item.egressMode==='unconfigured'||item.egressMode==='direct'||item.egressMode==='mihomo-country')&&typeof item.countryCode==='string'&&(item.egressMode==='mihomo-country'?/^[A-Z]{2}$/.test(item.countryCode):item.countryCode==='')&&typeof item.countryName==='string'&&typeof item.registeredAt==='string'&&typeof item.nextRefreshAt==='string'&&typeof item.phoneNumber==='string'&&(item.phoneNumber===''||/^\+[1-9][0-9]{2,14}$/.test(item.phoneNumber))&&typeof item.attempt==='number'&&Number.isInteger(item.attempt)&&item.attempt>=0&&item.attempt<=1000000&&typeof item.lastErrorCode==='string'&&/^[A-Z0-9_-]*$/.test(item.lastErrorCode)}
 export async function listVoWiFiLines(signal?:AbortSignal):Promise<VoWiFiLineState[]>{const response=await requestJSON('/api/v1/vowifi-lines',signal,'VOWIFI_NETWORK_UNAVAILABLE','VOWIFI_RESPONSE_INVALID','VOWIFI');if(typeof response!=='object'||response===null)throw new Error('VOWIFI_RESPONSE_INVALID');const lines=(response as {lines?:unknown}).lines;if(!Array.isArray(lines)||!lines.every(isVoWiFiLineState))throw new Error('VOWIFI_RESPONSE_INVALID');return lines}
 async function mutateVoWiFiLine(lineId:string,action:'activate'|'deactivate',signal?:AbortSignal):Promise<VoWiFiLineState>{if(!businessLineIdPattern.test(lineId))throw new Error('VOWIFI_LINE_INVALID');const response=await requestJSON(`/api/v1/vowifi-lines/${encodeURIComponent(lineId)}/${action}`,signal,'VOWIFI_NETWORK_UNAVAILABLE','VOWIFI_RESPONSE_INVALID','VOWIFI',{method:'POST'});if(!isVoWiFiLineState(response))throw new Error('VOWIFI_RESPONSE_INVALID');return response}
 export const activateVoWiFiLine=(lineId:string,signal?:AbortSignal)=>mutateVoWiFiLine(lineId,'activate',signal)
@@ -710,28 +688,6 @@ export async function getSetupHardwareTopology(signal?: AbortSignal): Promise<Ha
   )
   if (!isHardwareTopologyResponse(topology)) throw new Error('HARDWARE_TOPOLOGY_RESPONSE_INVALID')
   return topology
-}
-
-export async function putSetupSubscriptionProfileAccessMode(
-  profileId: string,
-  accessMode: AccessMode,
-  signal?: AbortSignal,
-): Promise<InventoryResponse> {
-  if (!idPattern.test(profileId) || !isAccessMode(accessMode)) throw new Error('ACCESS_MODE_REQUEST_INVALID')
-  const inventory = await requestJSON(
-    `/api/v1/setup/subscription-profiles/${encodeURIComponent(profileId)}/access-mode`,
-    signal,
-    'ACCESS_MODE_NETWORK_UNAVAILABLE',
-    'INVENTORY_RESPONSE_INVALID',
-    'SETUP_ACCESS_MODE',
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessMode }),
-    },
-  )
-  if (!isInventoryResponse(inventory)) throw new Error('INVENTORY_RESPONSE_INVALID')
-  return inventory
 }
 
 export async function confirmSetupHardware(signal?: AbortSignal): Promise<SetupSessionResponse> {
@@ -901,14 +857,16 @@ export async function readManagedModemIMEI(modemId: string, signal?: AbortSignal
 
 function isManagedLine(value: unknown): value is ManagedLine {
   if (typeof value !== 'object' || value === null) return false
+  if (!hasExactKeys(value, ['id', 'displayName', 'managedModemId', 'managedModemDisplayName', 'managedModemModel', 'managedModemSerialNumber', 'subscriptionDisplayHint', 'state', 'capabilities', 'createdAt'])) return false
   const candidate = value as Partial<ManagedLine>
   return (
     typeof candidate.id === 'string' && businessLineIdPattern.test(candidate.id) &&
     typeof candidate.displayName === 'string' && candidate.displayName.trim() === candidate.displayName && candidate.displayName.length > 0 && candidate.displayName.length <= 120 &&
     typeof candidate.managedModemId === 'string' && /^modem_[A-Za-z0-9_-]{22}$/.test(candidate.managedModemId) &&
     typeof candidate.managedModemDisplayName === 'string' && candidate.managedModemDisplayName.length > 0 && candidate.managedModemDisplayName.length <= 120 &&
+    typeof candidate.managedModemModel === 'string' && candidate.managedModemModel.trim() === candidate.managedModemModel && candidate.managedModemModel.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.managedModemModel) &&
+    typeof candidate.managedModemSerialNumber === 'string' && candidate.managedModemSerialNumber.trim() === candidate.managedModemSerialNumber && candidate.managedModemSerialNumber.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.managedModemSerialNumber) &&
     typeof candidate.subscriptionDisplayHint === 'string' && candidate.subscriptionDisplayHint.length > 0 && candidate.subscriptionDisplayHint.length <= 64 &&
-    isAccessMode(candidate.accessMode) &&
     (candidate.state === 'ready' || candidate.state === 'modem-offline' || candidate.state === 'sim-unavailable') &&
     isHardwareCapabilities(candidate.capabilities) &&
     typeof candidate.createdAt === 'string' && Number.isFinite(Date.parse(candidate.createdAt))
@@ -917,13 +875,23 @@ function isManagedLine(value: unknown): value is ManagedLine {
 
 function isLineCandidate(value: unknown): value is LineCandidate {
   if (typeof value !== 'object' || value === null) return false
+  if (!hasExactKeys(value, ['candidateId', 'managedModemId', 'managedModemDisplayName', 'managedModemModel', 'managedModemSerialNumber', 'subscriptionDisplayHint', 'homeOperatorName', 'homeOperatorCode', 'simPresence', 'capabilities', 'addable', 'readinessReason'])) return false
   const candidate = value as Partial<LineCandidate>
   return (
     typeof candidate.candidateId === 'string' && /^line-candidate-[0-9a-f]{32}$/.test(candidate.candidateId) &&
     typeof candidate.managedModemId === 'string' && /^modem_[A-Za-z0-9_-]{22}$/.test(candidate.managedModemId) &&
     typeof candidate.managedModemDisplayName === 'string' && candidate.managedModemDisplayName.length > 0 && candidate.managedModemDisplayName.length <= 120 &&
-    typeof candidate.subscriptionDisplayHint === 'string' && candidate.subscriptionDisplayHint.length > 0 && candidate.subscriptionDisplayHint.length <= 64 &&
-    isHardwareCapabilities(candidate.capabilities) && typeof candidate.addable === 'boolean'
+    typeof candidate.managedModemModel === 'string' && candidate.managedModemModel.trim() === candidate.managedModemModel && candidate.managedModemModel.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.managedModemModel) &&
+    typeof candidate.managedModemSerialNumber === 'string' && candidate.managedModemSerialNumber.trim() === candidate.managedModemSerialNumber && candidate.managedModemSerialNumber.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.managedModemSerialNumber) &&
+    typeof candidate.subscriptionDisplayHint === 'string' && candidate.subscriptionDisplayHint.length <= 64 && !/[\u0000-\u001f\u007f]/.test(candidate.subscriptionDisplayHint) &&
+    typeof candidate.homeOperatorName === 'string' && candidate.homeOperatorName.trim() === candidate.homeOperatorName && candidate.homeOperatorName.length <= 64 && !/[\u0000-\u001f\u007f]/.test(candidate.homeOperatorName) &&
+    typeof candidate.homeOperatorCode === 'string' && (candidate.homeOperatorCode === '' || /^[0-9]{3}-[0-9]{2,3}$/.test(candidate.homeOperatorCode)) &&
+    (candidate.simPresence === 'present' || candidate.simPresence === 'absent' || candidate.simPresence === 'unknown') &&
+    isHardwareCapabilities(candidate.capabilities) && typeof candidate.addable === 'boolean' &&
+    (candidate.readinessReason === 'READY' || candidate.readinessReason === 'MODEM_OFFLINE' ||
+      candidate.readinessReason === 'SIM_ABSENT' || candidate.readinessReason === 'SIM_UNAVAILABLE' ||
+      candidate.readinessReason === 'ALREADY_ADDED' || candidate.readinessReason === 'BINDING_CONFLICT') &&
+    candidate.addable === (candidate.readinessReason === 'READY')
   )
 }
 
@@ -944,8 +912,8 @@ export async function listLineCandidates(signal?: AbortSignal): Promise<LineCand
 }
 
 export async function addManagedLine(request: AddManagedLineRequest, signal?: AbortSignal): Promise<ManagedLine> {
-  if (!/^line-candidate-[0-9a-f]{32}$/.test(request.candidateId) || request.displayName.trim() !== request.displayName ||
-      request.displayName.length < 1 || request.displayName.length > 120 || !isAccessMode(request.accessMode)) throw new Error('LINE_ADD_REQUEST_INVALID')
+  if (!request || !hasExactKeys(request, ['candidateId', 'displayName']) || !/^line-candidate-[0-9a-f]{32}$/.test(request.candidateId) || request.displayName.trim() !== request.displayName ||
+      request.displayName.length < 1 || request.displayName.length > 120) throw new Error('LINE_ADD_REQUEST_INVALID')
   const response = await requestJSON('/api/v1/lines', signal, 'LINE_NETWORK_UNAVAILABLE', 'LINE_RESPONSE_INVALID', 'LINE', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
   })
@@ -954,35 +922,13 @@ export async function addManagedLine(request: AddManagedLineRequest, signal?: Ab
 }
 
 export async function updateManagedLine(lineId: string, request: UpdateManagedLineRequest, signal?: AbortSignal): Promise<ManagedLine> {
-  if (!businessLineIdPattern.test(lineId) || request.displayName.trim() !== request.displayName || request.displayName.length < 1 ||
-      request.displayName.length > 120 || !isAccessMode(request.accessMode)) throw new Error('LINE_UPDATE_REQUEST_INVALID')
+  if (!businessLineIdPattern.test(lineId) || !request || !hasExactKeys(request, ['displayName']) || request.displayName.trim() !== request.displayName || request.displayName.length < 1 ||
+      request.displayName.length > 120) throw new Error('LINE_UPDATE_REQUEST_INVALID')
   const response = await requestJSON(`/api/v1/lines/${encodeURIComponent(lineId)}`, signal, 'LINE_NETWORK_UNAVAILABLE', 'LINE_RESPONSE_INVALID', 'LINE', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
   })
   if (!isManagedLine(response)) throw new Error('LINE_RESPONSE_INVALID')
   return response
-}
-
-export async function putSubscriptionProfileAccessMode(
-  profileId: string,
-  accessMode: AccessMode,
-  signal?: AbortSignal,
-): Promise<InventoryResponse> {
-  if (!idPattern.test(profileId) || !isAccessMode(accessMode)) throw new Error('ACCESS_MODE_REQUEST_INVALID')
-  const inventory = await requestJSON(
-    `/api/v1/subscription-profiles/${encodeURIComponent(profileId)}/access-mode`,
-    signal,
-    'ACCESS_MODE_NETWORK_UNAVAILABLE',
-    'INVENTORY_RESPONSE_INVALID',
-    'ACCESS_MODE',
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessMode }),
-    },
-  )
-  if (!isInventoryResponse(inventory)) throw new Error('INVENTORY_RESPONSE_INVALID')
-  return inventory
 }
 
 export type SMSHistory = { messages: SMSMessage[]; totalCount: number; capacity: number; nearCapacity: boolean }
@@ -1124,6 +1070,3 @@ export async function activateEUICCProfile(id: string, signal?: AbortSignal): Pr
   if (!/^simulator-euicc-profile-[ab]$/.test(id)) throw new Error('EUICC_REQUEST_INVALID')
   return validateEUICCState(await requestJSON(`/api/v1/euicc/profiles/${encodeURIComponent(id)}/activate`, signal, 'EUICC_NETWORK_UNAVAILABLE', 'EUICC_RESPONSE_INVALID', 'EUICC_SWITCH', { method:'POST' }))
 }
-function isAccessPath(value: unknown): value is AccessPathState { if(typeof value!=='object'||value===null)return false;const item=value as Partial<AccessPathState>;return businessLineIdPattern.test(item.lineId??'')&&['direct','mihomo-required'].includes(item.mode??'')&&['running','stopped','failed'].includes(item.mihomoState??'')&&['online','offline'].includes(item.lineState??'')&&item.authentication==='simulated-aka-complete'&&['connected','blocked'].includes(item.epdg??'')&&['registered','offline'].includes(item.ims??'')&&item.directFallback===false&&!(item.mode==='mihomo-required'&&item.mihomoState!=='running'&&item.lineState!=='offline') }
-export async function listAccessPaths(signal?:AbortSignal):Promise<AccessPathState[]>{const response=await requestJSON('/api/v1/access-paths',signal,'ACCESS_PATH_NETWORK_UNAVAILABLE','ACCESS_PATH_RESPONSE_INVALID','ACCESS_PATH');if(typeof response!=='object'||response===null)throw new Error('ACCESS_PATH_RESPONSE_INVALID');const candidate=response as Partial<AccessPathListResponse>;if(!Array.isArray(candidate.lines)||candidate.lines.length>1024||!candidate.lines.every(isAccessPath))throw new Error('ACCESS_PATH_RESPONSE_INVALID');return candidate.lines}
-export async function configureAccessPath(lineId:string,request:AccessPathRequest,signal?:AbortSignal):Promise<AccessPathState>{if(!businessLineIdPattern.test(lineId)||!['direct','mihomo-required'].includes(request.mode)||!['running','stopped','failed'].includes(request.mihomoState))throw new Error('ACCESS_PATH_REQUEST_INVALID');const response=await requestJSON(`/api/v1/access-paths/${encodeURIComponent(lineId)}`,signal,'ACCESS_PATH_NETWORK_UNAVAILABLE','ACCESS_PATH_RESPONSE_INVALID','ACCESS_PATH_UPDATE',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});if(!isAccessPath(response))throw new Error('ACCESS_PATH_RESPONSE_INVALID');return response}

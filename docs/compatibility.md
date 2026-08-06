@@ -19,7 +19,7 @@
 | 型号 | 已验证 | 尚未验证或未开放 |
 | --- | --- | --- |
 | QDC507 | USB identity、固定 primary AT/QMI 角色、SIM/RF/注册/通话计数的 HIL-0；PDU-mode SMS 候选在 fixture 中完成编码、传输状态和 durable replay | 稳定设备身份读取与 `ManagedModem` 添加、与类型化 adapter 一致的 RF 控制声明、production 短信、真实电话、数字音频、RF 写入、eUICC mutation |
-| ML307A | USB identity、固定 primary AT、IMEI/USB Serial 脱敏指纹与 SIM READY/RF Off 白名单探测；SIM 已插入/锁卡/未插入分类 fixture；统一 SIM 鉴权与运行时 RF 控制的 fixture；一张无可用 ISIM 应用的真实 SIM 已完成 IMSI + EF_AD MNC 长度派生 IMS 身份 HIL-0，两位/三位 MNC 另有 fixture；类型化 SIM AKA；Host VoWiFi ePDG/IMS 注册与持续运行；SMS over IMS 真实单段和 multipart 入站；受控单段服务请求的关联出站 RP-ACK、公开 Web/API 异步 `sent` 状态提升、普通号码单段及两段 UCS-2 长短信自号码回环、自动重连后再次收发、multipart 业务回复 | 真实空卡槽 HIL-0、运行时 RF 写入 HIL、上电 RF 策略、RF On 下 Host VoWiFi、其他运营商的 ePDG 发现与接入、SMS over IMS 其他收件人互通、普通蜂窝短信/电话、数字媒体、eUICC mutation、蜂窝数据拨号 |
+| ML307A | USB identity、固定 primary AT、IMEI/USB Serial 脱敏指纹与 SIM READY/RF Off 白名单探测；SIM 已插入/锁卡/未插入分类 fixture；统一 SIM 鉴权与运行时 RF 控制的 fixture；一张无可用 ISIM 应用的真实 SIM 已完成 IMSI + EF_AD MNC 长度派生 IMS 身份 HIL-0，两位/三位 MNC 另有 fixture；活动 Profile 的 EF_SPN 与归属 MCC-MNC 解析有 fixture，一张可拔插 eUICC 的活动 Profile 已在 HIL-0 中返回可靠归属 MCC-MNC，但未提供可用 EF_SPN；类型化 SIM AKA；Host VoWiFi ePDG/IMS 注册与持续运行；SMS over IMS 真实单段和 multipart 入站；受控单段服务请求的关联出站 RP-ACK、公开 Web/API 异步 `sent` 状态提升、普通号码单段及两段 UCS-2 长短信自号码回环、自动重连后再次收发、multipart 业务回复 | 真实空卡槽 HIL-0、运行时 RF 写入 HIL、上电 RF 策略、RF On 下 Host VoWiFi、其他运营商的 ePDG 发现与接入、SMS over IMS 其他收件人互通、普通蜂窝短信/电话、数字媒体、eUICC mutation、蜂窝数据拨号 |
 
 两个型号共用同一个 Agent 协议、adapter registry、Modem/Line 领域模型和 Web/API；差异只位于经过证据约束的型号 adapter，不包装成两套平台。
 

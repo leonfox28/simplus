@@ -40,7 +40,7 @@ production Web/API 固定监听 `0.0.0.0:8080`，Mihomo 启动时其带密码 co
 - Agent socket 创建失败：确认 unit 以 `User=simplus-agent`、`Group=simplus` 创建 RuntimeDirectory，不能通过增加 `CAP_CHOWN` 绕过组配置。
 - Agent socket 只允许 root 维护工具和 `simplus` 服务 UID；不要加入普通交互用户或改成 `0666`。
 - ML307A 未出现在候选列表：确认 `2ecc:3012` 的 Interface `02` 已由安装器绑定且 SIM 为 READY；RF 是独立模组状态，不影响候选发现或添加。不要手工打开 tty 绕过 Agent。
-- Host VoWiFi 无法激活：先在线路页检查接入方式、当前订阅、国家出口和 Mihomo 状态；`mihomo-country` 不可用时不会回退 direct。
+- Host VoWiFi 无法激活：先在线路页确认该 Line 具备鉴权能力、出口已明确配置，并检查当前订阅、国家出口和 Mihomo 状态；`mihomo-country` 不可用时不会回退 direct。
 - Hardware 页面业务按钮不可用：先确认模组在线且声明对应的证据化能力；不支持的能力不得通过 Simulator fallback 伪装成功。
 - 数据位于 `/var/lib/simplus`；普通卸载保留该目录。
 

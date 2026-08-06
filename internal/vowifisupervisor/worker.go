@@ -189,7 +189,7 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 	}
 	defer stopWorkerSMSServer(smsServer, smsListener, config.RuntimeDir)
 	emit(workerEvent{State: StateOnline, Stage: "REGISTERED", Online: true, Attempt: attempt,
-		RegisteredAt: registration.RegisteredAt, NextRefresh: registration.NextRefresh})
+		RegisteredAt: registration.RegisteredAt, NextRefresh: registration.NextRefresh, PhoneNumber: registration.PhoneNumber})
 	keepalive := time.NewTicker(25 * time.Second)
 	health := time.NewTicker(15 * time.Second)
 	smsPoll := time.NewTicker(250 * time.Millisecond)
@@ -236,7 +236,7 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 			}
 			registration = updated
 			emit(workerEvent{State: StateOnline, Stage: "REGISTERED", Online: true, Attempt: attempt,
-				RegisteredAt: updated.RegisteredAt, NextRefresh: updated.NextRefresh})
+				RegisteredAt: updated.RegisteredAt, NextRefresh: updated.NextRefresh, PhoneNumber: updated.PhoneNumber})
 			refresh.Reset(maxDuration(time.Until(updated.NextRefresh), time.Second))
 		}
 	}

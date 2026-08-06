@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	domain "github.com/leonfox28/simplus/internal/domain/line"
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
@@ -28,11 +27,10 @@ func (repository *memoryRepository) CreateManagedLine(_ context.Context, record 
 	return nil
 }
 
-func (repository *memoryRepository) UpdateManagedLine(_ context.Context, lineID, displayName string, mode accessmode.Mode, updatedAt time.Time) error {
+func (repository *memoryRepository) UpdateManagedLine(_ context.Context, lineID, displayName string, updatedAt time.Time) error {
 	for index := range repository.lines {
 		if repository.lines[index].ID == lineID {
 			repository.lines[index].DisplayName = displayName
-			repository.lines[index].AccessMode = mode
 			repository.lines[index].UpdatedAt = updatedAt
 			return nil
 		}
@@ -70,10 +68,11 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 	service.now = func() time.Time { return now }
 
 	candidates, err := service.Candidates(t.Context())
-	if err != nil || len(candidates) != 1 || !candidates[0].Addable || candidates[0].ManagedModemID != modem.ID {
+	if err != nil || len(candidates) != 1 || !candidates[0].Addable || candidates[0].ManagedModemID != modem.ID ||
+		candidates[0].HomeOperatorName != "VOXI" || candidates[0].HomeOperatorCode != "234-15" {
 		t.Fatalf("candidates=%#v error=%v", candidates, err)
 	}
-	created, err := service.Add(t.Context(), candidates[0].CandidateID, "VOXI primary", accessmode.HostVoWiFiOnly)
+	created, err := service.Add(t.Context(), candidates[0].CandidateID, "VOXI primary")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +83,11 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 		repository.lines[0].SubscriptionDisplayHint != "ICCID •••• 1234" {
 		t.Fatalf("persisted=%#v", repository.lines)
 	}
+	if _, err := service.Add(t.Context(), candidates[0].CandidateID, "duplicate"); !errors.Is(err, ErrAlreadyManaged) {
+		t.Fatalf("duplicate add error=%v", err)
+	}
 	candidates, err = service.Candidates(t.Context())
-	if err != nil || len(candidates) != 0 {
+	if err != nil || len(candidates) != 1 || candidates[0].Readiness != domain.CandidateAlreadyAdded || candidates[0].Addable {
 		t.Fatalf("remaining candidates=%#v error=%v", candidates, err)
 	}
 
@@ -97,7 +99,8 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, simIdentity, capabilities)
 	views, err := service.List(t.Context())
-	if err != nil || len(views) != 1 || views[0].State != domain.StateReady {
+	if err != nil || len(views) != 1 || views[0].State != domain.StateReady ||
+		views[0].ManagedModemModel != "ML307A-DSLN" || views[0].ManagedModemSerialNumber != "ML307A-SERIAL-0001" {
 		t.Fatalf("moved-port views=%#v error=%v", views, err)
 	}
 
@@ -112,9 +115,35 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 	if err != nil || views[0].State != domain.StateModemOffline {
 		t.Fatalf("offline-modem views=%#v error=%v", views, err)
 	}
-	updated, err := service.Update(t.Context(), created.ID, "VOXI standby", accessmode.HoldRFOff)
-	if err != nil || updated.DisplayName != "VOXI standby" || updated.AccessMode != accessmode.HoldRFOff {
+	if views[0].ManagedModemModel != "" || views[0].ManagedModemSerialNumber != "" {
+		t.Fatalf("offline view leaked stale model or serial=%#v", views[0])
+	}
+	updated, err := service.Update(t.Context(), created.ID, "VOXI standby")
+	if err != nil || updated.DisplayName != "VOXI standby" {
 		t.Fatalf("updated=%#v error=%v", updated, err)
+	}
+}
+
+func TestManagedLineRejectsCandidateAfterSIMChanges(t *testing.T) {
+	modemIdentity := strings.Repeat("a", 64)
+	capabilities := hardware.Capabilities{SIMAccess: true}
+	modem := modemdomain.Record{
+		ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", EquipmentIdentityFingerprint: modemIdentity,
+		DisplayName: "Main ML307A", Capabilities: capabilities,
+	}
+	source := &topologySource{topology: readyTopology("agent-usb-1-2", modemIdentity, strings.Repeat("b", 64), capabilities)}
+	service, err := New(&memoryRepository{modems: []modemdomain.Record{modem}}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := service.Candidates(t.Context())
+	if err != nil || len(candidates) != 1 || !candidates[0].Addable {
+		t.Fatalf("initial candidates=%#v error=%v", candidates, err)
+	}
+	staleID := candidates[0].CandidateID
+	source.topology = readyTopology("agent-usb-1-2", modemIdentity, strings.Repeat("c", 64), capabilities)
+	if _, err := service.Add(t.Context(), staleID, "stale SIM"); !errors.Is(err, ErrCandidateNotFound) {
+		t.Fatalf("stale candidate error=%v", err)
 	}
 }
 
@@ -129,8 +158,11 @@ func TestManagedLineRequiresAnExplicitlyManagedModem(t *testing.T) {
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("unmanaged modem candidates=%#v error=%v", candidates, err)
 	}
-	if _, err := service.Add(t.Context(), "line-candidate-0123456789abcdef0123456789abcdef", "line", accessmode.HostVoWiFiOnly); !errors.Is(err, ErrCandidateNotFound) {
+	if _, err := service.Add(t.Context(), "line-candidate-0123456789abcdef0123456789abcdef", "line"); !errors.Is(err, ErrCandidateNotFound) {
 		t.Fatalf("add error=%v", err)
+	}
+	if _, err := service.Add(t.Context(), "line-candidate-short", "line"); !errors.Is(err, ErrRequestInvalid) {
+		t.Fatalf("invalid candidate error=%v", err)
 	}
 }
 
@@ -141,6 +173,7 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 		Generation: 1, ObservedAt: time.Unix(1, 0),
 		Devices: []hardware.PhysicalDevice{{
 			ID: deviceID, DisplayName: "ML307A", Transport: hardware.TransportUSB, State: hardware.DeviceAvailable,
+			ModemModel: "ML307A-DSLN", USBSerialNumber: "ML307A-SERIAL-0001",
 			EquipmentIdentityFingerprint: modemIdentity, Generation: 1,
 		}},
 		ModemFunctions: []hardware.ModemFunction{{
@@ -154,7 +187,8 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 		}},
 		SubscriptionProfiles: []inventory.SubscriptionProfile{{SubscriptionProfile: hardware.SubscriptionProfile{
 			ID: profileID, SIMMediaID: deviceID + "-media", DisplayName: "Active SIM", State: hardware.ProfileActive,
-			IdentityFingerprint: simIdentity, DisplayIdentityHint: "ICCID •••• 1234", Generation: 1,
+			IdentityFingerprint: simIdentity, DisplayIdentityHint: "ICCID •••• 1234",
+			HomeOperatorName: "VOXI", HomeOperatorCode: "234-15", Generation: 1,
 		}}},
 		ResourceGroups: []hardware.ResourceGroup{{
 			ID: deviceID + "-resources", PhysicalDeviceID: deviceID, DisplayName: "resources",
@@ -164,7 +198,53 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 		Lines: []inventory.Line{{
 			ID: lineID, PhysicalDeviceID: deviceID, ModemFunctionID: deviceID + "-modem",
 			SubscriptionProfileID: profileID, ResourceGroupID: deviceID + "-resources", DisplayName: "Observed line",
-			Generation: 1, Capabilities: capabilities, State: inventory.LineAwaitingAccessMode, RFSafety: inventory.RFSafetyOff,
+			Generation: 1, Capabilities: capabilities, State: inventory.LineReady,
 		}},
+	}
+}
+
+func TestLineCandidatesExplainUnavailableManagedModems(t *testing.T) {
+	modemIdentity := strings.Repeat("a", 64)
+	simIdentity := strings.Repeat("b", 64)
+	capabilities := hardware.Capabilities{SIMAccess: true, HostVoWiFiAuth: true}
+	modem := modemdomain.Record{
+		ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", EquipmentIdentityFingerprint: modemIdentity,
+		DisplayName: "Main ML307A", Capabilities: capabilities,
+	}
+
+	for _, test := range []struct {
+		name      string
+		readiness string
+		mutate    func(*inventory.Topology)
+	}{
+		{name: "offline", readiness: domain.CandidateModemOffline, mutate: func(topology *inventory.Topology) {
+			topology.Devices[0].State = hardware.DeviceUnavailable
+		}},
+		{name: "SIM absent", readiness: domain.CandidateSIMAbsent, mutate: func(topology *inventory.Topology) {
+			topology.SIMSlots[0].Presence, topology.SIMSlots[0].ActiveMediaID = hardware.SlotAbsent, ""
+			topology.SIMMedia, topology.SubscriptionProfiles, topology.Lines = nil, nil, nil
+		}},
+		{name: "SIM identity unavailable", readiness: domain.CandidateSIMUnavailable, mutate: func(topology *inventory.Topology) {
+			topology.SIMSlots[0].ActiveMediaID = ""
+			topology.SIMMedia, topology.SubscriptionProfiles, topology.Lines = nil, nil, nil
+		}},
+		{name: "binding conflict", readiness: domain.CandidateBindingConflict, mutate: func(topology *inventory.Topology) {
+			duplicate := topology.Devices[0]
+			duplicate.ID = "agent-usb-9-9"
+			topology.Devices = append(topology.Devices, duplicate)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			topology := readyTopology("agent-usb-1-2", modemIdentity, simIdentity, capabilities)
+			test.mutate(&topology)
+			service, err := New(&memoryRepository{modems: []modemdomain.Record{modem}}, &topologySource{topology: topology})
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := service.Candidates(t.Context())
+			if err != nil || len(candidates) != 1 || candidates[0].Addable || candidates[0].Readiness != test.readiness {
+				t.Fatalf("candidates=%#v error=%v", candidates, err)
+			}
+		})
 	}
 }

@@ -66,6 +66,12 @@ func TestATRuntimeDelegatesCommandsToAdapterCapabilitiesAndClosesSession(t *test
 			return []string{"+CGSN: 490154203237518", "OK"}, nil
 		case "AT+MCCID":
 			return []string{"+MCCID: 89861118216007272115", "OK"}, nil
+		case "AT+CRSM=176,28486,0,0,17":
+			return []string{`+CRSM: 144,0,"00564F5849FFFFFFFFFFFFFFFFFFFFFFFF"`, "OK"}, nil
+		case "AT+CIMI":
+			return []string{"234150123456789", "OK"}, nil
+		case "AT+CRSM=176,28589,0,0,4":
+			return []string{`+CRSM: 144,0,"00000002"`, "OK"}, nil
 		default:
 			return nil, errors.New("unexpected adapter query")
 		}
@@ -77,7 +83,8 @@ func TestATRuntimeDelegatesCommandsToAdapterCapabilitiesAndClosesSession(t *test
 	if probe.State != agentapi.ProbeStateFailed || probe.ErrorCode != agentapi.ErrorCallStateUnknown {
 		t.Fatalf("probe state = %#v", probe)
 	}
-	if probe.Identity.Model != "ML307A" || probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" || probe.SIM.DisplayIdentityHint != "ICCID •••• 2115" {
+	if probe.Identity.Model != "ML307A" || probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" ||
+		probe.SIM.DisplayIdentityHint != "ICCID •••• 2115" || probe.SIM.HomeOperatorName != "VOXI" || probe.SIM.HomeOperatorCode != "234-15" {
 		t.Fatalf("independent identity observations = %#v", probe)
 	}
 	if opener.endpoint != "/dev/fixture-ml307a" || !session.closed {

@@ -489,14 +489,14 @@ func TestConfigureHTTPSSupportsLoopbackAndConfirmedLocalCA(t *testing.T) {
 	if _, err := service.ConfirmHardwareReview(context.Background(), sessionGrant.Token, HardwareReviewInput{
 		TopologyDigest: topologyDigest,
 		Devices:        devices,
-		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "device-1", SubscriptionProfileID: "profile-1", AccessMode: "hold-rf-off", RFSafety: "off"}},
+		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "missing-device", SubscriptionProfileID: "profile-1"}},
 	}); !errors.Is(err, ErrHardwareReviewInvalid) {
-		t.Fatalf("unconfigured line review error = %v", err)
+		t.Fatalf("unknown device review error = %v", err)
 	}
 	hardware, err := service.ConfirmHardwareReview(context.Background(), sessionGrant.Token, HardwareReviewInput{
 		TopologyDigest: topologyDigest,
 		Devices:        devices,
-		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "device-1", SubscriptionProfileID: "profile-1", AccessMode: "hold-rf-off", AccessModeConfigured: true, RFSafety: "off"}},
+		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "device-1", SubscriptionProfileID: "profile-1"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -510,7 +510,7 @@ func TestConfigureHTTPSSupportsLoopbackAndConfirmedLocalCA(t *testing.T) {
 	completion, err := service.Complete(context.Background(), sessionGrant.Token, HardwareReviewInput{
 		TopologyDigest: topologyDigest,
 		Devices:        devices,
-		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "device-1", SubscriptionProfileID: "profile-1", AccessMode: "hold-rf-off", AccessModeConfigured: true, RFSafety: "off"}},
+		Lines:          []HardwareLine{{ID: "line-1", PhysicalDeviceID: "device-1", SubscriptionProfileID: "profile-1"}},
 	})
 	if err != nil {
 		t.Fatal(err)

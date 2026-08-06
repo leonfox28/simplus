@@ -16,7 +16,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 COMMANDS := simplusd simplus-agent simplus-netd simplusctl
 VOWIFI_HIL_COMMANDS := simplus-vowifi-hil-prepare simplus-vowifi-hil-vici simplus-vowifi-hil-pcscf simplus-vowifi-hil-ims simplus-vowifi-hil-redact simplus-vowifi-hil-stun
-GENERATED_PATHS := internal/api/openapi/generated.go internal/storage/sqlite/generated/core/access_modes.sql.go internal/storage/sqlite/generated/core/db.go internal/storage/sqlite/generated/core/models.go internal/storage/sqlite/generated/core/state.sql.go web/src/api/schema.d.ts
+GENERATED_PATHS := internal/api/openapi/generated.go internal/storage/sqlite/generated/core/db.go internal/storage/sqlite/generated/core/models.go internal/storage/sqlite/generated/core/state.sql.go web/src/api/schema.d.ts
 SQLC_VERSION := v1.31.1
 GOVULNCHECK_VERSION := v1.6.0
 ACTIONLINT_VERSION := v1.7.12

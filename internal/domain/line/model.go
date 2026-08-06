@@ -4,7 +4,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 )
 
@@ -14,6 +13,13 @@ const (
 	StateReady          = "ready"
 	StateModemOffline   = "modem-offline"
 	StateSIMUnavailable = "sim-unavailable"
+
+	CandidateReady           = "READY"
+	CandidateModemOffline    = "MODEM_OFFLINE"
+	CandidateSIMAbsent       = "SIM_ABSENT"
+	CandidateSIMUnavailable  = "SIM_UNAVAILABLE"
+	CandidateAlreadyAdded    = "ALREADY_ADDED"
+	CandidateBindingConflict = "BINDING_CONFLICT"
 )
 
 // Record is the administrator-owned Line configuration. It binds a stable
@@ -26,31 +32,37 @@ type Record struct {
 	SubscriptionIdentityFingerprint string
 	SubscriptionDisplayHint         string
 	DisplayName                     string
-	AccessMode                      accessmode.Mode
 	CreatedAt                       time.Time
 	UpdatedAt                       time.Time
 }
 
 type View struct {
-	ID                      string
-	DisplayName             string
-	ManagedModemID          string
-	ManagedModemDisplayName string
-	SubscriptionDisplayHint string
-	AccessMode              accessmode.Mode
-	State                   string
-	Capabilities            hardware.Capabilities
-	CreatedAt               time.Time
+	ID                       string
+	DisplayName              string
+	ManagedModemID           string
+	ManagedModemDisplayName  string
+	ManagedModemModel        string
+	ManagedModemSerialNumber string
+	SubscriptionDisplayHint  string
+	State                    string
+	Capabilities             hardware.Capabilities
+	CreatedAt                time.Time
 }
 
 // Candidate is a transient selection derived from a fresh hardware
 // observation. CandidateID may be submitted only to Create and is never a
 // stable business identity.
 type Candidate struct {
-	CandidateID             string
-	ManagedModemID          string
-	ManagedModemDisplayName string
-	SubscriptionDisplayHint string
-	Capabilities            hardware.Capabilities
-	Addable                 bool
+	CandidateID              string
+	ManagedModemID           string
+	ManagedModemDisplayName  string
+	ManagedModemModel        string
+	ManagedModemSerialNumber string
+	SubscriptionDisplayHint  string
+	HomeOperatorName         string
+	HomeOperatorCode         string
+	SIMPresence              string
+	Capabilities             hardware.Capabilities
+	Addable                  bool
+	Readiness                string
 }

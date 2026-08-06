@@ -56,9 +56,11 @@ func (runtime atRuntime) Probe(ctx context.Context, endpoint string, adapter mod
 	}
 	if result.SIM.State == agentapi.SIMStatePresent && result.SIM.PrimaryLockState == agentapi.PrimaryLockReady {
 		if identityAdapter, supported := adapter.(modemadapter.SIMIdentityAdapter); supported {
-			if fingerprint, hint, identityErr := identityAdapter.ReadSIMIdentity(ctx, query, runtime.identities); identityErr == nil {
-				result.SIM.IdentityFingerprint = fingerprint
-				result.SIM.DisplayIdentityHint = hint
+			if identity, identityErr := identityAdapter.ReadSIMIdentity(ctx, query, runtime.identities); identityErr == nil {
+				result.SIM.IdentityFingerprint = identity.Fingerprint
+				result.SIM.DisplayIdentityHint = identity.DisplayHint
+				result.SIM.HomeOperatorName = identity.HomeOperatorName
+				result.SIM.HomeOperatorCode = identity.HomeOperatorCode
 			}
 		}
 	}

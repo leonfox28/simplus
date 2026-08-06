@@ -5,11 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 )
 
-func TestSetupHardwareReviewPersistsAndAccessModeChangeInvalidatesIt(t *testing.T) {
+func TestSetupHardwareReviewPersists(t *testing.T) {
 	ctx := context.Background()
 	set, err := OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -29,11 +27,5 @@ func TestSetupHardwareReviewPersistsAndAccessModeChangeInvalidatesIt(t *testing.
 	}
 	if !reviewed || storedDigest != digest || devices != 1 || lines != 1 {
 		t.Fatalf("hardware review = %q %d %d %t", storedDigest, devices, lines, reviewed)
-	}
-	if err := set.PutSubscriptionProfileAccessMode(ctx, "profile-1", accessmode.HoldRFOff); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, reviewed, err := set.ReadSetupHardwareReview(ctx); err != nil || reviewed {
-		t.Fatalf("review after access mode mutation = %t/%v", reviewed, err)
 	}
 }

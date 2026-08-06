@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-05
 - 修订：[`0017`](0017-managed-modems-and-capability-adapters.md) 中暂留自动 Line 作为业务绑定的迁移安排
+- 后续修订：[`0019`](0019-line-identity-and-communication-paths.md) 删除 Line 接入方式，将 RF、Host VoWiFi、出口与 transport 分成独立配置
 
 ## 背景
 

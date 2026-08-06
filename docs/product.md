@@ -27,6 +27,7 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 - 只有管理员明确添加的模组才进入模组列表；热插拔只改变在线状态，不自动创建或删除业务配置；
 - 已添加模组使用 IMEI 的每实例不可逆指纹保持稳定绑定；USB 端口名只作当前定位，换插口不创建新模组，缺失或冲突身份不得猜测绑定；
 - 管理员随后从已添加模组当前可确认的 SIM/Profile 候选创建稳定 `Line`；USB 端口变化不改变 Line，模组离线或 SIM/Profile 更换只会令原 Line 不可用，不得自动改绑；
+- 添加 Line 只保存不可改绑的模组与 SIM/Profile 身份及显示名称，不修改 RF、不启动网络或 Mihomo，也不触发短信、电话或 Host VoWiFi；名称允许重复，随机 Line ID 是唯一身份；
 - 为每个已添加模组展示易懂的 `Modem / SIM / Line` 视图；
 - 支持少量模组并行，但同一模组上的命令串行执行；
 - 模组断开、重连或命令失败时给出明确状态。
@@ -71,16 +72,16 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 
 - 使用实体 SIM 或 eUICC Profile 的运营商鉴权能力建立 Host VoWiFi；
 - 至少完成一家真实运营商的 ePDG/IMS、短信和电话验证；
-- 每条 Host VoWiFi Line 可选择 `direct` 或 `mihomo-required`；
+- 每条具备鉴权能力的 Host VoWiFi Line 必须显式选择 `direct` 或当前订阅的 `mihomo-country`；新 Line 在选择前保持 `unconfigured` 且不能激活；
 - Mihomo 只承载 Simplus Host VoWiFi 所需流量，不成为通用系统代理或蜂窝数据网关；
-- 选择 `mihomo-required` 时，Mihomo 不可用必须明确离线，不得静默直连。
+- 选择 `mihomo-country` 时，Mihomo 不可用必须明确离线，不得静默直连。
 
 这两项是完整产品必需能力，但排在原生蜂窝短信、电话和 eUICC 基础之后，不能阻塞第一条可用 SMS 纵切。
 
 ### 3.7 Mihomo 管理与通知渠道
 
 - 管理 MetaCubeX 官方 stable Mihomo core 的下载、校验、版本和启停状态；
-- 管理用户提供的订阅、刷新结果、节点摘要及 Host VoWiFi 专用出口 Profile；
+- 管理用户提供的订阅、刷新结果和节点摘要；Host VoWiFi 专用出口只在线路配置中显式选择，不在 Mihomo 页面维护第二套 Line/Profile 绑定；
 - Mihomo 不开放 LAN 代理，不接管宿主默认代理；
 - 配置企业微信与飞书出站通知、测试投递及错误状态；
 - 通知渠道不接受远程控制命令，credential 不回显。

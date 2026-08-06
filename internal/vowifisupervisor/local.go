@@ -26,6 +26,7 @@ type workerEvent struct {
 	Online       bool      `json:"online"`
 	RegisteredAt time.Time `json:"registeredAt,omitempty"`
 	NextRefresh  time.Time `json:"nextRefreshAt,omitempty"`
+	PhoneNumber  string    `json:"phoneNumber"`
 	Attempt      int       `json:"attempt"`
 	ErrorCode    string    `json:"errorCode,omitempty"`
 }
@@ -209,6 +210,7 @@ func (local *Local) monitor(current *instance, runtimeDir string, stdout io.Read
 		current.status.Online = event.Online
 		current.status.RegisteredAt = event.RegisteredAt
 		current.status.NextRefresh = event.NextRefresh
+		current.status.PhoneNumber = event.PhoneNumber
 		current.status.Attempt = event.Attempt
 		if event.ErrorCode != "" || event.Online {
 			current.status.ErrorCode = event.ErrorCode
@@ -228,12 +230,15 @@ func (local *Local) monitor(current *instance, runtimeDir string, stdout io.Read
 	current.cleanup = cleanupErr
 	if cleanupErr != nil {
 		current.status.State, current.status.Stage, current.status.Online = StateFailed, "cleanup", false
+		current.status.PhoneNumber = ""
 		current.status.ErrorCode = "NETWORK_CLEANUP_FAILED"
 	} else if current.stop {
 		current.status.State, current.status.Stage, current.status.ErrorCode = StateStopped, "", ""
+		current.status.PhoneNumber = ""
 	} else {
 		current.status.State, current.status.Stage, current.status.Online = StateFailed, "worker", false
 		current.status.NextRefresh = time.Time{}
+		current.status.PhoneNumber = ""
 		if current.status.ErrorCode == "" {
 			current.status.ErrorCode = "WORKER_EXITED"
 		}
@@ -256,6 +261,7 @@ func (local *Local) Stop(ctx context.Context, lineID string) (Status, error) {
 	}
 	current.stop = true
 	current.status.State, current.status.Stage, current.status.Online = StateStopping, "cleanup", false
+	current.status.PhoneNumber = ""
 	process := current.command.Process
 	local.mu.Unlock()
 	if process != nil {
@@ -341,7 +347,8 @@ func (local *Local) cleanupStale() error {
 
 func validWorkerEvent(event workerEvent, lineID string) bool {
 	if event.LineID != lineID || !safeStatusToken.MatchString(event.Stage) || !safeStatusToken.MatchString(event.ErrorCode) ||
-		event.Attempt < 0 || event.Attempt > 1_000_000 {
+		event.Attempt < 0 || event.Attempt > 1_000_000 ||
+		event.PhoneNumber != "" && !phoneNumberPattern.MatchString(event.PhoneNumber) {
 		return false
 	}
 	switch event.State {
@@ -349,5 +356,5 @@ func validWorkerEvent(event workerEvent, lineID string) bool {
 	default:
 		return false
 	}
-	return event.Online == (event.State == StateOnline)
+	return event.Online == (event.State == StateOnline) && (event.Online || event.PhoneNumber == "")
 }

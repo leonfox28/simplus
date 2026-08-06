@@ -42,6 +42,7 @@ var (
 var (
 	smsOperationPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 	smsAddressPattern   = regexp.MustCompile(`^\+?[0-9]{3,20}$`)
+	phoneNumberPattern  = regexp.MustCompile(`^\+[1-9][0-9]{2,14}$`)
 	errorCodePattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 )
 
@@ -61,6 +62,7 @@ type StopRequest struct {
 
 // Status is safe for the management plane. It intentionally excludes PID,
 // namespace/interface names, addresses, P-CSCF, SPIs and authentication data.
+// PhoneNumber is present only when IMS returned an unambiguous E.164 identity.
 type Status struct {
 	LineID       string    `json:"lineId"`
 	State        string    `json:"state"`
@@ -71,6 +73,7 @@ type Status struct {
 	StartedAt    time.Time `json:"startedAt,omitempty"`
 	RegisteredAt time.Time `json:"registeredAt,omitempty"`
 	NextRefresh  time.Time `json:"nextRefreshAt,omitempty"`
+	PhoneNumber  string    `json:"phoneNumber"`
 	Attempt      int       `json:"attempt"`
 	ErrorCode    string    `json:"errorCode,omitempty"`
 }

@@ -28,6 +28,7 @@ type IMSRegistrationResult struct {
 	RegisteredAt time.Time
 	NextRefresh  time.Time
 	Expires      time.Duration
+	PhoneNumber  string
 }
 
 // IMSSession owns the two protected SIP flows, transient Digest AKA material
@@ -55,6 +56,7 @@ type IMSSession struct {
 	serviceCentreAddress string
 	serviceRoutes        []string
 	authorizedIdentity   string
+	phoneNumber          string
 	smsSequence          uint64
 	rpReference          byte
 	smsInReplyToMode     imsSMSInReplyToMode
@@ -255,9 +257,15 @@ func EstablishIMSSession(ctx context.Context, source, pcscf netip.Addr, inspecti
 		// this registration expires instead of silently reusing old CK/IK.
 		session.nextRefresh = session.registeredAt.Add(minDuration(expires/2, 2*time.Minute))
 	}
-	result := IMSRegistrationResult{RegisteredAt: session.registeredAt, NextRefresh: session.nextRefresh, Expires: expires}
 	session.serviceRoutes = registrationServiceRoutes(protectedResponse)
 	session.authorizedIdentity = registrationAuthorizedIdentity(protectedResponse, session.input.PublicIdentity)
+	session.phoneNumber = registrationPhoneNumber(protectedResponse)
+	result := IMSRegistrationResult{
+		RegisteredAt: session.registeredAt,
+		NextRefresh:  session.nextRefresh,
+		Expires:      expires,
+		PhoneNumber:  session.phoneNumber,
+	}
 	return session, result, nil
 }
 
@@ -341,16 +349,27 @@ func (session *IMSSession) Refresh(ctx context.Context) (IMSRegistrationResult, 
 	session.nextRefresh = refreshDeadline(session.registeredAt, expires)
 	session.serviceRoutes = registrationServiceRoutes(response)
 	session.authorizedIdentity = registrationAuthorizedIdentity(response, session.messagePublicIdentityLocked())
+	session.phoneNumber = registrationPhoneNumber(response)
 	if nextNonce != "" && nextNonce != session.challenge.Nonce {
 		return IMSRegistrationResult{}, ErrIMSReauthenticationRequired
 	}
-	return IMSRegistrationResult{RegisteredAt: session.registeredAt, NextRefresh: session.nextRefresh, Expires: expires}, nil
+	return IMSRegistrationResult{
+		RegisteredAt: session.registeredAt,
+		NextRefresh:  session.nextRefresh,
+		Expires:      expires,
+		PhoneNumber:  session.phoneNumber,
+	}, nil
 }
 
 func (session *IMSSession) Result() IMSRegistrationResult {
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	return IMSRegistrationResult{RegisteredAt: session.registeredAt, NextRefresh: session.nextRefresh, Expires: session.expires}
+	return IMSRegistrationResult{
+		RegisteredAt: session.registeredAt,
+		NextRefresh:  session.nextRefresh,
+		Expires:      session.expires,
+		PhoneNumber:  session.phoneNumber,
+	}
 }
 
 func (session *IMSSession) Close() {
@@ -385,6 +404,7 @@ func (session *IMSSession) Close() {
 	session.serviceCentreAddress = ""
 	session.serviceRoutes = nil
 	session.authorizedIdentity = ""
+	session.phoneNumber = ""
 	clear(session.pendingSMS)
 	clear(session.acknowledgedSMS)
 	clear(session.submitSegments)
@@ -429,6 +449,115 @@ func registrationAuthorizedIdentity(packet []byte, fallback string) string {
 		return identity
 	}
 	return fallback
+}
+
+// registrationPhoneNumber returns only an unambiguous international phone
+// number allocated by the IMS registrar. Private identities and arbitrary SIP
+// user names must never be presented as a subscriber phone number.
+func registrationPhoneNumber(packet []byte) string {
+	_, headers, err := parseSIPResponse(packet)
+	if err != nil {
+		return ""
+	}
+	values := headers["p-associated-uri"]
+	if len(values) == 0 || len(values) > 16 {
+		return ""
+	}
+	entries := 0
+	for _, value := range values {
+		for _, associated := range sipHeaderListValues(value) {
+			entries++
+			if entries > 32 {
+				return ""
+			}
+			if number := phoneNumberFromIMSURI(firstSIPURI([]string{associated})); number != "" {
+				return number
+			}
+		}
+	}
+	return ""
+}
+
+func sipHeaderListValues(value string) []string {
+	if !validSIPHeaderValue(value, 2048) {
+		return nil
+	}
+	values := make([]string, 0, 2)
+	start, angleDepth := 0, 0
+	quoted, escaped := false, false
+	for index, current := range value {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && current == '\\':
+			escaped = true
+		case current == '"':
+			quoted = !quoted
+		case !quoted && current == '<':
+			angleDepth++
+		case !quoted && current == '>':
+			if angleDepth == 0 {
+				return nil
+			}
+			angleDepth--
+		case !quoted && angleDepth == 0 && current == ',':
+			entry := strings.TrimSpace(value[start:index])
+			if entry == "" {
+				return nil
+			}
+			values = append(values, entry)
+			start = index + 1
+		}
+	}
+	if quoted || escaped || angleDepth != 0 {
+		return nil
+	}
+	entry := strings.TrimSpace(value[start:])
+	if entry == "" {
+		return nil
+	}
+	return append(values, entry)
+}
+
+func phoneNumberFromIMSURI(value string) string {
+	var number string
+	switch {
+	case strings.HasPrefix(value, "tel:"):
+		number = value[len("tel:"):]
+	case strings.HasPrefix(value, "sip:"):
+		user, _, found := strings.Cut(value[len("sip:"):], "@")
+		if !found {
+			return ""
+		}
+		number = user
+	case strings.HasPrefix(value, "sips:"):
+		user, _, found := strings.Cut(value[len("sips:"):], "@")
+		if !found {
+			return ""
+		}
+		number = user
+	default:
+		return ""
+	}
+	if separator := strings.IndexAny(number, ";?"); separator >= 0 {
+		number = number[:separator]
+	}
+	if !validInternationalPhoneNumber(number) {
+		return ""
+	}
+	return number
+}
+
+func validInternationalPhoneNumber(value string) bool {
+	if len(value) < 4 || len(value) > 16 || value[0] != '+' || value[1] < '1' || value[1] > '9' {
+		return false
+	}
+	for _, current := range value[2:] {
+		if current < '0' || current > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func firstSIPHeaderListValue(value string) string {

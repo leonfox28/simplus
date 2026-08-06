@@ -19,189 +19,6 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// Defines values for AccessMode.
-const (
-	CellularNative AccessMode = "cellular-native"
-	HoldRfOff      AccessMode = "hold-rf-off"
-	HostVowifiOnly AccessMode = "host-vowifi-only"
-)
-
-// Valid indicates whether the value is a known member of the AccessMode enum.
-func (e AccessMode) Valid() bool {
-	switch e {
-	case CellularNative:
-		return true
-	case HoldRfOff:
-		return true
-	case HostVowifiOnly:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathRequestMihomoState.
-const (
-	AccessPathRequestMihomoStateFailed  AccessPathRequestMihomoState = "failed"
-	AccessPathRequestMihomoStateRunning AccessPathRequestMihomoState = "running"
-	AccessPathRequestMihomoStateStopped AccessPathRequestMihomoState = "stopped"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathRequestMihomoState enum.
-func (e AccessPathRequestMihomoState) Valid() bool {
-	switch e {
-	case AccessPathRequestMihomoStateFailed:
-		return true
-	case AccessPathRequestMihomoStateRunning:
-		return true
-	case AccessPathRequestMihomoStateStopped:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathRequestMode.
-const (
-	AccessPathRequestModeDirect         AccessPathRequestMode = "direct"
-	AccessPathRequestModeMihomoRequired AccessPathRequestMode = "mihomo-required"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathRequestMode enum.
-func (e AccessPathRequestMode) Valid() bool {
-	switch e {
-	case AccessPathRequestModeDirect:
-		return true
-	case AccessPathRequestModeMihomoRequired:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateAuthentication.
-const (
-	SimulatedAkaComplete AccessPathStateAuthentication = "simulated-aka-complete"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateAuthentication enum.
-func (e AccessPathStateAuthentication) Valid() bool {
-	switch e {
-	case SimulatedAkaComplete:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateDirectFallback.
-const (
-	False AccessPathStateDirectFallback = false
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateDirectFallback enum.
-func (e AccessPathStateDirectFallback) Valid() bool {
-	switch e {
-	case False:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateEpdg.
-const (
-	Blocked   AccessPathStateEpdg = "blocked"
-	Connected AccessPathStateEpdg = "connected"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateEpdg enum.
-func (e AccessPathStateEpdg) Valid() bool {
-	switch e {
-	case Blocked:
-		return true
-	case Connected:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateIms.
-const (
-	AccessPathStateImsOffline    AccessPathStateIms = "offline"
-	AccessPathStateImsRegistered AccessPathStateIms = "registered"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateIms enum.
-func (e AccessPathStateIms) Valid() bool {
-	switch e {
-	case AccessPathStateImsOffline:
-		return true
-	case AccessPathStateImsRegistered:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateLineState.
-const (
-	AccessPathStateLineStateOffline AccessPathStateLineState = "offline"
-	AccessPathStateLineStateOnline  AccessPathStateLineState = "online"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateLineState enum.
-func (e AccessPathStateLineState) Valid() bool {
-	switch e {
-	case AccessPathStateLineStateOffline:
-		return true
-	case AccessPathStateLineStateOnline:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateMihomoState.
-const (
-	AccessPathStateMihomoStateFailed  AccessPathStateMihomoState = "failed"
-	AccessPathStateMihomoStateRunning AccessPathStateMihomoState = "running"
-	AccessPathStateMihomoStateStopped AccessPathStateMihomoState = "stopped"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateMihomoState enum.
-func (e AccessPathStateMihomoState) Valid() bool {
-	switch e {
-	case AccessPathStateMihomoStateFailed:
-		return true
-	case AccessPathStateMihomoStateRunning:
-		return true
-	case AccessPathStateMihomoStateStopped:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AccessPathStateMode.
-const (
-	AccessPathStateModeDirect         AccessPathStateMode = "direct"
-	AccessPathStateModeMihomoRequired AccessPathStateMode = "mihomo-required"
-)
-
-// Valid indicates whether the value is a known member of the AccessPathStateMode enum.
-func (e AccessPathStateMode) Valid() bool {
-	switch e {
-	case AccessPathStateModeDirect:
-		return true
-	case AccessPathStateModeMihomoRequired:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AuthSessionResponseLocale.
 const (
 	AuthSessionResponseLocaleEnUS AuthSessionResponseLocale = "en-US"
@@ -433,10 +250,41 @@ func (e InstallationState) Valid() bool {
 	}
 }
 
+// Defines values for LineCandidateReadinessReason.
+const (
+	LineCandidateReadinessReasonALREADYADDED    LineCandidateReadinessReason = "ALREADY_ADDED"
+	LineCandidateReadinessReasonBINDINGCONFLICT LineCandidateReadinessReason = "BINDING_CONFLICT"
+	LineCandidateReadinessReasonMODEMOFFLINE    LineCandidateReadinessReason = "MODEM_OFFLINE"
+	LineCandidateReadinessReasonREADY           LineCandidateReadinessReason = "READY"
+	LineCandidateReadinessReasonSIMABSENT       LineCandidateReadinessReason = "SIM_ABSENT"
+	LineCandidateReadinessReasonSIMUNAVAILABLE  LineCandidateReadinessReason = "SIM_UNAVAILABLE"
+)
+
+// Valid indicates whether the value is a known member of the LineCandidateReadinessReason enum.
+func (e LineCandidateReadinessReason) Valid() bool {
+	switch e {
+	case LineCandidateReadinessReasonALREADYADDED:
+		return true
+	case LineCandidateReadinessReasonBINDINGCONFLICT:
+		return true
+	case LineCandidateReadinessReasonMODEMOFFLINE:
+		return true
+	case LineCandidateReadinessReasonREADY:
+		return true
+	case LineCandidateReadinessReasonSIMABSENT:
+		return true
+	case LineCandidateReadinessReasonSIMUNAVAILABLE:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LineEgressBindingMode.
 const (
 	LineEgressBindingModeDirect        LineEgressBindingMode = "direct"
 	LineEgressBindingModeMihomoCountry LineEgressBindingMode = "mihomo-country"
+	LineEgressBindingModeUnconfigured  LineEgressBindingMode = "unconfigured"
 )
 
 // Valid indicates whether the value is a known member of the LineEgressBindingMode enum.
@@ -446,6 +294,8 @@ func (e LineEgressBindingMode) Valid() bool {
 		return true
 	case LineEgressBindingModeMihomoCountry:
 		return true
+	case LineEgressBindingModeUnconfigured:
+		return true
 	default:
 		return false
 	}
@@ -454,7 +304,8 @@ func (e LineEgressBindingMode) Valid() bool {
 // Defines values for LineEgressBindingReadinessReason.
 const (
 	LineEgressBindingReadinessReasonCOUNTRYNOTFOUND         LineEgressBindingReadinessReason = "COUNTRY_NOT_FOUND"
-	LineEgressBindingReadinessReasonLINENOTHOSTVOWIFI       LineEgressBindingReadinessReason = "LINE_NOT_HOST_VOWIFI"
+	LineEgressBindingReadinessReasonEGRESSNOTCONFIGURED     LineEgressBindingReadinessReason = "EGRESS_NOT_CONFIGURED"
+	LineEgressBindingReadinessReasonLINEVOWIFIUNSUPPORTED   LineEgressBindingReadinessReason = "LINE_VOWIFI_UNSUPPORTED"
 	LineEgressBindingReadinessReasonMIHOMONOTRUNNING        LineEgressBindingReadinessReason = "MIHOMO_NOT_RUNNING"
 	LineEgressBindingReadinessReasonMIHOMORESTARTREQUIRED   LineEgressBindingReadinessReason = "MIHOMO_RESTART_REQUIRED"
 	LineEgressBindingReadinessReasonREADY                   LineEgressBindingReadinessReason = "READY"
@@ -466,7 +317,9 @@ func (e LineEgressBindingReadinessReason) Valid() bool {
 	switch e {
 	case LineEgressBindingReadinessReasonCOUNTRYNOTFOUND:
 		return true
-	case LineEgressBindingReadinessReasonLINENOTHOSTVOWIFI:
+	case LineEgressBindingReadinessReasonEGRESSNOTCONFIGURED:
+		return true
+	case LineEgressBindingReadinessReasonLINEVOWIFIUNSUPPORTED:
 		return true
 	case LineEgressBindingReadinessReasonMIHOMONOTRUNNING:
 		return true
@@ -501,16 +354,13 @@ func (e LineEgressBindingMutationMode) Valid() bool {
 
 // Defines values for LineState.
 const (
-	LineStateAwaitingAccessMode LineState = "awaiting-access-mode"
-	LineStateReady              LineState = "ready"
-	LineStateUnavailable        LineState = "unavailable"
+	LineStateReady       LineState = "ready"
+	LineStateUnavailable LineState = "unavailable"
 )
 
 // Valid indicates whether the value is a known member of the LineState enum.
 func (e LineState) Valid() bool {
 	switch e {
-	case LineStateAwaitingAccessMode:
-		return true
 	case LineStateReady:
 		return true
 	case LineStateUnavailable:
@@ -634,75 +484,6 @@ func (e MihomoCoreStatusArchitecture) Valid() bool {
 	case MihomoCoreStatusArchitectureArm64:
 		return true
 	case MihomoCoreStatusArchitectureEmpty:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for MihomoEgressProfileReadinessReason.
-const (
-	MihomoEgressProfileReadinessReasonCORENOTINSTALLED     MihomoEgressProfileReadinessReason = "CORE_NOT_INSTALLED"
-	MihomoEgressProfileReadinessReasonCOUNTRYNOTFOUND      MihomoEgressProfileReadinessReason = "COUNTRY_NOT_FOUND"
-	MihomoEgressProfileReadinessReasonNODENOTFOUND         MihomoEgressProfileReadinessReason = "NODE_NOT_FOUND"
-	MihomoEgressProfileReadinessReasonPROFILEDISABLED      MihomoEgressProfileReadinessReason = "PROFILE_DISABLED"
-	MihomoEgressProfileReadinessReasonREADY                MihomoEgressProfileReadinessReason = "READY"
-	MihomoEgressProfileReadinessReasonSUBSCRIPTIONDISABLED MihomoEgressProfileReadinessReason = "SUBSCRIPTION_DISABLED"
-	MihomoEgressProfileReadinessReasonSUBSCRIPTIONNOTREADY MihomoEgressProfileReadinessReason = "SUBSCRIPTION_NOT_READY"
-)
-
-// Valid indicates whether the value is a known member of the MihomoEgressProfileReadinessReason enum.
-func (e MihomoEgressProfileReadinessReason) Valid() bool {
-	switch e {
-	case MihomoEgressProfileReadinessReasonCORENOTINSTALLED:
-		return true
-	case MihomoEgressProfileReadinessReasonCOUNTRYNOTFOUND:
-		return true
-	case MihomoEgressProfileReadinessReasonNODENOTFOUND:
-		return true
-	case MihomoEgressProfileReadinessReasonPROFILEDISABLED:
-		return true
-	case MihomoEgressProfileReadinessReasonREADY:
-		return true
-	case MihomoEgressProfileReadinessReasonSUBSCRIPTIONDISABLED:
-		return true
-	case MihomoEgressProfileReadinessReasonSUBSCRIPTIONNOTREADY:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for MihomoEgressProfileSelectionType.
-const (
-	MihomoEgressProfileSelectionTypeCountry MihomoEgressProfileSelectionType = "country"
-	MihomoEgressProfileSelectionTypeNode    MihomoEgressProfileSelectionType = "node"
-)
-
-// Valid indicates whether the value is a known member of the MihomoEgressProfileSelectionType enum.
-func (e MihomoEgressProfileSelectionType) Valid() bool {
-	switch e {
-	case MihomoEgressProfileSelectionTypeCountry:
-		return true
-	case MihomoEgressProfileSelectionTypeNode:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for MihomoEgressProfileMutationSelectionType.
-const (
-	MihomoEgressProfileMutationSelectionTypeCountry MihomoEgressProfileMutationSelectionType = "country"
-	MihomoEgressProfileMutationSelectionTypeNode    MihomoEgressProfileMutationSelectionType = "node"
-)
-
-// Valid indicates whether the value is a known member of the MihomoEgressProfileMutationSelectionType enum.
-func (e MihomoEgressProfileMutationSelectionType) Valid() bool {
-	switch e {
-	case MihomoEgressProfileMutationSelectionTypeCountry:
-		return true
-	case MihomoEgressProfileMutationSelectionTypeNode:
 		return true
 	default:
 		return false
@@ -910,27 +691,6 @@ func (e PhysicalDeviceState) Valid() bool {
 	case PhysicalDeviceStateAvailable:
 		return true
 	case PhysicalDeviceStateUnavailable:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RFSafetyState.
-const (
-	RFSafetyStateNotPresent RFSafetyState = "not-present"
-	RFSafetyStateOff        RFSafetyState = "off"
-	RFSafetyStateUnknown    RFSafetyState = "unknown"
-)
-
-// Valid indicates whether the value is a known member of the RFSafetyState enum.
-func (e RFSafetyState) Valid() bool {
-	switch e {
-	case RFSafetyStateNotPresent:
-		return true
-	case RFSafetyStateOff:
-		return true
-	case RFSafetyStateUnknown:
 		return true
 	default:
 		return false
@@ -1244,6 +1004,7 @@ func (e SubscriptionProfileState) Valid() bool {
 const (
 	VoWiFiLineStateEgressModeDirect        VoWiFiLineStateEgressMode = "direct"
 	VoWiFiLineStateEgressModeMihomoCountry VoWiFiLineStateEgressMode = "mihomo-country"
+	VoWiFiLineStateEgressModeUnconfigured  VoWiFiLineStateEgressMode = "unconfigured"
 )
 
 // Valid indicates whether the value is a known member of the VoWiFiLineStateEgressMode enum.
@@ -1253,6 +1014,8 @@ func (e VoWiFiLineStateEgressMode) Valid() bool {
 		return true
 	case VoWiFiLineStateEgressModeMihomoCountry:
 		return true
+	case VoWiFiLineStateEgressModeUnconfigured:
+		return true
 	default:
 		return false
 	}
@@ -1261,8 +1024,9 @@ func (e VoWiFiLineStateEgressMode) Valid() bool {
 // Defines values for VoWiFiLineStateReadinessCode.
 const (
 	VoWiFiLineStateReadinessCodeCOUNTRYNOTFOUND         VoWiFiLineStateReadinessCode = "COUNTRY_NOT_FOUND"
+	VoWiFiLineStateReadinessCodeEGRESSNOTCONFIGURED     VoWiFiLineStateReadinessCode = "EGRESS_NOT_CONFIGURED"
 	VoWiFiLineStateReadinessCodeLINEHARDWARENOTREADY    VoWiFiLineStateReadinessCode = "LINE_HARDWARE_NOT_READY"
-	VoWiFiLineStateReadinessCodeLINENOTHOSTVOWIFI       VoWiFiLineStateReadinessCode = "LINE_NOT_HOST_VOWIFI"
+	VoWiFiLineStateReadinessCodeLINEVOWIFIUNSUPPORTED   VoWiFiLineStateReadinessCode = "LINE_VOWIFI_UNSUPPORTED"
 	VoWiFiLineStateReadinessCodeMIHOMONOTRUNNING        VoWiFiLineStateReadinessCode = "MIHOMO_NOT_RUNNING"
 	VoWiFiLineStateReadinessCodeMIHOMORESTARTREQUIRED   VoWiFiLineStateReadinessCode = "MIHOMO_RESTART_REQUIRED"
 	VoWiFiLineStateReadinessCodeREADY                   VoWiFiLineStateReadinessCode = "READY"
@@ -1274,9 +1038,11 @@ func (e VoWiFiLineStateReadinessCode) Valid() bool {
 	switch e {
 	case VoWiFiLineStateReadinessCodeCOUNTRYNOTFOUND:
 		return true
+	case VoWiFiLineStateReadinessCodeEGRESSNOTCONFIGURED:
+		return true
 	case VoWiFiLineStateReadinessCodeLINEHARDWARENOTREADY:
 		return true
-	case VoWiFiLineStateReadinessCodeLINENOTHOSTVOWIFI:
+	case VoWiFiLineStateReadinessCodeLINEVOWIFIUNSUPPORTED:
 		return true
 	case VoWiFiLineStateReadinessCodeMIHOMONOTRUNNING:
 		return true
@@ -1327,64 +1093,10 @@ func (e VoWiFiLineStateState) Valid() bool {
 	}
 }
 
-// AccessMode defines model for AccessMode.
-type AccessMode string
-
-// AccessPathListResponse defines model for AccessPathListResponse.
-type AccessPathListResponse struct {
-	Lines []AccessPathState `json:"lines"`
-}
-
-// AccessPathRequest defines model for AccessPathRequest.
-type AccessPathRequest struct {
-	MihomoState AccessPathRequestMihomoState `json:"mihomoState"`
-	Mode        AccessPathRequestMode        `json:"mode"`
-}
-
-// AccessPathRequestMihomoState defines model for AccessPathRequest.MihomoState.
-type AccessPathRequestMihomoState string
-
-// AccessPathRequestMode defines model for AccessPathRequest.Mode.
-type AccessPathRequestMode string
-
-// AccessPathState defines model for AccessPathState.
-type AccessPathState struct {
-	Authentication AccessPathStateAuthentication `json:"authentication"`
-	DirectFallback AccessPathStateDirectFallback `json:"directFallback"`
-	Epdg           AccessPathStateEpdg           `json:"epdg"`
-	Ims            AccessPathStateIms            `json:"ims"`
-	LineId         string                        `json:"lineId"`
-	LineState      AccessPathStateLineState      `json:"lineState"`
-	MihomoState    AccessPathStateMihomoState    `json:"mihomoState"`
-	Mode           AccessPathStateMode           `json:"mode"`
-}
-
-// AccessPathStateAuthentication defines model for AccessPathState.Authentication.
-type AccessPathStateAuthentication string
-
-// AccessPathStateDirectFallback defines model for AccessPathState.DirectFallback.
-type AccessPathStateDirectFallback bool
-
-// AccessPathStateEpdg defines model for AccessPathState.Epdg.
-type AccessPathStateEpdg string
-
-// AccessPathStateIms defines model for AccessPathState.Ims.
-type AccessPathStateIms string
-
-// AccessPathStateLineState defines model for AccessPathState.LineState.
-type AccessPathStateLineState string
-
-// AccessPathStateMihomoState defines model for AccessPathState.MihomoState.
-type AccessPathStateMihomoState string
-
-// AccessPathStateMode defines model for AccessPathState.Mode.
-type AccessPathStateMode string
-
 // AddManagedLineRequest defines model for AddManagedLineRequest.
 type AddManagedLineRequest struct {
-	AccessMode  AccessMode `json:"accessMode"`
-	CandidateId string     `json:"candidateId"`
-	DisplayName string     `json:"displayName"`
+	CandidateId string `json:"candidateId"`
+	DisplayName string `json:"displayName"`
 }
 
 // AddManagedModemRequest defines model for AddManagedModemRequest.
@@ -1558,8 +1270,6 @@ type HardwareGeneration = int64
 
 // HardwareLineDetail defines model for HardwareLineDetail.
 type HardwareLineDetail struct {
-	AccessMode            AccessMode           `json:"accessMode"`
-	AccessModeConfigured  bool                 `json:"accessModeConfigured"`
 	Capabilities          HardwareCapabilities `json:"capabilities"`
 	DisplayName           string               `json:"displayName"`
 	Generation            HardwareGeneration   `json:"generation"`
@@ -1567,7 +1277,6 @@ type HardwareLineDetail struct {
 	ModemFunctionId       string               `json:"modemFunctionId"`
 	PhysicalDeviceId      string               `json:"physicalDeviceId"`
 	ResourceGroupId       string               `json:"resourceGroupId"`
-	RfSafety              RFSafetyState        `json:"rfSafety"`
 	State                 LineState            `json:"state"`
 	SubscriptionProfileId string               `json:"subscriptionProfileId"`
 }
@@ -1592,7 +1301,6 @@ type HealthResponse struct {
 	Backend           BackendKind              `json:"backend"`
 	DatabaseCount     int                      `json:"databaseCount"`
 	InstallationState InstallationState        `json:"installationState"`
-	RfSafety          RFSafetyState            `json:"rfSafety"`
 	Status            HealthStatus             `json:"status"`
 	Version           string                   `json:"version"`
 }
@@ -1617,13 +1325,28 @@ type InventoryResponse struct {
 
 // LineCandidate defines model for LineCandidate.
 type LineCandidate struct {
-	Addable                 bool                 `json:"addable"`
-	CandidateId             string               `json:"candidateId"`
-	Capabilities            HardwareCapabilities `json:"capabilities"`
-	ManagedModemDisplayName string               `json:"managedModemDisplayName"`
-	ManagedModemId          string               `json:"managedModemId"`
-	SubscriptionDisplayHint string               `json:"subscriptionDisplayHint"`
+	Addable bool `json:"addable"`
+
+	// CandidateId Transient opaque observation token revalidated at create time
+	CandidateId  string               `json:"candidateId"`
+	Capabilities HardwareCapabilities `json:"capabilities"`
+
+	// HomeOperatorCode Home MCC-MNC derived inside the Agent without exposing IMSI
+	HomeOperatorCode string `json:"homeOperatorCode"`
+
+	// HomeOperatorName Bounded EF_SPN name for the active profile; empty when unavailable
+	HomeOperatorName         string                       `json:"homeOperatorName"`
+	ManagedModemDisplayName  string                       `json:"managedModemDisplayName"`
+	ManagedModemId           string                       `json:"managedModemId"`
+	ManagedModemModel        string                       `json:"managedModemModel"`
+	ManagedModemSerialNumber string                       `json:"managedModemSerialNumber"`
+	ReadinessReason          LineCandidateReadinessReason `json:"readinessReason"`
+	SimPresence              ManagedModemSIMPresence      `json:"simPresence"`
+	SubscriptionDisplayHint  string                       `json:"subscriptionDisplayHint"`
 }
+
+// LineCandidateReadinessReason defines model for LineCandidate.ReadinessReason.
+type LineCandidateReadinessReason string
 
 // LineCandidateList defines model for LineCandidateList.
 type LineCandidateList struct {
@@ -1666,15 +1389,12 @@ type LineState string
 
 // LineSummary defines model for LineSummary.
 type LineSummary struct {
-	AccessMode            AccessMode    `json:"accessMode"`
-	AccessModeConfigured  bool          `json:"accessModeConfigured"`
-	DisplayName           string        `json:"displayName"`
-	Generation            int64         `json:"generation"`
-	Id                    string        `json:"id"`
-	PhysicalDeviceId      string        `json:"physicalDeviceId"`
-	RfSafety              RFSafetyState `json:"rfSafety"`
-	State                 LineState     `json:"state"`
-	SubscriptionProfileId string        `json:"subscriptionProfileId"`
+	DisplayName           string    `json:"displayName"`
+	Generation            int64     `json:"generation"`
+	Id                    string    `json:"id"`
+	PhysicalDeviceId      string    `json:"physicalDeviceId"`
+	State                 LineState `json:"state"`
+	SubscriptionProfileId string    `json:"subscriptionProfileId"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -1685,15 +1405,20 @@ type LoginRequest struct {
 
 // ManagedLine defines model for ManagedLine.
 type ManagedLine struct {
-	AccessMode              AccessMode           `json:"accessMode"`
 	Capabilities            HardwareCapabilities `json:"capabilities"`
 	CreatedAt               time.Time            `json:"createdAt"`
 	DisplayName             string               `json:"displayName"`
 	Id                      string               `json:"id"`
 	ManagedModemDisplayName string               `json:"managedModemDisplayName"`
 	ManagedModemId          string               `json:"managedModemId"`
-	State                   ManagedLineState     `json:"state"`
-	SubscriptionDisplayHint string               `json:"subscriptionDisplayHint"`
+
+	// ManagedModemModel Current bounded AT model result; empty when unavailable and displayed as read failure by the Web UI
+	ManagedModemModel string `json:"managedModemModel"`
+
+	// ManagedModemSerialNumber Current bounded USB Serial; empty when unavailable and displayed as read failure by the Web UI
+	ManagedModemSerialNumber string           `json:"managedModemSerialNumber"`
+	State                    ManagedLineState `json:"state"`
+	SubscriptionDisplayHint  string           `json:"subscriptionDisplayHint"`
 }
 
 // ManagedLineList defines model for ManagedLineList.
@@ -1782,48 +1507,6 @@ type MihomoDashboardStatus struct {
 	Url               string `json:"url"`
 	Version           string `json:"version"`
 }
-
-// MihomoEgressProfile defines model for MihomoEgressProfile.
-type MihomoEgressProfile struct {
-	DisplayName         string                             `json:"displayName"`
-	Enabled             bool                               `json:"enabled"`
-	Id                  string                             `json:"id"`
-	LineId              string                             `json:"lineId"`
-	ReadinessReason     MihomoEgressProfileReadinessReason `json:"readinessReason"`
-	Ready               bool                               `json:"ready"`
-	SelectedCountryCode string                             `json:"selectedCountryCode"`
-	SelectedCountryName string                             `json:"selectedCountryName"`
-	SelectedNodeId      string                             `json:"selectedNodeId"`
-	SelectedNodeName    string                             `json:"selectedNodeName"`
-	SelectionType       MihomoEgressProfileSelectionType   `json:"selectionType"`
-	SourceCidr          string                             `json:"sourceCidr"`
-	SubscriptionId      string                             `json:"subscriptionId"`
-}
-
-// MihomoEgressProfileReadinessReason defines model for MihomoEgressProfile.ReadinessReason.
-type MihomoEgressProfileReadinessReason string
-
-// MihomoEgressProfileSelectionType defines model for MihomoEgressProfile.SelectionType.
-type MihomoEgressProfileSelectionType string
-
-// MihomoEgressProfileList defines model for MihomoEgressProfileList.
-type MihomoEgressProfileList struct {
-	Profiles []MihomoEgressProfile `json:"profiles"`
-}
-
-// MihomoEgressProfileMutation defines model for MihomoEgressProfileMutation.
-type MihomoEgressProfileMutation struct {
-	DisplayName         string                                   `json:"displayName"`
-	Enabled             bool                                     `json:"enabled"`
-	LineId              string                                   `json:"lineId"`
-	SelectedCountryCode string                                   `json:"selectedCountryCode"`
-	SelectedNodeId      string                                   `json:"selectedNodeId"`
-	SelectionType       MihomoEgressProfileMutationSelectionType `json:"selectionType"`
-	SubscriptionId      string                                   `json:"subscriptionId"`
-}
-
-// MihomoEgressProfileMutationSelectionType defines model for MihomoEgressProfileMutation.SelectionType.
-type MihomoEgressProfileMutationSelectionType string
 
 // MihomoNode defines model for MihomoNode.
 type MihomoNode struct {
@@ -2009,14 +1692,6 @@ type PhysicalDeviceSummary struct {
 	Transport          DeviceTransport     `json:"transport"`
 }
 
-// PutAccessModeRequest defines model for PutAccessModeRequest.
-type PutAccessModeRequest struct {
-	AccessMode AccessMode `json:"accessMode"`
-}
-
-// RFSafetyState defines model for RFSafetyState.
-type RFSafetyState string
-
 // ResourceGroupDetail defines model for ResourceGroupDetail.
 type ResourceGroupDetail struct {
 	DisplayName      string             `json:"displayName"`
@@ -2178,14 +1853,12 @@ type SetupStatusResponse struct {
 
 // SubscriptionProfileDetail defines model for SubscriptionProfileDetail.
 type SubscriptionProfileDetail struct {
-	AccessMode           AccessMode               `json:"accessMode"`
-	AccessModeConfigured bool                     `json:"accessModeConfigured"`
-	DisplayIdentityHint  string                   `json:"displayIdentityHint"`
-	DisplayName          string                   `json:"displayName"`
-	Generation           HardwareGeneration       `json:"generation"`
-	Id                   string                   `json:"id"`
-	SimMediaId           string                   `json:"simMediaId"`
-	State                SubscriptionProfileState `json:"state"`
+	DisplayIdentityHint string                   `json:"displayIdentityHint"`
+	DisplayName         string                   `json:"displayName"`
+	Generation          HardwareGeneration       `json:"generation"`
+	Id                  string                   `json:"id"`
+	SimMediaId          string                   `json:"simMediaId"`
+	State               SubscriptionProfileState `json:"state"`
 }
 
 // SubscriptionProfileState defines model for SubscriptionProfileState.
@@ -2196,22 +1869,24 @@ type TopologyRevision = string
 
 // UpdateManagedLineRequest defines model for UpdateManagedLineRequest.
 type UpdateManagedLineRequest struct {
-	AccessMode  AccessMode `json:"accessMode"`
-	DisplayName string     `json:"displayName"`
+	DisplayName string `json:"displayName"`
 }
 
 // VoWiFiLineState defines model for VoWiFiLineState.
 type VoWiFiLineState struct {
-	Attempt       int                          `json:"attempt"`
-	CountryCode   string                       `json:"countryCode"`
-	CountryName   string                       `json:"countryName"`
-	DesiredActive bool                         `json:"desiredActive"`
-	EgressMode    VoWiFiLineStateEgressMode    `json:"egressMode"`
-	Eligible      bool                         `json:"eligible"`
-	LastErrorCode string                       `json:"lastErrorCode"`
-	LineId        string                       `json:"lineId"`
-	NextRefreshAt string                       `json:"nextRefreshAt"`
-	Online        bool                         `json:"online"`
+	Attempt       int                       `json:"attempt"`
+	CountryCode   string                    `json:"countryCode"`
+	CountryName   string                    `json:"countryName"`
+	DesiredActive bool                      `json:"desiredActive"`
+	EgressMode    VoWiFiLineStateEgressMode `json:"egressMode"`
+	Eligible      bool                      `json:"eligible"`
+	LastErrorCode string                    `json:"lastErrorCode"`
+	LineId        string                    `json:"lineId"`
+	NextRefreshAt string                    `json:"nextRefreshAt"`
+	Online        bool                      `json:"online"`
+
+	// PhoneNumber E.164 phone number authorized by IMS registration; empty when unavailable
+	PhoneNumber   string                       `json:"phoneNumber"`
 	ReadinessCode VoWiFiLineStateReadinessCode `json:"readinessCode"`
 	RegisteredAt  string                       `json:"registeredAt"`
 	Stage         string                       `json:"stage"`
@@ -2231,9 +1906,6 @@ type VoWiFiLineStateState string
 type VoWiFiLineStateList struct {
 	Lines []VoWiFiLineState `json:"lines"`
 }
-
-// ConfigureAccessPathJSONRequestBody defines body for ConfigureAccessPath for application/json ContentType.
-type ConfigureAccessPathJSONRequestBody = AccessPathRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -2268,12 +1940,6 @@ type PutLineEgressBindingJSONRequestBody = LineEgressBindingMutation
 // SendMessageJSONRequestBody defines body for SendMessage for application/json ContentType.
 type SendMessageJSONRequestBody = SendSMSRequest
 
-// CreateMihomoEgressProfileJSONRequestBody defines body for CreateMihomoEgressProfile for application/json ContentType.
-type CreateMihomoEgressProfileJSONRequestBody = MihomoEgressProfileMutation
-
-// UpdateMihomoEgressProfileJSONRequestBody defines body for UpdateMihomoEgressProfile for application/json ContentType.
-type UpdateMihomoEgressProfileJSONRequestBody = MihomoEgressProfileMutation
-
 // CreateMihomoSubscriptionJSONRequestBody defines body for CreateMihomoSubscription for application/json ContentType.
 type CreateMihomoSubscriptionJSONRequestBody = MihomoSubscriptionCreateRequest
 
@@ -2307,20 +1973,8 @@ type ConfirmSetupHTTPSJSONRequestBody = ConfirmSetupHTTPSRequest
 // PutSetupStorageJSONRequestBody defines body for PutSetupStorage for application/json ContentType.
 type PutSetupStorageJSONRequestBody = ConfigureSetupStorageRequest
 
-// PutSetupSubscriptionProfileAccessModeJSONRequestBody defines body for PutSetupSubscriptionProfileAccessMode for application/json ContentType.
-type PutSetupSubscriptionProfileAccessModeJSONRequestBody = PutAccessModeRequest
-
-// PutSubscriptionProfileAccessModeJSONRequestBody defines body for PutSubscriptionProfileAccessMode for application/json ContentType.
-type PutSubscriptionProfileAccessModeJSONRequestBody = PutAccessModeRequest
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// ListAccessPaths List Simulator Host VoWiFi and egress states
-	// (GET /api/v1/access-paths)
-	ListAccessPaths(w http.ResponseWriter, r *http.Request)
-	// ConfigureAccessPath Configure Simulator direct or mihomo-required egress
-	// (PUT /api/v1/access-paths/{lineId})
-	ConfigureAccessPath(w http.ResponseWriter, r *http.Request, lineId string)
 	// Login Create an administrator browser session
 	// (POST /api/v1/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -2369,22 +2023,22 @@ type ServerInterface interface {
 	// GetInventory Read the discovered device and active-line inventory
 	// (GET /api/v1/inventory)
 	GetInventory(w http.ResponseWriter, r *http.Request)
-	// ListLineCandidates List current SIM/Profile candidates on administrator-added modems
+	// ListLineCandidates List current Line candidates and typed readiness for every administrator-added modem
 	// (GET /api/v1/line-candidates)
 	ListLineCandidates(w http.ResponseWriter, r *http.Request)
-	// ListLineEgressBindings List effective direct or Mihomo-country bindings for current Lines
+	// ListLineEgressBindings List explicit direct, Mihomo-country, or unconfigured egress state for current Lines
 	// (GET /api/v1/line-egress-bindings)
 	ListLineEgressBindings(w http.ResponseWriter, r *http.Request)
 	// ListManagedLines List administrator-created Lines and their resolved runtime state
 	// (GET /api/v1/lines)
 	ListManagedLines(w http.ResponseWriter, r *http.Request)
-	// AddManagedLine Create a stable Line from one current managed-modem SIM/Profile candidate
+	// AddManagedLine Create only a stable Line identity from one current managed-modem SIM/Profile candidate
 	// (POST /api/v1/lines)
 	AddManagedLine(w http.ResponseWriter, r *http.Request)
-	// UpdateManagedLine Update a Line display name and access mode without rebinding hardware
+	// UpdateManagedLine Update a Line display name without rebinding hardware
 	// (PUT /api/v1/lines/{lineId})
 	UpdateManagedLine(w http.ResponseWriter, r *http.Request, lineId string)
-	// PutLineEgressBinding Persist a Line egress choice without rewriting or restarting Mihomo
+	// PutLineEgressBinding Persist an explicit direct or Mihomo-country Line egress choice without rewriting or restarting Mihomo
 	// (PUT /api/v1/lines/{lineId}/egress)
 	PutLineEgressBinding(w http.ResponseWriter, r *http.Request, lineId string)
 	// ListMessages List the most recent durable SMS records
@@ -2414,18 +2068,6 @@ type ServerInterface interface {
 	// GetMihomoDashboardStatus Read the installed Zashboard entry point and Mihomo controller credentials
 	// (GET /api/v1/mihomo/dashboard)
 	GetMihomoDashboardStatus(w http.ResponseWriter, r *http.Request)
-	// ListMihomoEgressProfiles List Host VoWiFi-only egress selections
-	// (GET /api/v1/mihomo/egress-profiles)
-	ListMihomoEgressProfiles(w http.ResponseWriter, r *http.Request)
-	// CreateMihomoEgressProfile Create an egress profile without starting Mihomo
-	// (POST /api/v1/mihomo/egress-profiles)
-	CreateMihomoEgressProfile(w http.ResponseWriter, r *http.Request)
-
-	// (DELETE /api/v1/mihomo/egress-profiles/{profileId})
-	DeleteMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileId string)
-
-	// (PUT /api/v1/mihomo/egress-profiles/{profileId})
-	UpdateMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileId string)
 	// GetMihomoRuntimeStatus Read Mihomo process state and selected/running subscription distinction
 	// (GET /api/v1/mihomo/runtime)
 	GetMihomoRuntimeStatus(w http.ResponseWriter, r *http.Request)
@@ -2498,7 +2140,7 @@ type ServerInterface interface {
 	// CompleteSetup Revalidate every setup prerequisite and atomically enter ready
 	// (POST /api/v1/setup/complete)
 	CompleteSetup(w http.ResponseWriter, r *http.Request)
-	// ConfirmSetupHardware Confirm the current RF-Off inventory and all per-profile access modes
+	// ConfirmSetupHardware Confirm the current read-only hardware inventory
 	// (POST /api/v1/setup/hardware/confirm)
 	ConfirmSetupHardware(w http.ResponseWriter, r *http.Request)
 	// GetSetupHardwareTopology Read the RF-Off normalized hardware topology during first-run setup
@@ -2525,12 +2167,6 @@ type ServerInterface interface {
 	// PutSetupStorage Validate and persist the data and recording roots for a new instance
 	// (PUT /api/v1/setup/storage)
 	PutSetupStorage(w http.ResponseWriter, r *http.Request)
-	// PutSetupSubscriptionProfileAccessMode Persist a setup-time access mode without enabling RF
-	// (PUT /api/v1/setup/subscription-profiles/{profileId}/access-mode)
-	PutSetupSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileId string)
-	// PutSubscriptionProfileAccessMode Persist the administrator-selected access mode for one subscription profile
-	// (PUT /api/v1/subscription-profiles/{profileId}/access-mode)
-	PutSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileId string)
 	// GetSystemHealth Read the local control-plane health snapshot
 	// (GET /api/v1/system/health)
 	GetSystemHealth(w http.ResponseWriter, r *http.Request)
@@ -2548,18 +2184,6 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
-
-// ListAccessPaths List Simulator Host VoWiFi and egress states
-// (GET /api/v1/access-paths)
-func (_ Unimplemented) ListAccessPaths(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// ConfigureAccessPath Configure Simulator direct or mihomo-required egress
-// (PUT /api/v1/access-paths/{lineId})
-func (_ Unimplemented) ConfigureAccessPath(w http.ResponseWriter, r *http.Request, lineId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
 
 // Login Create an administrator browser session
 // (POST /api/v1/auth/login)
@@ -2657,13 +2281,13 @@ func (_ Unimplemented) GetInventory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ListLineCandidates List current SIM/Profile candidates on administrator-added modems
+// ListLineCandidates List current Line candidates and typed readiness for every administrator-added modem
 // (GET /api/v1/line-candidates)
 func (_ Unimplemented) ListLineCandidates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ListLineEgressBindings List effective direct or Mihomo-country bindings for current Lines
+// ListLineEgressBindings List explicit direct, Mihomo-country, or unconfigured egress state for current Lines
 // (GET /api/v1/line-egress-bindings)
 func (_ Unimplemented) ListLineEgressBindings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2675,19 +2299,19 @@ func (_ Unimplemented) ListManagedLines(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// AddManagedLine Create a stable Line from one current managed-modem SIM/Profile candidate
+// AddManagedLine Create only a stable Line identity from one current managed-modem SIM/Profile candidate
 // (POST /api/v1/lines)
 func (_ Unimplemented) AddManagedLine(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// UpdateManagedLine Update a Line display name and access mode without rebinding hardware
+// UpdateManagedLine Update a Line display name without rebinding hardware
 // (PUT /api/v1/lines/{lineId})
 func (_ Unimplemented) UpdateManagedLine(w http.ResponseWriter, r *http.Request, lineId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// PutLineEgressBinding Persist a Line egress choice without rewriting or restarting Mihomo
+// PutLineEgressBinding Persist an explicit direct or Mihomo-country Line egress choice without rewriting or restarting Mihomo
 // (PUT /api/v1/lines/{lineId}/egress)
 func (_ Unimplemented) PutLineEgressBinding(w http.ResponseWriter, r *http.Request, lineId string) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2744,28 +2368,6 @@ func (_ Unimplemented) GetLatestMihomoCore(w http.ResponseWriter, r *http.Reques
 // GetMihomoDashboardStatus Read the installed Zashboard entry point and Mihomo controller credentials
 // (GET /api/v1/mihomo/dashboard)
 func (_ Unimplemented) GetMihomoDashboardStatus(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// ListMihomoEgressProfiles List Host VoWiFi-only egress selections
-// (GET /api/v1/mihomo/egress-profiles)
-func (_ Unimplemented) ListMihomoEgressProfiles(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// CreateMihomoEgressProfile Create an egress profile without starting Mihomo
-// (POST /api/v1/mihomo/egress-profiles)
-func (_ Unimplemented) CreateMihomoEgressProfile(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// (DELETE /api/v1/mihomo/egress-profiles/{profileId})
-func (_ Unimplemented) DeleteMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// (PUT /api/v1/mihomo/egress-profiles/{profileId})
-func (_ Unimplemented) UpdateMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2911,7 +2513,7 @@ func (_ Unimplemented) CompleteSetup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ConfirmSetupHardware Confirm the current RF-Off inventory and all per-profile access modes
+// ConfirmSetupHardware Confirm the current read-only hardware inventory
 // (POST /api/v1/setup/hardware/confirm)
 func (_ Unimplemented) ConfirmSetupHardware(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2965,18 +2567,6 @@ func (_ Unimplemented) PutSetupStorage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// PutSetupSubscriptionProfileAccessMode Persist a setup-time access mode without enabling RF
-// (PUT /api/v1/setup/subscription-profiles/{profileId}/access-mode)
-func (_ Unimplemented) PutSetupSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// PutSubscriptionProfileAccessMode Persist the administrator-selected access mode for one subscription profile
-// (PUT /api/v1/subscription-profiles/{profileId}/access-mode)
-func (_ Unimplemented) PutSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // GetSystemHealth Read the local control-plane health snapshot
 // (GET /api/v1/system/health)
 func (_ Unimplemented) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
@@ -3009,46 +2599,6 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
-
-// ListAccessPaths operation middleware
-func (siw *ServerInterfaceWrapper) ListAccessPaths(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAccessPaths(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ConfigureAccessPath operation middleware
-func (siw *ServerInterfaceWrapper) ConfigureAccessPath(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "lineId" -------------
-	var lineId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "lineId", chi.URLParam(r, "lineId"), &lineId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lineId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ConfigureAccessPath(w, r, lineId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -3559,86 +3109,6 @@ func (siw *ServerInterfaceWrapper) GetMihomoDashboardStatus(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMihomoDashboardStatus(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListMihomoEgressProfiles operation middleware
-func (siw *ServerInterfaceWrapper) ListMihomoEgressProfiles(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListMihomoEgressProfiles(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// CreateMihomoEgressProfile operation middleware
-func (siw *ServerInterfaceWrapper) CreateMihomoEgressProfile(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateMihomoEgressProfile(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DeleteMihomoEgressProfile operation middleware
-func (siw *ServerInterfaceWrapper) DeleteMihomoEgressProfile(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "profileId" -------------
-	var profileId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "profileId", chi.URLParam(r, "profileId"), &profileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "profileId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteMihomoEgressProfile(w, r, profileId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// UpdateMihomoEgressProfile operation middleware
-func (siw *ServerInterfaceWrapper) UpdateMihomoEgressProfile(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "profileId" -------------
-	var profileId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "profileId", chi.URLParam(r, "profileId"), &profileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "profileId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateMihomoEgressProfile(w, r, profileId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4230,58 +3700,6 @@ func (siw *ServerInterfaceWrapper) PutSetupStorage(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// PutSetupSubscriptionProfileAccessMode operation middleware
-func (siw *ServerInterfaceWrapper) PutSetupSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "profileId" -------------
-	var profileId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "profileId", chi.URLParam(r, "profileId"), &profileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "profileId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PutSetupSubscriptionProfileAccessMode(w, r, profileId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// PutSubscriptionProfileAccessMode operation middleware
-func (siw *ServerInterfaceWrapper) PutSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "profileId" -------------
-	var profileId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "profileId", chi.URLParam(r, "profileId"), &profileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "profileId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PutSubscriptionProfileAccessMode(w, r, profileId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetSystemHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -4542,18 +3960,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/mihomo/subscriptions/{subscriptionId}/select", wrapper.SelectMihomoSubscription)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/api/v1/mihomo/egress-profiles", wrapper.ListMihomoEgressProfiles)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/api/v1/mihomo/egress-profiles", wrapper.CreateMihomoEgressProfile)
-	})
-	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/api/v1/mihomo/egress-profiles/{profileId}", wrapper.DeleteMihomoEgressProfile)
-	})
-	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/api/v1/mihomo/egress-profiles/{profileId}", wrapper.UpdateMihomoEgressProfile)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/line-egress-bindings", wrapper.ListLineEgressBindings)
 	})
 	r.Group(func(r chi.Router) {
@@ -4588,12 +3994,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/messages", wrapper.SendMessage)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/api/v1/access-paths", wrapper.ListAccessPaths)
-	})
-	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/api/v1/access-paths/{lineId}", wrapper.ConfigureAccessPath)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/euicc", wrapper.GetEUICCState)
@@ -4659,9 +4059,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/modems/{modemId}/equipment-identity", wrapper.ReadManagedModemEquipmentIdentity)
 	})
 	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/api/v1/subscription-profiles/{profileId}/access-mode", wrapper.PutSubscriptionProfileAccessMode)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/setup/status", wrapper.GetSetupStatus)
 	})
 	r.Group(func(r chi.Router) {
@@ -4692,9 +4089,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/api/v1/setup/hardware/topology", wrapper.GetSetupHardwareTopology)
 	})
 	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/api/v1/setup/subscription-profiles/{profileId}/access-mode", wrapper.PutSetupSubscriptionProfileAccessMode)
-	})
-	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/setup/hardware/confirm", wrapper.ConfirmSetupHardware)
 	})
 	r.Group(func(r chi.Router) {
@@ -4712,208 +4106,201 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

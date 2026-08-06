@@ -32,6 +32,7 @@
 | 21：Host VoWiFi 短信 | 真实单段与 multipart 入站、Web/API 异步提交结果、单段与两段 UCS-2 自回环，以及自动重连后再次收发 |
 | 22：已添加模组与能力适配层 | 动态发现与持久模组分离、IMEI 指纹稳定绑定，以及 ML307A 最小鉴权/RF 能力边界 |
 | 23：持久线路层 | 管理员显式创建稳定 Line，运行时解析硬件目标，业务消费者不再依赖自动 Line |
+| 24：线路与通信路径解耦 | Line 只表达稳定身份；RF、VoWiFi、出口和 transport 独立配置，新 Line 出口默认未配置 |
 
 ## Milestone 22：已添加模组与能力适配层
 
@@ -48,7 +49,7 @@
 
 ## Milestone 23：持久线路层
 
-- [x] 以随机业务 ID 持久化 `ManagedModem + SIM/Profile 身份 + 卡槽` 绑定、显示名称和接入方式；
+- [x] 以随机业务 ID 持久化 `ManagedModem + SIM/Profile 身份 + 卡槽` 绑定和显示名称；
 - [x] 提供已添加线路列表、当前可添加候选、显式创建和不改绑编辑 API；
 - [x] 重做线路页，只有“添加模组 → 添加线路”后才出现可操作 Line；
 - [x] 将短信、通话、Mihomo 国家出口和 Host VoWiFi 全部迁移到稳定 Line 目录；
@@ -56,6 +57,17 @@
 - [x] 将临时 Agent Line 限制在运行时解析与 SIM preflight，Web/API 不公开硬件目标和身份指纹；
 - [x] 验证 USB 端口变化保持绑定，模组离线、SIM 更换和身份冲突 fail closed；
 - [x] 允许升级时只清理旧版 Host VoWiFi 网络清单，禁止旧清单重新启动。
+
+## Milestone 24：添加线路与通信路径解耦
+
+- [x] 删除 Line、Profile、setup、inventory 和公共 API 中的 access-mode/`rfSafety` 模型与修改入口，并移除重复保存出口状态的旧 Simulator access-path 与 Mihomo egress-profile API/表；
+- [x] 数据库升级保留稳定 Line、SIM 绑定、国家出口和 VoWiFi 意图，并把旧 Host VoWiFi 的隐式直连物化为显式 `direct`；
+- [x] 让候选接口覆盖所有已添加模组，返回实时型号、USB Serial、脱敏 SIM/Profile、能力和 `READY / MODEM_OFFLINE / SIM_ABSENT / SIM_UNAVAILABLE / ALREADY_ADDED / BINDING_CONFLICT`；创建时重新扫描，候选过期或身份变化即拒绝；
+- [x] 添加线路只保存候选和名称，不修改 RF、Mihomo、Host VoWiFi 或任何通信 transport；绑定创建后不可改，本阶段不提供删除；
+- [x] 新 Line 出口默认为 `unconfigured`，只接受显式 `direct` 或 `mihomo-country`；Host VoWiFi 准入只检查当前解析、`hostVoWifiAuth` 与明确可用出口，不读取或修改 RF；
+- [x] 短信与电话移除接入方式分支，依据实际装配 transport、Line 能力和所需运行状态 fail closed；
+- [x] 线路页改为 ProTable、候选单选表格和响应式配置抽屉，名称、出口与 VoWiFi 意图分别保存，未配置出口时禁用激活；
+- [x] OpenAPI 和 Web 严格校验不返回身份指纹、运行时设备目标或设备路径，并覆盖过期候选、重复添加、SIM 更换、离线、端口变化、身份冲突与旧库迁移。
 
 ## Milestone 20：公开源码准备
 

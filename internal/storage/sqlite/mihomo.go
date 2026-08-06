@@ -142,49 +142,6 @@ func (set *Set) MarkMihomoSubscriptionRefreshFailure(ctx context.Context, subscr
 	return nil
 }
 
-func (set *Set) ListMihomoEgressProfiles(ctx context.Context) ([]domain.EgressProfile, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT id, display_name, subscription_id, line_id, selection_type, selected_node_id, selected_country_code, source_cidr, enabled, created_at_utc, updated_at_utc FROM mihomo_egress_profiles ORDER BY display_name, id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := make([]domain.EgressProfile, 0)
-	for rows.Next() {
-		var item domain.EgressProfile
-		var enabled int
-		var created, updated string
-		if err := rows.Scan(&item.ID, &item.DisplayName, &item.SubscriptionID, &item.LineID, &item.SelectionType, &item.SelectedNodeID, &item.SelectedCountryCode, &item.SourceCIDR, &enabled, &created, &updated); err != nil {
-			return nil, err
-		}
-		item.Enabled = enabled == 1
-		var err error
-		item.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
-		if err != nil {
-			return nil, err
-		}
-		item.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
-}
-
-func (set *Set) UpsertMihomoEgressProfile(ctx context.Context, item domain.EgressProfile) error {
-	_, err := set.Core.ExecContext(ctx, `INSERT INTO mihomo_egress_profiles (id,display_name,subscription_id,line_id,selection_type,selected_node_id,selected_country_code,source_cidr,enabled,created_at_utc,updated_at_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,subscription_id=excluded.subscription_id,line_id=excluded.line_id,selection_type=excluded.selection_type,selected_node_id=excluded.selected_node_id,selected_country_code=excluded.selected_country_code,source_cidr=excluded.source_cidr,enabled=excluded.enabled,updated_at_utc=excluded.updated_at_utc`, item.ID, item.DisplayName, item.SubscriptionID, item.LineID, item.SelectionType, item.SelectedNodeID, item.SelectedCountryCode, item.SourceCIDR, boolInt(item.Enabled), item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano))
-	return err
-}
-
-func (set *Set) DeleteMihomoEgressProfile(ctx context.Context, id string) (bool, error) {
-	result, err := set.Core.ExecContext(ctx, `DELETE FROM mihomo_egress_profiles WHERE id=?`, id)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
-}
-
 func (set *Set) ReadMihomoRuntimeSelection(ctx context.Context) (selected, running string, err error) {
 	err = set.Core.QueryRowContext(ctx, `SELECT selected_subscription_id, running_subscription_id FROM mihomo_runtime_selection WHERE singleton=1`).Scan(&selected, &running)
 	if err != nil {

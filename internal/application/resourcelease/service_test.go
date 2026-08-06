@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	storage "github.com/leonfox28/simplus/internal/storage/sqlite"
 )
@@ -19,20 +18,6 @@ func (provider topologyProviderFunc) Topology(ctx context.Context) (inventory.To
 	return provider(ctx)
 }
 
-type accessModes struct{}
-
-func (accessModes) SubscriptionProfileAccessModes(_ context.Context, profileIDs []string) (map[string]accessmode.Mode, error) {
-	modes := make(map[string]accessmode.Mode, len(profileIDs))
-	for _, profileID := range profileIDs {
-		modes[profileID] = accessmode.HoldRFOff
-	}
-	return modes, nil
-}
-
-func (accessModes) PutSubscriptionProfileAccessMode(context.Context, string, accessmode.Mode) error {
-	return nil
-}
-
 func TestServiceBindsLeaseToCurrentTopologyGeneration(t *testing.T) {
 	ctx := context.Background()
 	set, err := storage.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
@@ -40,7 +25,7 @@ func TestServiceBindsLeaseToCurrentTopologyGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer set.Close()
-	service := New(inventory.NewSimulator(accessModes{}), set)
+	service := New(inventory.NewSimulator(), set)
 	service.now = func() time.Time { return time.Unix(1_700_000_000, 0) }
 
 	request := AcquireRequest{
@@ -74,7 +59,7 @@ func TestServiceBindsLeaseToCurrentTopologyGeneration(t *testing.T) {
 		t.Fatalf("unknown purpose error = %v", err)
 	}
 
-	topology, err := inventory.NewSimulator(accessModes{}).Topology(ctx)
+	topology, err := inventory.NewSimulator().Topology(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +80,7 @@ func TestServiceGenerationChangeFencesExistingLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer set.Close()
-	topology, err := inventory.NewSimulator(accessModes{}).Topology(ctx)
+	topology, err := inventory.NewSimulator().Topology(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +121,7 @@ func TestServiceRenewsAndReleasesWithFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer set.Close()
-	topology, err := inventory.NewSimulator(accessModes{}).Topology(ctx)
+	topology, err := inventory.NewSimulator().Topology(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

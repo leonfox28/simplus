@@ -53,6 +53,8 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 			snapshot.SubscriptionProfiles = append(snapshot.SubscriptionProfiles, duplicate)
 		}},
 		{name: "full identity leaked into hint", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].DisplayIdentityHint = "\nsecret" }},
+		{name: "malformed home operator code", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].HomeOperatorCode = "23415" }},
+		{name: "malformed home operator name", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].HomeOperatorName = "VOXI\n" }},
 		{name: "entity generation ahead of snapshot", mutate: func(snapshot *Snapshot) { snapshot.ResourceGroups[0].Generation = 2 }},
 		{name: "resource group generation behind profile binding", mutate: func(snapshot *Snapshot) {
 			snapshot.Generation = 2

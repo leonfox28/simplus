@@ -2,31 +2,16 @@ package inventory
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 )
 
 const (
-	LineAwaitingAccessMode = "awaiting-access-mode"
-	LineReady              = "ready"
-	LineUnavailable        = "unavailable"
-
-	RFSafetyOff = "off"
+	LineReady       = "ready"
+	LineUnavailable = "unavailable"
 )
-
-var (
-	ErrSubscriptionProfileNotFound = errors.New("subscription profile not found")
-	ErrInvalidAccessMode           = errors.New("invalid access mode")
-)
-
-type AccessModeRepository interface {
-	SubscriptionProfileAccessModes(context.Context, []string) (map[string]accessmode.Mode, error)
-	PutSubscriptionProfileAccessMode(context.Context, string, accessmode.Mode) error
-}
 
 type HardwareSource interface {
 	Snapshot(context.Context) (hardware.Snapshot, error)
@@ -45,8 +30,6 @@ type PhysicalDevice struct {
 
 type SubscriptionProfile struct {
 	hardware.SubscriptionProfile
-	AccessMode           accessmode.Mode
-	AccessModeConfigured bool
 }
 
 type Line struct {
@@ -60,10 +43,7 @@ type Line struct {
 	DisplayName           string
 	Generation            uint64
 	Capabilities          hardware.Capabilities
-	AccessMode            accessmode.Mode
-	AccessModeConfigured  bool
 	State                 string
-	RFSafety              string
 }
 
 type Snapshot struct {
@@ -88,23 +68,22 @@ type Topology struct {
 }
 
 type Service struct {
-	accessModes AccessModeRepository
-	hardware    HardwareSource
+	hardware HardwareSource
 }
 
-func New(source HardwareSource, accessModes AccessModeRepository) *Service {
-	return &Service{hardware: source, accessModes: accessModes}
+func New(source HardwareSource) *Service {
+	return &Service{hardware: source}
 }
 
-func NewSimulator(accessModes AccessModeRepository) *Service {
-	return New(simulatorSource{lineCount: 1}, accessModes)
+func NewSimulator() *Service {
+	return New(simulatorSource{lineCount: 1})
 }
 
 // NewMultiSimulator is the V1 interactive Simulator topology. The single-line
 // constructor remains available for focused fixtures, while the running
 // product exposes two independent modem functions and lines.
-func NewMultiSimulator(accessModes AccessModeRepository) *Service {
-	return New(simulatorSource{lineCount: 2}, accessModes)
+func NewMultiSimulator() *Service {
+	return New(simulatorSource{lineCount: 2})
 }
 
 func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
@@ -144,7 +123,7 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func (service *Service) Topology(ctx context.Context) (Topology, error) {
-	if service == nil || service.accessModes == nil || service.hardware == nil {
+	if service == nil || service.hardware == nil {
 		return Topology{}, fmt.Errorf("inventory service is not configured")
 	}
 	if err := ctx.Err(); err != nil {
@@ -172,40 +151,14 @@ func (service *Service) Topology(ctx context.Context) (Topology, error) {
 		deviceStates[device.ID] = device.State
 	}
 	profileStates := make(map[string]string, len(normalized.SubscriptionProfiles))
-	modes := make(map[string]struct {
-		mode       accessmode.Mode
-		configured bool
-	}, len(normalized.SubscriptionProfiles))
-	profileIDs := make([]string, 0, len(normalized.SubscriptionProfiles))
 	for _, profile := range normalized.SubscriptionProfiles {
-		profileIDs = append(profileIDs, profile.ID)
-	}
-	storedModes, err := service.accessModes.SubscriptionProfileAccessModes(ctx, profileIDs)
-	if err != nil {
-		return Topology{}, fmt.Errorf("load subscription profile access modes: %w", err)
-	}
-	for _, profile := range normalized.SubscriptionProfiles {
-		mode, configured := storedModes[profile.ID]
-		if !configured {
-			mode = accessmode.HoldRFOff
-		}
 		profileStates[profile.ID] = profile.State
-		modes[profile.ID] = struct {
-			mode       accessmode.Mode
-			configured bool
-		}{mode: mode, configured: configured}
 		topology.SubscriptionProfiles = append(topology.SubscriptionProfiles, SubscriptionProfile{
-			SubscriptionProfile:  profile,
-			AccessMode:           mode,
-			AccessModeConfigured: configured,
+			SubscriptionProfile: profile,
 		})
 	}
 	for _, hardwareLine := range normalized.Lines {
-		selection := modes[hardwareLine.SubscriptionProfileID]
-		state := LineAwaitingAccessMode
-		if selection.configured {
-			state = LineReady
-		}
+		state := LineReady
 		if deviceStates[hardwareLine.PhysicalDeviceID] != hardware.DeviceAvailable || profileStates[hardwareLine.SubscriptionProfileID] == hardware.ProfileLocked {
 			state = LineUnavailable
 		}
@@ -213,7 +166,7 @@ func (service *Service) Topology(ctx context.Context) (Topology, error) {
 			ID: hardwareLine.ID, PhysicalDeviceID: hardwareLine.PhysicalDeviceID, ModemFunctionID: hardwareLine.ModemFunctionID,
 			SubscriptionProfileID: hardwareLine.SubscriptionProfileID, ResourceGroupID: hardwareLine.ResourceGroupID,
 			DisplayName: hardwareLine.DisplayName, Generation: hardwareLine.Generation, Capabilities: hardwareLine.Capabilities,
-			AccessMode: selection.mode, AccessModeConfigured: selection.configured, State: state, RFSafety: RFSafetyOff,
+			State: state,
 		})
 	}
 	revision, err := Revision(topology)
@@ -222,33 +175,6 @@ func (service *Service) Topology(ctx context.Context) (Topology, error) {
 	}
 	topology.Revision = revision
 	return topology, nil
-}
-
-func (service *Service) PutAccessMode(ctx context.Context, profileID string, mode accessmode.Mode) (Snapshot, error) {
-	if service == nil || service.accessModes == nil || service.hardware == nil {
-		return Snapshot{}, fmt.Errorf("inventory service is not configured")
-	}
-	if !mode.Valid() {
-		return Snapshot{}, fmt.Errorf("%w: %q", ErrInvalidAccessMode, mode)
-	}
-	topology, err := service.Topology(ctx)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	found := false
-	for _, profile := range topology.SubscriptionProfiles {
-		if profile.ID == profileID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return Snapshot{}, fmt.Errorf("%w: %s", ErrSubscriptionProfileNotFound, profileID)
-	}
-	if err := service.accessModes.PutSubscriptionProfileAccessMode(ctx, profileID, mode); err != nil {
-		return Snapshot{}, fmt.Errorf("persist access mode for %s: %w", profileID, err)
-	}
-	return service.Snapshot(ctx)
 }
 
 type simulatorSource struct{ lineCount int }

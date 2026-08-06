@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	linedomain "github.com/leonfox28/simplus/internal/domain/line"
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
@@ -32,7 +31,7 @@ func TestManagedLinePersistsStableModemAndSubscriptionBinding(t *testing.T) {
 	record := linedomain.Record{
 		ID: "line_AgICAgICAgICAgICAgICAg", ManagedModemID: modem.ID, SIMSlotIndex: 0,
 		SubscriptionIdentityFingerprint: strings.Repeat("b", 64), SubscriptionDisplayHint: "ICCID •••• 1234",
-		DisplayName: "VOXI", AccessMode: accessmode.HostVoWiFiOnly, CreatedAt: now, UpdatedAt: now,
+		DisplayName: "VOXI", CreatedAt: now, UpdatedAt: now,
 	}
 	if err := set.CreateManagedLine(t.Context(), record); err != nil {
 		t.Fatal(err)
@@ -41,14 +40,14 @@ func TestManagedLinePersistsStableModemAndSubscriptionBinding(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0] != record {
 		t.Fatalf("items=%#v error=%v", items, err)
 	}
-	if err := set.UpdateManagedLine(t.Context(), record.ID, "VOXI UK", accessmode.HoldRFOff, now.Add(time.Minute)); err != nil {
+	if err := set.UpdateManagedLine(t.Context(), record.ID, "VOXI UK", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	items, err = set.ListManagedLines(t.Context())
-	if err != nil || items[0].DisplayName != "VOXI UK" || items[0].AccessMode != accessmode.HoldRFOff {
+	if err != nil || items[0].DisplayName != "VOXI UK" {
 		t.Fatalf("updated=%#v error=%v", items, err)
 	}
-	if err := set.UpdateManagedLine(t.Context(), "line_missing0123456789012", "missing", accessmode.HoldRFOff, now); !errors.Is(err, linedomain.ErrNotFound) {
+	if err := set.UpdateManagedLine(t.Context(), "line_missing0123456789012", "missing", now); !errors.Is(err, linedomain.ErrNotFound) {
 		t.Fatalf("missing update error=%v", err)
 	}
 	record.ID = "line_AwMDAwMDAwMDAwMDAwMDAw"

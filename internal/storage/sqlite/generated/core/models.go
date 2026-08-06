@@ -47,7 +47,6 @@ type ManagedLine struct {
 	SubscriptionIdentityFingerprint string `json:"subscription_identity_fingerprint"`
 	SubscriptionDisplayHint         string `json:"subscription_display_hint"`
 	DisplayName                     string `json:"display_name"`
-	AccessMode                      string `json:"access_mode"`
 	CreatedAtUtc                    string `json:"created_at_utc"`
 	UpdatedAtUtc                    string `json:"updated_at_utc"`
 }
@@ -79,20 +78,6 @@ type ManagementTl struct {
 	LeafNotAfterUtc         sql.NullString `json:"leaf_not_after_utc"`
 	Confirmed               int64          `json:"confirmed"`
 	ConfiguredAtUtc         string         `json:"configured_at_utc"`
-}
-
-type MihomoEgressProfile struct {
-	ID                  string `json:"id"`
-	DisplayName         string `json:"display_name"`
-	SubscriptionID      string `json:"subscription_id"`
-	SelectedNodeID      string `json:"selected_node_id"`
-	Enabled             int64  `json:"enabled"`
-	CreatedAtUtc        string `json:"created_at_utc"`
-	UpdatedAtUtc        string `json:"updated_at_utc"`
-	SelectionType       string `json:"selection_type"`
-	SelectedCountryCode string `json:"selected_country_code"`
-	SourceCidr          string `json:"source_cidr"`
-	LineID              string `json:"line_id"`
 }
 
 type MihomoRuntimeSelection struct {
@@ -162,23 +147,11 @@ type SetupStorage struct {
 	ConfiguredAtUtc  string `json:"configured_at_utc"`
 }
 
-type SimulatorAccessPath struct {
-	LineID      string `json:"line_id"`
-	Mode        string `json:"mode"`
-	MihomoState string `json:"mihomo_state"`
-}
-
 type SimulatorEuiccProfile struct {
 	ProfileID           string `json:"profile_id"`
 	DisplayName         string `json:"display_name"`
 	DisplayIdentityHint string `json:"display_identity_hint"`
 	Active              int64  `json:"active"`
-}
-
-type SubscriptionProfileAccessMode struct {
-	SubscriptionProfileID string `json:"subscription_profile_id"`
-	AccessMode            string `json:"access_mode"`
-	UpdatedAtUtc          string `json:"updated_at_utc"`
 }
 
 type VowifiLineDesire struct {

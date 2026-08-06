@@ -13,7 +13,7 @@ import (
 func TestML307AIdentityCapabilitiesOwnTheirFixedQueries(t *testing.T) {
 	adapter := ML307A{}
 	fingerprint := strings.Repeat("a", 64)
-	commands := make([]string, 0, 2)
+	commands := make([]string, 0, 5)
 	query := func(_ context.Context, command string, _ time.Duration) ([]string, error) {
 		commands = append(commands, command)
 		switch command {
@@ -21,6 +21,12 @@ func TestML307AIdentityCapabilitiesOwnTheirFixedQueries(t *testing.T) {
 			return []string{"+CGSN: 490154203237518", "OK"}, nil
 		case "AT+MCCID":
 			return []string{"+MCCID: 89861118216007272115", "OK"}, nil
+		case "AT+CRSM=176,28486,0,0,17":
+			return []string{`+CRSM: 144,0,"00564F5849FFFFFFFFFFFFFFFFFFFFFFFF"`, "OK"}, nil
+		case "AT+CIMI":
+			return []string{"234150123456789", "OK"}, nil
+		case "AT+CRSM=176,28589,0,0,4":
+			return []string{`+CRSM: 144,0,"00000002"`, "OK"}, nil
 		default:
 			return nil, errors.New("unexpected query")
 		}
@@ -29,10 +35,13 @@ func TestML307AIdentityCapabilitiesOwnTheirFixedQueries(t *testing.T) {
 	if got, err := adapter.ReadEquipmentIdentity(t.Context(), query); err != nil || got != "490154203237518" {
 		t.Fatalf("equipment identity = %q, error = %v", got, err)
 	}
-	if got, hint, err := adapter.ReadSIMIdentity(t.Context(), query, identity); err != nil || got != fingerprint || hint != "ICCID •••• 2115" {
-		t.Fatalf("SIM identity = (%q, %q), error = %v", got, hint, err)
+	observed, err := adapter.ReadSIMIdentity(t.Context(), query, identity)
+	if err != nil || observed.Fingerprint != fingerprint || observed.DisplayHint != "ICCID •••• 2115" ||
+		observed.HomeOperatorName != "VOXI" || observed.HomeOperatorCode != "234-15" {
+		t.Fatalf("SIM identity = %#v, error = %v", observed, err)
 	}
-	if len(commands) != 2 || commands[0] != "AT+CGSN=1" || commands[1] != "AT+MCCID" {
+	want := []string{"AT+CGSN=1", "AT+MCCID", "AT+CRSM=176,28486,0,0,17", "AT+CIMI", "AT+CRSM=176,28589,0,0,4"}
+	if strings.Join(commands, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("identity commands = %#v", commands)
 	}
 }

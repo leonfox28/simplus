@@ -350,13 +350,45 @@ func TestRegistrationAuthorizedIdentityUsesFirstAssociatedURI(t *testing.T) {
 	if got := registrationAuthorizedIdentity(packet, fallback); got != "sip:+447700900123@ims.example.invalid" {
 		t.Fatalf("authorized identity = %q", got)
 	}
+	if got := registrationPhoneNumber(packet); got != "+447700900123" {
+		t.Fatalf("phone number = %q", got)
+	}
 	packet = []byte("SIP/2.0 200 OK\r\nP-Associated-URI: <tel:+447700900123>\r\nContent-Length: 0\r\n\r\n")
 	if got := registrationAuthorizedIdentity(packet, fallback); got != "tel:+447700900123" {
 		t.Fatalf("TEL authorized identity = %q", got)
 	}
+	if got := registrationPhoneNumber(packet); got != "+447700900123" {
+		t.Fatalf("TEL phone number = %q", got)
+	}
 	packet = []byte("SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n")
 	if got := registrationAuthorizedIdentity(packet, fallback); got != fallback {
 		t.Fatalf("fallback identity = %q", got)
+	}
+	if got := registrationPhoneNumber(packet); got != "" {
+		t.Fatalf("missing phone number = %q", got)
+	}
+}
+
+func TestRegistrationPhoneNumberSkipsPrivateAndMalformedIdentities(t *testing.T) {
+	packet := []byte("SIP/2.0 200 OK\r\n" +
+		"P-Associated-URI: <sip:234150123456789@ims.example.invalid>, <tel:+447700900123;phone-context=ims.example.invalid>\r\n" +
+		"Content-Length: 0\r\n\r\n")
+	if got := registrationPhoneNumber(packet); got != "+447700900123" {
+		t.Fatalf("phone number after private identity = %q", got)
+	}
+
+	for name, associated := range map[string]string{
+		"private identity": "<sip:234150123456789@ims.example.invalid>",
+		"local number":     "<tel:07700900123>",
+		"too long":         "<tel:+1234567890123456>",
+		"empty list item":  "<tel:+447700900123>, , <tel:+447700900456>",
+	} {
+		t.Run(name, func(t *testing.T) {
+			packet := []byte("SIP/2.0 200 OK\r\nP-Associated-URI: " + associated + "\r\nContent-Length: 0\r\n\r\n")
+			if got := registrationPhoneNumber(packet); got != "" {
+				t.Fatalf("phone number = %q", got)
+			}
+		})
 	}
 }
 

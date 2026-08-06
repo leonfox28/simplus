@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
 )
@@ -65,7 +64,7 @@ type Repository interface {
 type LineSource interface {
 	Topology(context.Context) (inventory.Topology, error)
 }
-type AccessPathGuard interface {
+type TransportAvailability interface {
 	Available(context.Context, string) bool
 }
 
@@ -181,26 +180,20 @@ type Service struct {
 
 	gatesMu       sync.Mutex
 	gates         map[string]*serialGate
-	accessPaths   AccessPathGuard
+	availability  TransportAvailability
 	hostVoWiFiSMS bool
 }
 
-func (service *Service) UseAccessPathGuard(guard AccessPathGuard) {
-	if service != nil {
-		service.accessPaths = guard
-	}
-}
-
-func (service *Service) UseHostVoWiFiTransport(guard AccessPathGuard) {
+func (service *Service) UseHostVoWiFiTransport(availability TransportAvailability) {
 	if service != nil {
 		service.hostVoWiFiSMS = true
-		service.accessPaths = guard
+		service.availability = availability
 	}
 }
 
 func (service *Service) supportsSMS(line inventory.Line) bool {
 	if service != nil && service.hostVoWiFiSMS {
-		return line.AccessMode == accessmode.HostVoWiFiOnly && line.Capabilities.HostVoWiFiAuth
+		return line.Capabilities.HostVoWiFiAuth
 	}
 	return line.Capabilities.SMS
 }
@@ -247,7 +240,7 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 	if err != nil {
 		return SendResult{}, err
 	}
-	if line.AccessMode == accessmode.HostVoWiFiOnly && (service.accessPaths == nil || !service.accessPaths.Available(ctx, line.ID)) {
+	if service.hostVoWiFiSMS && (service.availability == nil || !service.availability.Available(ctx, line.ID)) {
 		return SendResult{}, ErrLineUnavailable
 	}
 	segments, err := smscodec.Encode(request.Body)

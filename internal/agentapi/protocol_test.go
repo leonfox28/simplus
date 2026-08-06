@@ -59,6 +59,15 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 		{name: "invalid RAT", mutate: func(response *ProbeResponse) { response.Devices[0].CurrentNetwork.RAT = "6g" }},
 		{name: "complete without call count", mutate: func(response *ProbeResponse) { response.Devices[0].ActiveCallCount = nil }},
 		{name: "identity hint without fingerprint", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.DisplayIdentityHint = "ICCID •••• 2115" }},
+		{name: "operator without fingerprint", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.HomeOperatorCode = "234-15" }},
+		{name: "invalid operator code", mutate: func(response *ProbeResponse) {
+			response.Devices[0].SIM = SIMObservation{State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
+				IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115", HomeOperatorCode: "23415"}
+		}},
+		{name: "invalid operator name", mutate: func(response *ProbeResponse) {
+			response.Devices[0].SIM = SIMObservation{State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
+				IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115", HomeOperatorName: "VOXI\n"}
+		}},
 		{name: "identity on absent SIM", mutate: func(response *ProbeResponse) {
 			response.Devices[0].SIM.IdentityFingerprint = strings.Repeat("b", 64)
 			response.Devices[0].SIM.DisplayIdentityHint = "ICCID •••• 2115"
@@ -85,6 +94,7 @@ func TestValidateProbeResponseAcceptsOnlyMaskedReadySIMIdentity(t *testing.T) {
 	response.Devices[0].SIM = SIMObservation{
 		State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
 		IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115",
+		HomeOperatorName: "VOXI", HomeOperatorCode: "234-15",
 	}
 	if err := validateProbeResponse(response); err != nil {
 		t.Fatal(err)

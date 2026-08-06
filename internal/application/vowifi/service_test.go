@@ -9,7 +9,6 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	lineegressdomain "github.com/leonfox28/simplus/internal/domain/lineegress"
 	domain "github.com/leonfox28/simplus/internal/domain/vowifi"
@@ -101,9 +100,13 @@ func TestRepeatedActivateReturnsObservedRuntimeState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisor.statuses[testLineID] = vowifisupervisor.Status{LineID: testLineID, State: vowifisupervisor.StateOnline, Online: true, EgressMode: vowifisupervisor.EgressMihomoCountry, CountryCode: "GB"}
+	supervisor.statuses[testLineID] = vowifisupervisor.Status{
+		LineID: testLineID, State: vowifisupervisor.StateOnline, Online: true,
+		EgressMode: vowifisupervisor.EgressMihomoCountry, CountryCode: "GB", PhoneNumber: "+447700900123",
+	}
 	second, err := service.Activate(context.Background(), testLineID)
-	if err != nil || first.State != vowifisupervisor.StateStarting || second.State != vowifisupervisor.StateOnline || !second.Online {
+	if err != nil || first.State != vowifisupervisor.StateStarting || second.State != vowifisupervisor.StateOnline ||
+		!second.Online || second.PhoneNumber != "+447700900123" {
 		t.Fatalf("first=%#v second=%#v err=%v", first, second, err)
 	}
 }
@@ -120,8 +123,7 @@ func (fake *fakeSupervisor) Stop(_ context.Context, lineID string) (vowifisuperv
 
 func readyFixture() (*Service, *memoryStore, *fakeSupervisor) {
 	line := inventory.Line{
-		ID: testLineID, RuntimeLineID: testHardwareLineID, AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
-		State: inventory.LineReady, RFSafety: "unknown",
+		ID: testLineID, RuntimeLineID: testHardwareLineID, State: inventory.LineReady,
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
 	}
 	store := &memoryStore{desires: make(map[string]domain.Desire)}
@@ -159,6 +161,27 @@ func TestActivateFailsClosedWhenLineOrEgressIsNotReady(t *testing.T) {
 	}
 	if len(store.desires) != 0 || len(supervisor.starts) != 0 {
 		t.Fatalf("side effects desires=%#v starts=%#v", store.desires, supervisor.starts)
+	}
+}
+
+func TestListReportsUnconfiguredAndUnsupportedWithoutStartingRuntime(t *testing.T) {
+	service, store, supervisor := readyFixture()
+	service.Egress = fixedEgress{views: []lineegressapp.View{{
+		LineID: testLineID, Mode: lineegressdomain.ModeUnconfigured, ReadinessReason: "EGRESS_NOT_CONFIGURED",
+	}}}
+	states, err := service.List(t.Context())
+	if err != nil || len(states) != 1 || states[0].Eligible || states[0].ReadinessCode != "EGRESS_NOT_CONFIGURED" {
+		t.Fatalf("unconfigured states=%#v error=%v", states, err)
+	}
+	service.Inventory = fixedInventory{topology: inventory.Topology{Lines: []inventory.Line{{
+		ID: testLineID, RuntimeLineID: testHardwareLineID, State: inventory.LineReady,
+	}}}}
+	states, err = service.List(t.Context())
+	if err != nil || states[0].ReadinessCode != "LINE_VOWIFI_UNSUPPORTED" {
+		t.Fatalf("unsupported states=%#v error=%v", states, err)
+	}
+	if len(store.desires) != 0 || len(supervisor.starts) != 0 {
+		t.Fatalf("unexpected side effects desires=%#v starts=%#v", store.desires, supervisor.starts)
 	}
 }
 

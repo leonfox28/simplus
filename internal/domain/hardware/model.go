@@ -110,6 +110,8 @@ type SubscriptionProfile struct {
 	// IdentityFingerprint is an internal, per-install keyed pseudonym produced at the hardware boundary. Real adapters must never place a raw identity or an unkeyed ICCID digest here.
 	IdentityFingerprint string
 	DisplayIdentityHint string
+	HomeOperatorName    string
+	HomeOperatorCode    string
 	Generation          uint64
 }
 

@@ -25,7 +25,6 @@ import (
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	messageapp "github.com/leonfox28/simplus/internal/application/messaging"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	linedomain "github.com/leonfox28/simplus/internal/domain/line"
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
@@ -45,8 +44,6 @@ type fixedStateStore string
 func (store fixedStateStore) InstallationState(context.Context) (string, error) {
 	return string(store), nil
 }
-
-type testAccessModeStore map[string]accessmode.Mode
 
 type testLineEgressManager struct {
 	items   []lineegressapp.View
@@ -81,10 +78,8 @@ type testManagedLineManager struct {
 	candidates  []linedomain.Candidate
 	addedID     string
 	addedName   string
-	addedMode   accessmode.Mode
 	updatedID   string
 	updatedName string
-	updatedMode accessmode.Mode
 }
 
 func (manager *testManagedLineManager) List(context.Context) ([]linedomain.View, error) {
@@ -95,15 +90,15 @@ func (manager *testManagedLineManager) Candidates(context.Context) ([]linedomain
 	return append([]linedomain.Candidate(nil), manager.candidates...), nil
 }
 
-func (manager *testManagedLineManager) Add(_ context.Context, candidateID, displayName string, mode accessmode.Mode) (linedomain.View, error) {
-	manager.addedID, manager.addedName, manager.addedMode = candidateID, displayName, mode
+func (manager *testManagedLineManager) Add(_ context.Context, candidateID, displayName string) (linedomain.View, error) {
+	manager.addedID, manager.addedName = candidateID, displayName
 	return manager.items[0], nil
 }
 
-func (manager *testManagedLineManager) Update(_ context.Context, lineID, displayName string, mode accessmode.Mode) (linedomain.View, error) {
-	manager.updatedID, manager.updatedName, manager.updatedMode = lineID, displayName, mode
+func (manager *testManagedLineManager) Update(_ context.Context, lineID, displayName string) (linedomain.View, error) {
+	manager.updatedID, manager.updatedName = lineID, displayName
 	result := manager.items[0]
-	result.DisplayName, result.AccessMode = displayName, mode
+	result.DisplayName = displayName
 	return result, nil
 }
 
@@ -156,21 +151,6 @@ func (manager *testLineEgressManager) Put(_ context.Context, lineID, mode, count
 	return lineegressapp.View{LineID: lineID, Mode: mode, CountryCode: country, CountryName: "英国", ListenerPort: 20157, Ready: true, ReadinessReason: "READY"}, nil
 }
 
-func (store testAccessModeStore) SubscriptionProfileAccessModes(_ context.Context, profileIDs []string) (map[string]accessmode.Mode, error) {
-	modes := make(map[string]accessmode.Mode, len(profileIDs))
-	for _, profileID := range profileIDs {
-		if mode, configured := store[profileID]; configured {
-			modes[profileID] = mode
-		}
-	}
-	return modes, nil
-}
-
-func (store testAccessModeStore) PutSubscriptionProfileAccessMode(_ context.Context, profileID string, mode accessmode.Mode) error {
-	store[profileID] = mode
-	return nil
-}
-
 type acceptingAuthenticator struct{}
 
 func (acceptingAuthenticator) Login(context.Context, string, string) (authapp.LoginResult, error) {
@@ -197,7 +177,7 @@ func withTestAdministratorSession(handler http.Handler) http.Handler {
 }
 
 func newTestInventory() *inventory.Service {
-	return inventory.NewSimulator(testAccessModeStore{})
+	return inventory.NewSimulator()
 }
 
 const testBusinessLineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
@@ -228,7 +208,7 @@ func newAuthorizedTestHandler(stores *sqlitestore.Set) http.Handler {
 	return withTestAdministratorSession(Router(New(
 		health.New(stores, "simulator"),
 		setupapp.New(stores, stores),
-		inventory.NewSimulator(stores),
+		inventory.NewSimulator(),
 		logger,
 		acceptingAuthenticator{},
 		nil,
@@ -346,13 +326,16 @@ func TestManagedLineHTTPContractUsesStableIdentityAndOpaqueCandidates(t *testing
 	manager := &testManagedLineManager{
 		items: []linedomain.View{{
 			ID: testBusinessLineID, DisplayName: "VOXI primary", ManagedModemID: modemID,
-			ManagedModemDisplayName: "ML307A", SubscriptionDisplayHint: "ICCID •••• 5553",
-			AccessMode: accessmode.HostVoWiFiOnly, State: linedomain.StateReady,
+			ManagedModemDisplayName: "ML307A", ManagedModemModel: "ML307A-DSLN", ManagedModemSerialNumber: "ML307A-SERIAL-0001",
+			SubscriptionDisplayHint: "ICCID •••• 5553", State: linedomain.StateReady,
 			Capabilities: capabilities, CreatedAt: createdAt,
 		}},
 		candidates: []linedomain.Candidate{{
 			CandidateID: candidateID, ManagedModemID: modemID, ManagedModemDisplayName: "ML307A",
-			SubscriptionDisplayHint: "ICCID •••• 5553", Capabilities: capabilities, Addable: true,
+			ManagedModemModel: "ML307A-DSLN", ManagedModemSerialNumber: "ML307A-SERIAL-0001",
+			SubscriptionDisplayHint: "ICCID •••• 5553", HomeOperatorName: "VOXI", HomeOperatorCode: "234-15",
+			SIMPresence:  hardware.SlotPresent,
+			Capabilities: capabilities, Addable: true, Readiness: linedomain.CandidateReady,
 		}},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -372,24 +355,36 @@ func TestManagedLineHTTPContractUsesStableIdentityAndOpaqueCandidates(t *testing
 
 	listed := request(http.MethodGet, "/api/v1/lines", "")
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"id":"`+testBusinessLineID+`"`) ||
-		strings.Contains(listed.Body.String(), "RuntimeLineID") || strings.Contains(listed.Body.String(), "agent-line-") ||
-		strings.Contains(listed.Body.String(), "IdentityFingerprint") {
+		strings.Contains(listed.Body.String(), "runtimeLineId") || strings.Contains(listed.Body.String(), "physicalDeviceId") ||
+		strings.Contains(listed.Body.String(), "subscriptionIdentityFingerprint") || strings.Contains(listed.Body.String(), "agent-line-") ||
+		strings.Contains(listed.Body.String(), "/dev/") {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
 	scanned := request(http.MethodGet, "/api/v1/line-candidates", "")
 	if scanned.Code != http.StatusOK || !strings.Contains(scanned.Body.String(), `"candidateId":"`+candidateID+`"`) ||
-		!strings.Contains(scanned.Body.String(), `"managedModemId":"`+modemID+`"`) {
+		!strings.Contains(scanned.Body.String(), `"managedModemId":"`+modemID+`"`) ||
+		!strings.Contains(scanned.Body.String(), `"homeOperatorName":"VOXI"`) || !strings.Contains(scanned.Body.String(), `"homeOperatorCode":"234-15"`) ||
+		strings.Contains(scanned.Body.String(), "physicalDeviceId") ||
+		strings.Contains(scanned.Body.String(), "subscriptionIdentityFingerprint") || strings.Contains(strings.ToLower(scanned.Body.String()), "imsi") ||
+		strings.Contains(scanned.Body.String(), "/dev/") {
 		t.Fatalf("scan status=%d body=%s", scanned.Code, scanned.Body.String())
 	}
-	added := request(http.MethodPost, "/api/v1/lines", `{"candidateId":"`+candidateID+`","displayName":"VOXI primary","accessMode":"host-vowifi-only"}`)
+	added := request(http.MethodPost, "/api/v1/lines", `{"candidateId":"`+candidateID+`","displayName":"VOXI primary"}`)
 	if added.Code != http.StatusCreated || manager.addedID != candidateID || manager.addedName != "VOXI primary" ||
-		manager.addedMode != accessmode.HostVoWiFiOnly || added.Header().Get("Location") != "/api/v1/lines/"+testBusinessLineID {
-		t.Fatalf("add status=%d body=%s call=(%q,%q,%q)", added.Code, added.Body.String(), manager.addedID, manager.addedName, manager.addedMode)
+		added.Header().Get("Location") != "/api/v1/lines/"+testBusinessLineID {
+		t.Fatalf("add status=%d body=%s call=(%q,%q)", added.Code, added.Body.String(), manager.addedID, manager.addedName)
 	}
-	updated := request(http.MethodPut, "/api/v1/lines/"+testBusinessLineID, `{"displayName":"Backup","accessMode":"cellular-native"}`)
-	if updated.Code != http.StatusOK || manager.updatedID != testBusinessLineID || manager.updatedName != "Backup" ||
-		manager.updatedMode != accessmode.CellularNative {
-		t.Fatalf("update status=%d body=%s call=(%q,%q,%q)", updated.Code, updated.Body.String(), manager.updatedID, manager.updatedName, manager.updatedMode)
+	updated := request(http.MethodPut, "/api/v1/lines/"+testBusinessLineID, `{"displayName":"Backup"}`)
+	if updated.Code != http.StatusOK || manager.updatedID != testBusinessLineID || manager.updatedName != "Backup" {
+		t.Fatalf("update status=%d body=%s call=(%q,%q)", updated.Code, updated.Body.String(), manager.updatedID, manager.updatedName)
+	}
+	legacyCreate := request(http.MethodPost, "/api/v1/lines", `{"candidateId":"`+candidateID+`","displayName":"Legacy","accessMode":"host-vowifi-only"}`)
+	if legacyCreate.Code != http.StatusBadRequest {
+		t.Fatalf("legacy create status=%d body=%s", legacyCreate.Code, legacyCreate.Body.String())
+	}
+	rebind := request(http.MethodPut, "/api/v1/lines/"+testBusinessLineID, `{"displayName":"Rebind","managedModemId":"`+modemID+`"}`)
+	if rebind.Code != http.StatusBadRequest || manager.updatedName != "Backup" {
+		t.Fatalf("rebind status=%d body=%s update=%q", rebind.Code, rebind.Body.String(), manager.updatedName)
 	}
 }
 
@@ -401,6 +396,7 @@ func TestVoWiFiHTTPContractListsAndMutatesOnlyTypedState(t *testing.T) {
 		CountryCode: "GB", CountryName: "英国", Attempt: 1,
 		RegisteredAt:  time.Date(2026, 8, 5, 5, 7, 41, 0, time.FixedZone("CST", 8*60*60)),
 		NextRefreshAt: time.Date(2026, 8, 5, 5, 32, 41, 0, time.FixedZone("CST", 8*60*60)),
+		PhoneNumber:   "+447700900123",
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := New(health.New(fixedStateStore("ready"), "hardware"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
@@ -411,6 +407,7 @@ func TestVoWiFiHTTPContractListsAndMutatesOnlyTypedState(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"online"`) ||
+		!strings.Contains(response.Body.String(), `"phoneNumber":"+447700900123"`) ||
 		strings.Contains(response.Body.String(), "pid") || strings.Contains(response.Body.String(), "pcscf") || strings.Contains(response.Body.String(), "innerAddress") {
 		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -453,7 +450,7 @@ func TestSystemHealthStartsFailClosedAndUninitialized(t *testing.T) {
 	}
 	defer stores.Close()
 
-	handler := newTestHandler(stores, inventory.NewSimulator(stores))
+	handler := newTestHandler(stores, inventory.NewSimulator())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/health", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -480,9 +477,6 @@ func TestSystemHealthStartsFailClosedAndUninitialized(t *testing.T) {
 	}
 	if body.InstallationState != openapi.InstallationState("uninitialized") {
 		t.Fatalf("installationState = %q", body.InstallationState)
-	}
-	if body.RfSafety != openapi.RFSafetyState("off") {
-		t.Fatalf("rfSafety = %q", body.RfSafety)
 	}
 	if body.DatabaseCount != 5 {
 		t.Fatalf("databaseCount = %d", body.DatabaseCount)
@@ -703,15 +697,6 @@ func TestSetupAdministratorRequiresSessionAndPersistsArgon2idCredential(t *testi
 		t.Fatalf("setup topology = %#v", setupTopology)
 	}
 
-	accessModeRequest := httptest.NewRequest(http.MethodPut, "/api/v1/setup/subscription-profiles/simulator-profile-1/access-mode", strings.NewReader(`{"accessMode":"hold-rf-off"}`))
-	accessModeRequest.Host = "127.0.0.1:8080"
-	accessModeRequest.Header.Set("Content-Type", "application/json")
-	accessModeRequest.AddCookie(cookie)
-	accessModeResponse := httptest.NewRecorder()
-	handler.ServeHTTP(accessModeResponse, accessModeRequest)
-	if accessModeResponse.Code != http.StatusOK {
-		t.Fatalf("setup access mode status = %d, body = %s", accessModeResponse.Code, accessModeResponse.Body.String())
-	}
 	hardwareRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/hardware/confirm", nil)
 	hardwareRequest.Host = "127.0.0.1:8080"
 	hardwareRequest.AddCookie(cookie)
@@ -748,30 +733,14 @@ func TestSetupAdministratorRequiresSessionAndPersistsArgon2idCredential(t *testi
 }
 
 func TestBusinessAPIsStayLockedUntilSetupCompletes(t *testing.T) {
-	accessModes := testAccessModeStore{}
-	handler := newTestHandler(
-		fixedStateStore(setupapp.InstallationUninitialized),
-		inventory.NewSimulator(accessModes),
-	)
-	for _, test := range []struct {
-		method string
-		path   string
-		body   string
-	}{
-		{method: http.MethodGet, path: "/api/v1/inventory"},
-		{
-			method: http.MethodPut,
-			path:   "/api/v1/subscription-profiles/simulator-profile-1/access-mode",
-			body:   `{"accessMode":"cellular-native"}`,
-		},
-	} {
-		request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+	handler := newTestHandler(fixedStateStore(setupapp.InstallationUninitialized), inventory.NewSimulator())
+	for _, path := range []string{"/api/v1/inventory", "/api/v1/lines"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Host = "127.0.0.1:8080"
-		request.Header.Set("Content-Type", "application/json")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusConflict {
-			t.Errorf("%s %s status = %d, body = %s", test.method, test.path, response.Code, response.Body.String())
+			t.Errorf("GET %s status = %d, body = %s", path, response.Code, response.Body.String())
 			continue
 		}
 		var body openapi.ApiError
@@ -779,11 +748,8 @@ func TestBusinessAPIsStayLockedUntilSetupCompletes(t *testing.T) {
 			t.Fatal(err)
 		}
 		if body.Code != "INSTANCE_NOT_INITIALIZED" || body.Retryable {
-			t.Errorf("%s %s body = %#v", test.method, test.path, body)
+			t.Errorf("GET %s body = %#v", path, body)
 		}
-	}
-	if len(accessModes) != 0 {
-		t.Fatalf("locked mutation changed access modes: %#v", accessModes)
 	}
 }
 
@@ -828,7 +794,7 @@ func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 	handler := Router(New(
 		health.New(stores, "simulator"),
 		setupapp.New(stores, stores),
-		inventory.NewSimulator(stores),
+		inventory.NewSimulator(),
 		logger,
 		authService,
 		nil,
@@ -871,7 +837,7 @@ func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 		t.Fatalf("authenticated inventory status = %d, body = %s", inventoryResponse.Code, inventoryResponse.Body.String())
 	}
 
-	mutationRequest := httptest.NewRequest(http.MethodPut, "/api/v1/subscription-profiles/simulator-profile-1/access-mode", strings.NewReader(`{"accessMode":"hold-rf-off"}`))
+	mutationRequest := httptest.NewRequest(http.MethodPost, "/api/v1/lines", strings.NewReader(`{"candidateId":"line-candidate-0123456789abcdef0123456789abcdef","displayName":"Line"}`))
 	mutationRequest.Host = "127.0.0.1:8080"
 	mutationRequest.Header.Set("Content-Type", "application/json")
 	mutationRequest.AddCookie(sessionCookie)
@@ -913,8 +879,8 @@ func TestInventoryReturnsDynamicDeviceAndLineSummaries(t *testing.T) {
 	if body.Lines[0].PhysicalDeviceId != body.Devices[0].Id || body.Lines[0].SubscriptionProfileId != "simulator-profile-1" {
 		t.Fatalf("line identity = %#v, device = %#v", body.Lines[0], body.Devices[0])
 	}
-	if body.Lines[0].AccessModeConfigured || body.Lines[0].AccessMode != openapi.AccessMode("hold-rf-off") || body.Lines[0].RfSafety != openapi.RFSafetyState("off") {
-		t.Fatalf("unsafe simulator line = %#v", body.Lines[0])
+	if body.Lines[0].State != openapi.LineStateReady {
+		t.Fatalf("simulator line = %#v", body.Lines[0])
 	}
 }
 
@@ -928,10 +894,7 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if err := stores.PutSubscriptionProfileAccessMode(ctx, "simulator-profile-1", accessmode.CellularNative); err != nil {
-		t.Fatal(err)
-	}
-	inventoryService := inventory.NewSimulator(stores)
+	inventoryService := inventory.NewSimulator()
 	const simulatorAgentInstanceID = "01234567-89ab-cdef-0123-456789abcdef"
 	simulatorClient, err := agentapi.NewLocalSMSClient(simulatorAgentInstanceID, agentapi.NewDefaultSimulatorSMSBackend())
 	if err != nil {
@@ -1059,7 +1022,7 @@ func TestContactsCRUDUsesBusinessAuthCSRFAndDurableStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	raw := Router(New(health.New(stores, "simulator"), setupapp.New(stores, stores), inventory.NewSimulator(stores), logger, acceptingAuthenticator{}, nil, contacts))
+	raw := Router(New(health.New(stores, "simulator"), setupapp.New(stores, stores), inventory.NewSimulator(), logger, acceptingAuthenticator{}, nil, contacts))
 
 	unauthorized := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/contacts", nil)
@@ -1115,10 +1078,7 @@ func TestSimulatorCallHTTPFlowRejectsEmergencyAndPersistsHistory(t *testing.T) {
 	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if err := stores.PutSubscriptionProfileAccessMode(ctx, "simulator-profile-1", accessmode.CellularNative); err != nil {
-		t.Fatal(err)
-	}
-	lines := inventory.NewSimulator(stores)
+	lines := inventory.NewSimulator()
 	service, err := callapp.New(ctx, stores, testBusinessLineSource{source: lines})
 	if err != nil {
 		t.Fatal(err)
@@ -1181,88 +1141,9 @@ func TestHardwareTopologyReturnsRelationalResourceModel(t *testing.T) {
 	}
 	profile := body.SubscriptionProfiles[0]
 	line := body.Lines[0]
-	if profile.State != openapi.SubscriptionProfileStateActive || profile.AccessModeConfigured || line.SubscriptionProfileId != profile.Id ||
-		line.ResourceGroupId != body.ResourceGroups[0].Id || line.RfSafety != openapi.RFSafetyStateOff {
+	if profile.State != openapi.SubscriptionProfileStateActive || line.SubscriptionProfileId != profile.Id ||
+		line.ResourceGroupId != body.ResourceGroups[0].Id || line.State != openapi.LineStateReady {
 		t.Fatalf("topology profile=%#v line=%#v", profile, line)
-	}
-}
-
-func TestPutAccessModePersistsAndReturnsUpdatedInventory(t *testing.T) {
-	stores, err := sqlitestore.OpenSet(context.Background(), filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stores.Close()
-
-	inventoryService := inventory.NewSimulator(stores)
-	initial, err := inventoryService.Snapshot(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), inventoryService)
-	request := httptest.NewRequest(
-		http.MethodPut,
-		"/api/v1/subscription-profiles/simulator-profile-1/access-mode",
-		strings.NewReader(`{"accessMode":"host-vowifi-only"}`),
-	)
-	request.Host = "127.0.0.1:8080"
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	var body openapi.InventoryResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Revision == initial.Revision {
-		t.Fatalf("access-mode update did not change inventory revision %q", body.Revision)
-	}
-	line := body.Lines[0]
-	if !line.AccessModeConfigured || line.AccessMode != openapi.HostVowifiOnly || line.State != openapi.LineStateReady || line.RfSafety != openapi.RFSafetyState("off") {
-		t.Fatalf("updated line = %#v", line)
-	}
-	mode, configured, err := stores.SubscriptionProfileAccessMode(context.Background(), "simulator-profile-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !configured || mode != accessmode.HostVoWiFiOnly {
-		t.Fatalf("stored mode = %q, configured = %v", mode, configured)
-	}
-}
-
-func TestPutAccessModeReturnsStableClientErrors(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), newTestInventory())
-	for _, test := range []struct {
-		name    string
-		profile string
-		body    string
-		status  int
-		code    string
-	}{
-		{name: "invalid mode", profile: "simulator-profile-1", body: `{"accessMode":"automatic"}`, status: http.StatusBadRequest, code: "ACCESS_MODE_REQUEST_INVALID"},
-		{name: "unknown field", profile: "simulator-profile-1", body: `{"accessMode":"hold-rf-off","fallback":true}`, status: http.StatusBadRequest, code: "ACCESS_MODE_REQUEST_INVALID"},
-		{name: "missing profile", profile: "missing-profile", body: `{"accessMode":"hold-rf-off"}`, status: http.StatusNotFound, code: "SUBSCRIPTION_PROFILE_NOT_FOUND"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPut, "/api/v1/subscription-profiles/"+test.profile+"/access-mode", strings.NewReader(test.body))
-			request.Host = "127.0.0.1:8080"
-			request.Header.Set("Content-Type", "application/json")
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			if response.Code != test.status {
-				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-			}
-			var body openapi.ApiError
-			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if body.Code != test.code || body.Retryable {
-				t.Fatalf("error body = %#v", body)
-			}
-		})
 	}
 }
 

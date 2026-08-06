@@ -10,17 +10,16 @@ import (
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	domain "github.com/leonfox28/simplus/internal/domain/lineegress"
 	mihomodomain "github.com/leonfox28/simplus/internal/domain/mihomo"
 )
 
 var (
-	ErrInvalidBinding = errors.New("line egress binding is invalid")
-	ErrLineNotFound   = errors.New("line was not found")
-	ErrLineMode       = errors.New("line is not configured for Host VoWiFi")
-	lineIDPattern     = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
-	countryPattern    = regexp.MustCompile(`^[A-Z]{2}$`)
+	ErrInvalidBinding  = errors.New("line egress binding is invalid")
+	ErrLineNotFound    = errors.New("line was not found")
+	ErrLineUnsupported = errors.New("line does not support Host VoWiFi")
+	lineIDPattern      = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
+	countryPattern     = regexp.MustCompile(`^[A-Z]{2}$`)
 )
 
 type Store interface {
@@ -71,15 +70,21 @@ func (service *Service) List(ctx context.Context) ([]View, error) {
 	for _, binding := range stored {
 		byLine[binding.LineID] = binding
 	}
-	environment, err := service.environment(ctx)
-	if err != nil {
-		return nil, err
+	environment := runtimeEnvironment{countryNames: map[string]string{}}
+	for _, line := range topology.Lines {
+		if byLine[line.ID].Mode == domain.ModeMihomoCountry {
+			environment, err = service.environment(ctx)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
 	}
 	views := make([]View, 0, len(topology.Lines))
 	for _, line := range topology.Lines {
 		binding, found := byLine[line.ID]
 		if !found {
-			binding = domain.Binding{LineID: line.ID, Mode: domain.ModeDirect}
+			binding = domain.Binding{LineID: line.ID, Mode: domain.ModeUnconfigured}
 		}
 		views = append(views, view(line, binding, environment))
 	}
@@ -110,15 +115,18 @@ func (service *Service) Put(ctx context.Context, lineID, mode, countryCode strin
 	if !found {
 		return View{}, ErrLineNotFound
 	}
-	if selected.AccessMode != accessmode.HostVoWiFiOnly {
-		return View{}, ErrLineMode
+	if !selected.Capabilities.HostVoWiFiAuth {
+		return View{}, ErrLineUnsupported
 	}
-	environment, err := service.environment(ctx)
-	if err != nil {
-		return View{}, err
-	}
-	if mode == domain.ModeMihomoCountry && environment.countryNames[countryCode] == "" {
-		return View{}, ErrInvalidBinding
+	environment := runtimeEnvironment{countryNames: map[string]string{}}
+	if mode == domain.ModeMihomoCountry {
+		environment, err = service.environment(ctx)
+		if err != nil {
+			return View{}, err
+		}
+		if environment.countryNames[countryCode] == "" {
+			return View{}, ErrInvalidBinding
+		}
 	}
 	binding := domain.Binding{LineID: lineID, Mode: mode, CountryCode: countryCode, UpdatedAt: service.Now().UTC()}
 	if err := service.Store.UpsertLineEgressBinding(ctx, binding); err != nil {
@@ -161,8 +169,12 @@ func (service *Service) environment(ctx context.Context) (runtimeEnvironment, er
 
 func view(line inventory.Line, binding domain.Binding, environment runtimeEnvironment) View {
 	result := View{LineID: line.ID, Mode: binding.Mode, CountryCode: binding.CountryCode}
-	if line.AccessMode != accessmode.HostVoWiFiOnly {
-		result.ReadinessReason = "LINE_NOT_HOST_VOWIFI"
+	if !line.Capabilities.HostVoWiFiAuth {
+		result.ReadinessReason = "LINE_VOWIFI_UNSUPPORTED"
+		return result
+	}
+	if binding.Mode == domain.ModeUnconfigured {
+		result.ReadinessReason = "EGRESS_NOT_CONFIGURED"
 		return result
 	}
 	if binding.Mode == domain.ModeDirect {

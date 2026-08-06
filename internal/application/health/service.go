@@ -18,7 +18,6 @@ type Snapshot struct {
 	Version           string
 	APIVersion        string
 	InstallationState string
-	RFSafety          string
 	Backend           string
 	DatabaseCount     int
 }
@@ -45,7 +44,6 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 		Version:           buildinfo.Current().Version,
 		APIVersion:        APIVersion,
 		InstallationState: state,
-		RFSafety:          "off",
 		Backend:           service.backend,
 		DatabaseCount:     5,
 	}, nil

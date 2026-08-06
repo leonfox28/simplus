@@ -96,7 +96,7 @@ bash scripts/dev/test-simplus-simaka-c.sh
 
 自定义 strongSwan 插件必须针对主机实际安装的版本与 build tree 构建。一次性 runner 只接受内部固定路径和类型化输入；节点配置必须为 root-owned mode `0600`，不得打印或提交。
 
-正式安装后的日常路径不运行一次性 runner。管理员在线路页保存 Host VoWiFi 接入方式和 `direct` 或 Mihomo 国家出口，再使用“激活 VoWiFi”与“停用 VoWiFi”。服务只恢复此前明确保存的激活意图。
+正式安装后的日常路径不运行一次性 runner。管理员在线路页为具备 Host VoWiFi 鉴权能力的 Line 明确保存 `direct` 或 Mihomo 国家出口，再使用“激活 VoWiFi”与“停用 VoWiFi”。新 Line 的未配置出口不能激活；服务只恢复此前明确保存的激活意图。
 
 出现连接、注册或刷新故障时按 [`troubleshooting.md`](troubleshooting.md) 的稳定错误码和复查顺序定位。公开问题中只能提供脱敏状态，不能附加真实订阅、节点、内网拓扑、SIM 身份、SIP 鉴权头或原始日志。
 

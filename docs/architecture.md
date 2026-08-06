@@ -58,9 +58,9 @@ simplusd typed SMS/Call/eUICC API
 
 动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。添加对话框可以为人工辨认显示本次扫描的相对 USB 拓扑地址、VID:PID 和 USB Serial 每实例 HMAC 的短标识；这些字段不参与业务分支、不成为持久绑定，也不包含原始 IMEI、`/dev` 节点或 sysfs 绝对路径。USB 描述符的原始 Serial 被产品定义为可直接显示的模组元数据：Agent 对它做长度和控制字符限制，已添加模组在线时由普通列表直接展示，但它不落入 Managed Modem 记录、不参与绑定或业务控制；对应的每实例 HMAC 指纹仍只作辅助观察。普通 probe、inventory、模组列表和数据库只以 HMAC 处理 IMEI；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹。管理员在模组页点击显示按钮时，可以通过独立的鉴权 POST 实时读取当前在线模组的 IMEI：请求以 Managed Modem ID 进入，经过当前 Agent/快照/设备代际约束并再次核对持久 IMEI 指纹，响应固定为 `no-store`，原值不落库、不进入普通日志，隐藏或刷新后从页面状态清除。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
 
-Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称、接入方式及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md)。
+Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。射频、Host VoWiFi 意图、`direct`/Mihomo 国家出口及短信/电话 transport 都不是 Line 身份的一部分，各自通过独立配置与类型化能力工作。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md) 与 [`0019`](decisions/0019-line-identity-and-communication-paths.md)。
 
-能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。当前只有 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`：六者分别声明型号支持的只读综合探测、读取 IMEI、读取主卡槽插入状态、读取用于稳定 Line 绑定的 ICCID 脱敏身份、提供统一 SIM/IMS 身份与 AKA challenge-response，以及把布尔 RF 目标映射为固定动作并要求新鲜读回。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务，后续只在接入真实 transport 时增加最小接口；现有 QDC507 `SMSAdapter` 只是未装配到 production 的候选 transport。端点路径与 AT/QMI 命令始终留在 Agent 内部。
+能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。当前只有 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`：六者分别声明型号支持的只读综合探测、读取 IMEI、读取主卡槽插入状态、读取用于稳定 Line 绑定的 ICCID 脱敏身份及活动 Profile 的有界归属运营商元数据、提供统一 SIM/IMS 身份与 AKA challenge-response，以及把布尔 RF 目标映射为固定动作并要求新鲜读回。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务，后续只在接入真实 transport 时增加最小接口；现有 QDC507 `SMSAdapter` 只是未装配到 production 的候选 transport。端点路径与 AT/QMI 命令始终留在 Agent 内部。
 
 `SIMAuthAdapter` 返回的 IMS Home Domain 必须来自当前 SIM，而不是型号或运营商常量。ML307A 先使用完整、内部一致的 ISIM 身份；ISIM 不可用时，按 [3GPP TS 23.003](https://www.etsi.org/deliver/etsi_ts/123000_123099/123003/15.10.00_60/ts_123003v151000p.pdf) 的 IMSI 派生格式，并读取 [3GPP TS 31.102](https://www.etsi.org/deliver/etsi_ts/131100_131199/131102/19.04.00_60/ts_131102v190400p.pdf) EF_AD 给出的两位或三位 MNC 长度，构造 private/public identity 与 Home Domain。不得维护运营商映射表、根据 IMSI 前缀猜 MNC 长度，或在读取失败时退回某个已知运营商；缺失、为零或非法的 MNC 长度一律 fail closed。派生结果沿类型化边界进入 SIP REGISTER 与 challenge realm 校验。
 
@@ -107,7 +107,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - React 19 + Ant Design Pro 单页应用，使用 Umi Max 路由和 ProLayout；
 - 登录、基础初始化以及左侧导航的模组、线路、短信、语音、Mihomo、通知和系统设置页面均使用同一套管理后台组件；
 - 模组页只展示管理员已添加的模组，主表固定为型号、USB Serial 序列号、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、支持状态、类型化不可添加原因和能力；
-- 线路页只展示管理员创建的持久 Line；“添加线路”从已添加模组的当前 SIM/Profile 候选创建绑定，并组合维护接入方式、`direct`/Mihomo 国家出口和 Host VoWiFi 激活意图；
+- 线路页只展示管理员创建的持久 Line；“添加线路”以单选表格展示所有已添加模组的当前 SIM/Profile 候选及类型化不可添加原因，创建只保存不可改绑的身份和名称；主表直接显示 IMS 注册明确返回的 E.164 手机号，无法确认时显示未获取；配置抽屉分别维护名称、显式 `direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，不出现 RF 控制；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
 - 不把 Agent 协议、AT 指令或内部 fencing 模型泄漏到 UI。
 
@@ -116,15 +116,15 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - `simplus-netd` 同时实现 Mihomo 生命周期和固定的 per-Line Host VoWiFi `start/stop/status`；启动协议只接受稳定 Line ID、由 Line 层解析的当前不透明硬件目标、`direct`/`mihomo-country` 和国家码，不接受 shell、设备路径、网络命令或任意配置参数；
 - production 只有 root `simplus-netd` 拥有创建 namespace、veth、策略路由、nftables 和 XFRM 所需权限；`simplusd` 与 Web 始终没有网络管理 capability；
 - Mihomo supervisor 只接受已安装 core 和每订阅不可变生成配置的固定路径形状，并把 listener bind error 视为启动失败；
-- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；
+- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；REGISTER `P-Associated-URI` 中明确的 `tel:+...` 或 `sip:+...@...` 可以规范化为运行态手机号，其他 IMS 身份不得猜测转换，状态失效时号码随之清空；
 - 同一 worker 还独占 SMS over IMS 的受保护 SIP socket、Service-Route、RP reference、异步出站提交事务与待确认入站消息；root-only worker socket 只提供固定的发送、入站 list/read/acknowledge、出站报告 list/acknowledge 操作，管理进程无法提交 SIP、RPDU、APDU、设备路径或网络参数；提交报告优先按 `In-Reply-To` 并始终按仍占用的 RP reference 关联原 SIP transaction；
 - Line 应用层先把稳定业务 Line 唯一解析到当前硬件目标；worker 再用该不透明目标检查具备 `sim-auth` 的就绪 SIM、identity fence、无活动呼叫与出口，并维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连。它不检查或修改 RF，停用、进程退出及服务重启都清理其临时网络对象；
 - core SQLite 只保存管理员的 `desired_active` 意图，实时 online 状态只来自 `simplus-netd`；`simplusd` 启动和每十秒协调二者；
 - 权限与协议决策见 [`0008`](decisions/0008-mihomo-tproxy-privilege-separation.md)、[`0012`](decisions/0012-web-managed-vowifi-runtime.md) 和 [`0016`](decisions/0016-vowifi-sms-over-ims.md)。
 - Zashboard `v3.6.0` 是安装到 Mihomo working directory 的固定摘要、MIT 许可静态产物，没有独立进程或 systemd unit，由运行中的 core 通过 `external-ui` 直接托管；controller 的监听范围跟随管理后台，production 为 `0.0.0.0:19090`，并使用实例独立强密码，见 [`0010`](decisions/0010-zashboard-external-ui.md) 与 [`0015`](decisions/0015-zashboard-wildcard-controller.md)。
-- 订阅节点的内部稳定 ID 仅用于持久化和 Line Binding；生成 Mihomo 配置时必须保留上游 `name`，重名节点应拒绝转换而不是暗中改名。
+- 订阅节点的内部稳定 ID 只用于订阅节点持久化和 API 展示；Line 不绑定节点 ID，只保存显式直连或国家选择。生成 Mihomo 配置时必须保留上游 `name`，重名节点应拒绝转换而不是暗中改名。
 - 订阅本身使用随机 128-bit `subscription_...` ID 作为稳定唯一身份；显示名称只供用户识别，可重复且可编辑，新建时默认为由内部随机 ID 派生的 6 位易读标识。
-- 当前订阅按实际国家预生成固定 localhost TPROXY listener。真实 Line 只绑定 `direct` 或一个国家 listener；该绑定不进入订阅 YAML，因此增删改 Line 不触发 Mihomo 配置重写或重启。
+- 当前订阅按实际国家预生成固定 localhost TPROXY listener。新 Line 的出口固定从 `unconfigured` 开始，只有管理员显式选择后才保存 `direct` 或一个国家 listener；该绑定不进入订阅 YAML，因此增删改 Line 不触发 Mihomo 配置重写或重启。`unconfigured` 只会出现在读取响应中，不能作为写入模式，也不能激活 Host VoWiFi。
 
 ### 分阶段启用的组件
 
@@ -139,7 +139,7 @@ SIM/eUICC auth <-> Host ePDG/IKE + IMS AKA/Gm
 Host VoWiFi packets -> per-Line network boundary -> direct or Mihomo -> ePDG/P-CSCF
 ```
 
-ML307A 与受控测试 Profile 的首个真实纵切已按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 通过：第一次 IKE_AUTH 用 `IDr=ims` 选择 IMS APN，ePDG EAP-AKA 建立外层 CHILD SA；初始 SIP REGISTER 取得 IMS AKA challenge 后，Host 以 SIM 返回的 CK/IK 创建两对 Gm transport-mode ESP SA，并把 Gm 与 ePDG template 组成双层 XFRM bundle。该路径随后按 [`0012`](decisions/0012-web-managed-vowifi-runtime.md) 迁入 `simplus-netd` 长生命周期和 Web 线路页，仍固定保持 RF Off、fail closed、脱敏状态和全量异常清理。公开证据等级和未验证边界见 [`compatibility.md`](compatibility.md)。
+ML307A 与受控测试 Profile 的首个真实纵切已按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 通过：第一次 IKE_AUTH 用 `IDr=ims` 选择 IMS APN，ePDG EAP-AKA 建立外层 CHILD SA；初始 SIP REGISTER 取得 IMS AKA challenge 后，Host 以 SIM 返回的 CK/IK 创建两对 Gm transport-mode ESP SA，并把 Gm 与 ePDG template 组成双层 XFRM bundle。该路径随后按 [`0012`](decisions/0012-web-managed-vowifi-runtime.md) 迁入 `simplus-netd` 长生命周期和 Web 线路页，并保持 fail closed、脱敏状态和全量异常清理。产品运行时已按 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md) 与 [`0019`](decisions/0019-line-identity-and-communication-paths.md) 与 RF 解耦；公开证据仍只覆盖 RF Off，证据等级和未验证边界见 [`compatibility.md`](compatibility.md)。
 
 动态 IMS Home Domain 只消除了 SIM 身份与 SIP 层的运营商硬编码，不等于完整的多运营商 VoWiFi 支持。当前 ePDG FQDN、IKE responder identity 和已验证远端集合仍属于首个已验证运营商的专用接入 profile；在它们也改为由 SIM/标准发现与独立 HIL 驱动前，其他运营商必须保持未验证和 fail closed。
 

@@ -170,6 +170,172 @@ INSERT INTO sms_messages (
 	}
 }
 
+func TestCoreV21UpgradeSeparatesLineIdentityFromAccessPath(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(root, CoreDataset+".sqlite3")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	goose.SetLogger(goose.NopLogger())
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/core", 21)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 6, 8, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	const modemID = "modem_AQEBAQEBAQEBAQEBAQEBAQ"
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO managed_modems (
+  id, legacy_hardware_device_id, equipment_identity_fingerprint, usb_serial_fingerprint,
+  display_name, model, transport, capability_mask, created_at_utc, updated_at_utc
+) VALUES (?, '', ?, '', 'ML307A', 'ML307A', 'usb', 0, ?, ?)`, modemID, strings.Repeat("a", 64), now, now); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	lines := []struct {
+		id, fingerprint, hint, mode string
+	}{
+		{"line_AQEBAQEBAQEBAQEBAQEBAQ", strings.Repeat("b", 64), "ICCID •••• 0001", "host-vowifi-only"},
+		{"line_AgICAgICAgICAgICAgICAg", strings.Repeat("c", 64), "ICCID •••• 0002", "host-vowifi-only"},
+		{"line_AwMDAwMDAwMDAwMDAwMDAw", strings.Repeat("d", 64), "ICCID •••• 0003", "host-vowifi-only"},
+	}
+	for _, line := range lines {
+		if _, err := database.ExecContext(ctx, `
+INSERT INTO managed_lines (
+  id, managed_modem_id, sim_slot_index, subscription_identity_fingerprint,
+  subscription_display_hint, display_name, access_mode, created_at_utc, updated_at_utc
+) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?)`, line.id, modemID, line.fingerprint, line.hint, line.hint, line.mode, now, now); err != nil {
+			_ = database.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO simulator_access_paths (line_id, mode, mihomo_state)
+VALUES (?, 'mihomo-required', 'failed')`, lines[0].id); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	const subscriptionID = "subscription_AQEBAQEBAQEBAQEBAQEBAQ"
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO mihomo_subscriptions (
+  id, display_name, url_ciphertext, url_plaintext, url_hint, enabled,
+  last_refresh_at_utc, last_refresh_status, node_count, last_error_code,
+  created_at_utc, updated_at_utc
+) VALUES (?, 'Legacy', ?, 'https://example.invalid/subscription', 'example.invalid', 1,
+          ?, 'success', 1, '', ?, ?)`, subscriptionID, make([]byte, 32), now, now, now, now); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO mihomo_egress_profiles (
+  id, display_name, subscription_id, selected_node_id, enabled,
+  created_at_utc, updated_at_utc, selection_type, selected_country_code,
+  source_cidr, line_id
+) VALUES ('egress_AQEBAQEBAQEBAQEBAQEBAQ', 'Legacy JP', ?, '', 1,
+          ?, ?, 'country', 'JP', '', ?)`, subscriptionID, now, now, lines[2].id); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO line_egress_bindings (line_id, mode, country_code, updated_at_utc)
+VALUES (?, 'mihomo-country', 'GB', ?)`, lines[1].id, now); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO vowifi_line_desires (line_id, desired_active, updated_at_utc)
+VALUES (?, 1, ?)`, lines[1].id, now); err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	var accessModeColumns int
+	if err := set.Core.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('managed_lines') WHERE name = 'access_mode'`).Scan(&accessModeColumns); err != nil {
+		t.Fatal(err)
+	}
+	if accessModeColumns != 0 {
+		t.Fatal("managed_lines.access_mode survived the v22 migration")
+	}
+	var legacyTables int
+	if err := set.Core.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'subscription_profile_access_modes'`).Scan(&legacyTables); err != nil {
+		t.Fatal(err)
+	}
+	if legacyTables != 0 {
+		t.Fatal("legacy access-mode table survived the v22 migration")
+	}
+	var legacyAccessPathTables int
+	if err := set.Core.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'simulator_access_paths'`).Scan(&legacyAccessPathTables); err != nil {
+		t.Fatal(err)
+	}
+	if legacyAccessPathTables != 0 {
+		t.Fatal("legacy Simulator access-path table survived the v22 migration")
+	}
+	var legacyMihomoEgressTables int
+	if err := set.Core.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'mihomo_egress_profiles'`).Scan(&legacyMihomoEgressTables); err != nil {
+		t.Fatal(err)
+	}
+	if legacyMihomoEgressTables != 0 {
+		t.Fatal("legacy Mihomo egress-profile table survived the v22 migration")
+	}
+	managedLines, err := set.ListManagedLines(ctx)
+	if err != nil || len(managedLines) != len(lines) {
+		t.Fatalf("managed lines=%#v error=%v", managedLines, err)
+	}
+	for index, record := range managedLines {
+		if record.ID != lines[index].id || record.SubscriptionIdentityFingerprint != lines[index].fingerprint ||
+			record.DisplayName != lines[index].hint || record.SubscriptionDisplayHint != lines[index].hint {
+			t.Fatalf("managed line %d=%#v", index, record)
+		}
+	}
+	bindings, err := set.ListLineEgressBindings(ctx)
+	if err != nil || len(bindings) != 3 {
+		t.Fatalf("bindings=%#v error=%v", bindings, err)
+	}
+	byLine := make(map[string]string, len(bindings))
+	for _, binding := range bindings {
+		byLine[binding.LineID] = binding.Mode + ":" + binding.CountryCode
+	}
+	if byLine[lines[0].id] != "direct:" || byLine[lines[1].id] != "mihomo-country:GB" ||
+		byLine[lines[2].id] != "mihomo-country:JP" {
+		t.Fatalf("migrated bindings=%#v", byLine)
+	}
+	desires, err := set.ListVoWiFiDesires(ctx)
+	if err != nil || len(desires) != 1 || !desires[0].DesiredActive || desires[0].LineID != lines[1].id {
+		t.Fatalf("migrated desires=%#v error=%v", desires, err)
+	}
+	rows, err := set.Core.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("v22 migration left a foreign-key violation")
+	}
+}
+
 func TestOpenSetRejectsCorruptDatabaseAtIntegrityPreflight(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "db")
 	set, err := OpenSet(context.Background(), root)

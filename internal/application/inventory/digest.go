@@ -4,10 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 )
-
-var ErrSetupTopologyUnsafe = errors.New("hardware topology is not safe for setup completion")
 
 type setupDigestTopology struct {
 	Generation           uint64
@@ -39,15 +36,5 @@ func Revision(topology Topology) (string, error) {
 }
 
 func SetupDigest(topology Topology) (string, error) {
-	for _, profile := range topology.SubscriptionProfiles {
-		if !profile.AccessModeConfigured || !profile.AccessMode.Valid() {
-			return "", ErrSetupTopologyUnsafe
-		}
-	}
-	for _, line := range topology.Lines {
-		if !line.AccessModeConfigured || !line.AccessMode.Valid() || line.RFSafety != RFSafetyOff {
-			return "", ErrSetupTopologyUnsafe
-		}
-	}
 	return Revision(topology)
 }

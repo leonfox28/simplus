@@ -29,6 +29,16 @@ type IdentityPseudonymizer interface {
 	Pseudonym(string, []byte) (string, error)
 }
 
+// SIMProfileIdentity contains only bounded, non-secret metadata needed to
+// identify and describe the currently active SIM/eSIM profile. Raw ICCID and
+// IMSI values never cross the adapter boundary.
+type SIMProfileIdentity struct {
+	Fingerprint      string
+	DisplayHint      string
+	HomeOperatorName string
+	HomeOperatorCode string
+}
+
 // Adapter contains only model-specific discovery facts that are safe to use
 // before a business driver is enabled. SMS, call, and eUICC drivers are added
 // as separate capabilities after their model-specific behavior is verified.
@@ -72,10 +82,11 @@ type SIMPresenceAdapter interface {
 
 // SIMIdentityAdapter is separate from presence and authentication: Line
 // binding needs a stable SIM identity, while a card may be present without
-// being ready for identity access or network authentication.
+// being ready for identity access or network authentication. It may also
+// return bounded home-operator metadata derived entirely inside the Agent.
 type SIMIdentityAdapter interface {
 	Adapter
-	ReadSIMIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (string, string, error)
+	ReadSIMIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (SIMProfileIdentity, error)
 }
 
 // RFControlAdapter describes model-specific runtime RF transitions. Commands

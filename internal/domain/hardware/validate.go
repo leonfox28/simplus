@@ -145,7 +145,8 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 	profileFingerprints := make(map[string]string, len(snapshot.SubscriptionProfiles))
 	for _, profile := range snapshot.SubscriptionProfiles {
 		if !validID(profile.ID) || !validID(profile.SIMMediaID) || !validLabel(profile.DisplayName) || !validEntityGeneration(profile.Generation, snapshot.Generation) ||
-			!oneOf(profile.State, ProfileActive, ProfileInactive, ProfileLocked) || !validIdentity(MediaIdentityKnown, profile.IdentityFingerprint, profile.DisplayIdentityHint) {
+			!oneOf(profile.State, ProfileActive, ProfileInactive, ProfileLocked) || !validIdentity(MediaIdentityKnown, profile.IdentityFingerprint, profile.DisplayIdentityHint) ||
+			!validHomeOperator(profile.HomeOperatorName, profile.HomeOperatorCode) {
 			return Snapshot{}, ErrInvalidSnapshot
 		}
 		if _, present := media[profile.SIMMediaID]; !present {
@@ -328,6 +329,27 @@ func validIdentity(state, fingerprint, hint string) bool {
 		return fingerprint == ""
 	}
 	return fingerprintPattern.MatchString(fingerprint)
+}
+
+func validHomeOperator(name, code string) bool {
+	if name != "" && (!validLabel(name) || len(name) > 64) {
+		return false
+	}
+	if code == "" {
+		return true
+	}
+	if len(code) != 6 && len(code) != 7 || code[3] != '-' {
+		return false
+	}
+	for index, character := range code {
+		if index == 3 {
+			continue
+		}
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func oneOf(value string, allowed ...string) bool {

@@ -79,6 +79,33 @@ func TestIMSRefreshErrorsMapToSafeStages(t *testing.T) {
 	}
 }
 
+func TestWorkerEventAcceptsOnlyOnlineE164PhoneNumber(t *testing.T) {
+	valid := workerEvent{
+		LineID: testManagedLineID, State: StateOnline, Stage: "REGISTERED", Online: true,
+		PhoneNumber: "+447700900123", Attempt: 1,
+	}
+	if !validWorkerEvent(valid, testManagedLineID) {
+		t.Fatal("valid online phone number was rejected")
+	}
+	privateIdentity := valid
+	privateIdentity.PhoneNumber = "234150123456789"
+	tooLong := valid
+	tooLong.PhoneNumber = "+1234567890123456"
+	offline := valid
+	offline.State, offline.Online = StateReconnecting, false
+	for name, event := range map[string]workerEvent{
+		"private identity": privateIdentity,
+		"too long":         tooLong,
+		"offline":          offline,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if validWorkerEvent(event, testManagedLineID) {
+				t.Fatal("invalid phone number event was accepted")
+			}
+		})
+	}
+}
+
 func TestStrongSwanTraceReportsFurthestSafeStage(t *testing.T) {
 	trace := &strongSwanTrace{}
 	trace.observe("generating IKE_SA_INIT request 0")

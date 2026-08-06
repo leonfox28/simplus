@@ -263,6 +263,8 @@ type SIMObservation struct {
 	AttemptsSource      string `json:"attemptsSource,omitempty"`
 	IdentityFingerprint string `json:"identityFingerprint,omitempty"`
 	DisplayIdentityHint string `json:"displayIdentityHint,omitempty"`
+	HomeOperatorName    string `json:"homeOperatorName,omitempty"`
+	HomeOperatorCode    string `json:"homeOperatorCode,omitempty"`
 }
 
 type SignalObservation struct {

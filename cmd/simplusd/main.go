@@ -16,7 +16,6 @@ import (
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/api/httpapi"
-	"github.com/leonfox28/simplus/internal/application/accesspath"
 	"github.com/leonfox28/simplus/internal/application/auth"
 	"github.com/leonfox28/simplus/internal/application/calls"
 	"github.com/leonfox28/simplus/internal/application/contacts"
@@ -88,7 +87,7 @@ func run() int {
 	var voWiFiSupervisor *vowifisupervisor.Client
 	switch cfg.Runtime.Backend {
 	case config.BackendSimulator:
-		inventoryService = inventory.NewMultiSimulator(stores)
+		inventoryService = inventory.NewMultiSimulator()
 		const simulatorAgentInstanceID = "01234567-89ab-cdef-0123-456789abcdef"
 		simulatorClient, clientErr := agentapi.NewLocalSMSClient(simulatorAgentInstanceID, agentapi.NewDefaultSimulatorSMSBackend())
 		if clientErr != nil {
@@ -124,7 +123,7 @@ func run() int {
 			_ = stores.Close()
 			return 1
 		}
-		inventoryService = inventory.New(inventory.NewAgentSource(agentClient), stores)
+		inventoryService = inventory.New(inventory.NewAgentSource(agentClient))
 		hardwareAgentClient = agentClient
 		if mihomoSupervisorSocket != "" {
 			voWiFiSupervisor, clientErr = vowifisupervisor.NewClient(mihomoSupervisorSocket)
@@ -180,7 +179,6 @@ func run() int {
 	}
 	var callService *calls.Service
 	var euiccService *euicc.Service
-	var accessPathService *accesspath.Service
 	if cfg.Runtime.Backend == config.BackendSimulator {
 		callService, err = calls.New(ctx, stores, managedLineService)
 		if err != nil {
@@ -194,14 +192,6 @@ func run() int {
 			_ = stores.Close()
 			return 1
 		}
-		accessPathService, err = accesspath.New(stores, managedLineService)
-		if err != nil {
-			logger.Error("access paths initialization failed", "error", err)
-			_ = stores.Close()
-			return 1
-		}
-		messageService.UseAccessPathGuard(accessPathService)
-		callService.UseAccessPathGuard(accessPathService)
 	}
 	notificationService := notificationapp.New(stores, secretKeyring)
 	mihomoRoot := filepath.Join(cfg.Storage.DataRoot, "mihomo")
@@ -234,7 +224,6 @@ func run() int {
 		mihomoRuntimeManager = mihomoapp.NewRuntimeManagerWithSupervisor(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager, mihomoSupervisor)
 	}
 	mihomoSubscriptionService := mihomoapp.NewSubscriptionService(stores, secretKeyring, mihomoConfigManager)
-	mihomoEgressService := mihomoapp.NewEgressService(stores, mihomoCoreManager)
 	lineEgressService := lineegressapp.New(stores, managedLineService, mihomoRuntimeManager)
 	var voWiFiService *vowifiapp.Service
 	if cfg.Runtime.Backend == config.BackendHardware && voWiFiSupervisor != nil {
@@ -259,12 +248,8 @@ func run() int {
 	if euiccService != nil {
 		apiServer = httpapi.WithEUICC(apiServer, euiccService)
 	}
-	if accessPathService != nil {
-		apiServer = httpapi.WithAccessPaths(apiServer, accessPathService)
-	}
 	apiServer = httpapi.WithMihomoCore(apiServer, mihomoCoreManager)
 	apiServer = httpapi.WithMihomoSubscriptions(apiServer, mihomoSubscriptionService)
-	apiServer = httpapi.WithMihomoEgress(apiServer, mihomoEgressService)
 	apiServer = httpapi.WithLineEgress(apiServer, lineEgressService)
 	if voWiFiService != nil {
 		apiServer = httpapi.WithVoWiFi(apiServer, voWiFiService)

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   completeSetup,
-  configureAccessPath,
   addManagedLine,
   activateVoWiFiLine,
   confirmSetupHardware,
@@ -18,7 +17,6 @@ import {
   getSetupStatus,
   getSystemHealth,
   listLineEgressBindings,
-  listAccessPaths,
   listLineCandidates,
   listManagedModems,
   listModemCandidates,
@@ -31,8 +29,6 @@ import {
   putSetupAdministrator,
   putSetupHTTPS,
   putSetupStorage,
-  putSetupSubscriptionProfileAccessMode,
-  putSubscriptionProfileAccessMode,
   readManagedModemIMEI,
   deactivateVoWiFiLine,
   sendSMSMessage,
@@ -185,13 +181,13 @@ describe('setup API client', () => {
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/setup/https/confirm')
   })
 
-  it('uses restricted inventory and access-mode endpoints during setup', async () => {
+  it('uses read-only restricted hardware endpoints during setup', async () => {
     const inventory = {
       generation: 1,
       revision: 'a'.repeat(64),
       observedAt: '2026-08-02T12:00:00Z',
       devices: [{ id: 'simulator-device-1', displayName: 'Simulator', transport: 'simulated', state: 'available', generation: 1, modemFunctionCount: 1, simSlotCount: 1, resourceGroupCount: 1 }],
-      lines: [{ id: 'simulator-line-1', physicalDeviceId: 'simulator-device-1', subscriptionProfileId: 'simulator-profile-1', displayName: 'Simulator line', generation: 1, accessMode: 'hold-rf-off', accessModeConfigured: false, state: 'awaiting-access-mode', rfSafety: 'off' }],
+      lines: [{ id: 'simulator-line-1', physicalDeviceId: 'simulator-device-1', subscriptionProfileId: 'simulator-profile-1', displayName: 'Simulator line', generation: 1, state: 'ready' }],
     }
     const capabilities = {
       simAccess: true,
@@ -217,11 +213,10 @@ describe('setup API client', () => {
       modemFunctions: [{ id: 'simulator-function-1', physicalDeviceId: 'simulator-device-1', displayName: 'Simulator function', backend: 'simulated', generation: 1, capabilities }],
       simSlots: [{ id: 'simulator-slot-1', physicalDeviceId: 'simulator-device-1', index: 0, presence: 'present', activeMediaId: 'simulator-media-1', generation: 1 }],
       simMedia: [{ id: 'simulator-media-1', simSlotId: 'simulator-slot-1', kind: 'removable-euicc', identityState: 'known', displayIdentityHint: 'eUICC •••• 0001', generation: 1 }],
-      subscriptionProfiles: [{ id: 'simulator-profile-1', simMediaId: 'simulator-media-1', displayName: 'Simulator profile 1', state: 'active', displayIdentityHint: 'ICCID •••• 0001', generation: 1, accessMode: 'hold-rf-off', accessModeConfigured: false }],
+      subscriptionProfiles: [{ id: 'simulator-profile-1', simMediaId: 'simulator-media-1', displayName: 'Simulator profile 1', state: 'active', displayIdentityHint: 'ICCID •••• 0001', generation: 1 }],
       resourceGroups: [{ id: 'simulator-resource-group-1', physicalDeviceId: 'simulator-device-1', displayName: 'Simulator shared modem resources', resources: ['radio-control', 'sim-access', 'voice-media', 'sms-storage', 'sim-apdu', 'host-vowifi-auth', 'network-selection', 'sim-lock', 'euicc-profiles'], modemFunctionIds: ['simulator-function-1'], simSlotIds: ['simulator-slot-1'], maxActiveCalls: 1, maxConcurrentOps: 1, generation: 1 }],
-      lines: [{ id: 'simulator-line-1', physicalDeviceId: 'simulator-device-1', modemFunctionId: 'simulator-function-1', subscriptionProfileId: 'simulator-profile-1', resourceGroupId: 'simulator-resource-group-1', displayName: 'Simulator line', generation: 1, capabilities, accessMode: 'hold-rf-off', accessModeConfigured: false, state: 'awaiting-access-mode', rfSafety: 'off' }],
+      lines: [{ id: 'simulator-line-1', physicalDeviceId: 'simulator-device-1', modemFunctionId: 'simulator-function-1', subscriptionProfileId: 'simulator-profile-1', resourceGroupId: 'simulator-resource-group-1', displayName: 'Simulator line', generation: 1, capabilities, state: 'ready' }],
     }
-    const updated = { ...inventory, revision: 'b'.repeat(64), lines: [{ ...inventory.lines[0], accessModeConfigured: true, state: 'ready' }] }
     const reviewed = {
       ...setupSession,
       httpsConfigured: true,
@@ -236,18 +231,15 @@ describe('setup API client', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json(inventory))
       .mockResolvedValueOnce(Response.json(topology))
-      .mockResolvedValueOnce(Response.json(updated))
       .mockResolvedValueOnce(Response.json(reviewed))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getSetupInventory()).resolves.toEqual(inventory)
     await expect(getSetupHardwareTopology()).resolves.toEqual(topology)
-    await expect(putSetupSubscriptionProfileAccessMode('simulator-profile-1', 'hold-rf-off')).resolves.toEqual(updated)
     await expect(confirmSetupHardware()).resolves.toEqual(reviewed)
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       '/api/v1/setup/inventory',
       '/api/v1/setup/hardware/topology',
-      '/api/v1/setup/subscription-profiles/simulator-profile-1/access-mode',
       '/api/v1/setup/hardware/confirm',
     ])
   })
@@ -304,7 +296,6 @@ describe('health API client', () => {
       version: 'test',
       apiVersion: 'v1',
       installationState: 'uninitialized',
-      rfSafety: 'off',
       backend: 'simulator',
       databaseCount: 5,
     }
@@ -376,10 +367,7 @@ describe('inventory API client', () => {
         subscriptionProfileId: 'simulator-profile-1',
         displayName: 'Simulator line 1',
         generation: 1,
-        accessMode: 'hold-rf-off',
-        accessModeConfigured: false,
-        state: 'awaiting-access-mode',
-        rfSafety: 'off',
+        state: 'ready',
       },
     ],
   }
@@ -415,9 +403,9 @@ describe('inventory API client', () => {
       modemFunctions: [{ id: 'function-1', physicalDeviceId: 'device-1', displayName: 'Function 1', backend: 'direct-qmi', generation: 1, capabilities }],
       simSlots: [{ id: 'slot-1', physicalDeviceId: 'device-1', index: 0, presence: 'present', activeMediaId: 'media-1', generation: 1 }],
       simMedia: [{ id: 'media-1', simSlotId: 'slot-1', kind: 'uicc', identityState: 'known', displayIdentityHint: 'SIM •••• 0101', generation: 1 }],
-      subscriptionProfiles: [{ id: 'profile-1', simMediaId: 'media-1', displayName: 'Profile 1', state: 'active', displayIdentityHint: 'ICCID •••• 0101', generation: 1, accessMode: 'hold-rf-off', accessModeConfigured: true }],
+      subscriptionProfiles: [{ id: 'profile-1', simMediaId: 'media-1', displayName: 'Profile 1', state: 'active', displayIdentityHint: 'ICCID •••• 0101', generation: 1 }],
       resourceGroups: [{ id: 'group-1', physicalDeviceId: 'device-1', displayName: 'Group 1', resources: ['radio-control', 'sim-access', 'voice-media', 'sms-storage', 'sim-apdu', 'host-vowifi-auth', 'network-selection', 'sim-lock'], modemFunctionIds: ['function-1'], simSlotIds: ['slot-1'], maxActiveCalls: 1, maxConcurrentOps: 1, generation: 1 }],
-      lines: [{ id: 'line-1', physicalDeviceId: 'device-1', modemFunctionId: 'function-1', subscriptionProfileId: 'profile-1', resourceGroupId: 'group-1', displayName: 'Line 1', generation: 1, capabilities, accessMode: 'hold-rf-off', accessModeConfigured: true, state: 'ready', rfSafety: 'off' }],
+      lines: [{ id: 'line-1', physicalDeviceId: 'device-1', modemFunctionId: 'function-1', subscriptionProfileId: 'profile-1', resourceGroupId: 'group-1', displayName: 'Line 1', generation: 1, capabilities, state: 'ready' }],
     }
     const fetchMock = vi.fn().mockResolvedValue(Response.json(topology))
     vi.stubGlobal('fetch', fetchMock)
@@ -489,13 +477,13 @@ describe('inventory API client', () => {
     await expect(getInventory()).rejects.toThrow('INVENTORY_RESPONSE_INVALID')
   })
 
-  it('rejects an inconsistent unconfigured line', async () => {
+  it('rejects an unknown line state', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
         Response.json({
           ...inventory,
-          lines: [{ ...inventory.lines[0], accessMode: 'cellular-native' }],
+          lines: [{ ...inventory.lines[0], state: 'awaiting-access-mode' }],
         }),
       ),
     )
@@ -509,37 +497,6 @@ describe('inventory API client', () => {
     await expect(getInventory()).rejects.toThrow('INVENTORY_NETWORK_UNAVAILABLE')
   })
 
-  it('persists a selected access mode and validates the returned inventory', async () => {
-    const updated = {
-      ...inventory,
-      revision: 'b'.repeat(64),
-      lines: [
-        {
-          ...inventory.lines[0],
-          accessMode: 'host-vowifi-only',
-          accessModeConfigured: true,
-          state: 'ready',
-        },
-      ],
-    }
-    const fetchMock = vi.fn().mockResolvedValue(Response.json(updated))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(putSubscriptionProfileAccessMode('simulator-profile-1', 'host-vowifi-only')).resolves.toEqual(updated)
-    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(path).toBe('/api/v1/subscription-profiles/simulator-profile-1/access-mode')
-    expect(init.method).toBe('PUT')
-    expect(init.body).toBe('{"accessMode":"host-vowifi-only"}')
-    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
-  })
-
-  it('normalizes access-mode transport failures', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
-
-    await expect(putSubscriptionProfileAccessMode('simulator-profile-1', 'hold-rf-off')).rejects.toThrow(
-      'ACCESS_MODE_NETWORK_UNAVAILABLE',
-    )
-  })
 })
 
 describe('Mihomo subscription API client', () => {
@@ -648,8 +605,9 @@ describe('managed Line API client', () => {
     displayName: 'VOXI',
     managedModemId: 'modem_AQEBAQEBAQEBAQEBAQEBAQ',
     managedModemDisplayName: 'ML307A',
+    managedModemModel: 'ML307A',
+    managedModemSerialNumber: 'ML307A-DEMO-01',
     subscriptionDisplayHint: 'ICCID •••• 5553',
-    accessMode: 'host-vowifi-only' as const,
     state: 'ready' as const,
     capabilities,
     createdAt: '2026-08-05T12:00:00Z',
@@ -658,9 +616,15 @@ describe('managed Line API client', () => {
     candidateId: 'line-candidate-0123456789abcdef0123456789abcdef',
     managedModemId: line.managedModemId,
     managedModemDisplayName: line.managedModemDisplayName,
+    managedModemModel: line.managedModemModel,
+    managedModemSerialNumber: line.managedModemSerialNumber,
     subscriptionDisplayHint: line.subscriptionDisplayHint,
+    homeOperatorName: 'VOXI',
+    homeOperatorCode: '234-15',
+    simPresence: 'present' as const,
     capabilities,
     addable: true,
+    readinessReason: 'READY' as const,
   }
 
   it('lists candidates and performs typed create/update mutations', async () => {
@@ -674,11 +638,37 @@ describe('managed Line API client', () => {
 
     await expect(listManagedLines()).resolves.toEqual([line])
     await expect(listLineCandidates()).resolves.toEqual([candidate])
-    await expect(addManagedLine({ candidateId: candidate.candidateId, displayName: line.displayName, accessMode: line.accessMode })).resolves.toEqual(line)
-    await expect(updateManagedLine(line.id, { displayName: 'VOXI primary', accessMode: line.accessMode })).resolves.toEqual({ ...line, displayName: 'VOXI primary' })
+    await expect(addManagedLine({ candidateId: candidate.candidateId, displayName: line.displayName })).resolves.toEqual(line)
+    await expect(updateManagedLine(line.id, { displayName: 'VOXI primary' })).resolves.toEqual({ ...line, displayName: 'VOXI primary' })
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/v1/lines')
     expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/v1/lines/${line.id}`)
     expect(new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get('X-Simplus-CSRF')).toBe('line-csrf')
+  })
+
+  it('rejects Line responses that expose hardware paths or identity fingerprints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ lines: [{ ...line, physicalDeviceId: 'agent-usb-1-3' }] }))
+      .mockResolvedValueOnce(Response.json({ candidates: [{ ...candidate, subscriptionIdentityFingerprint: 'a'.repeat(64) }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listManagedLines()).rejects.toThrow('LINE_LIST_RESPONSE_INVALID')
+    await expect(listLineCandidates()).rejects.toThrow('LINE_CANDIDATE_RESPONSE_INVALID')
+  })
+
+  it('rejects legacy access-mode and rebinding request fields before transport', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(addManagedLine({
+      candidateId: candidate.candidateId,
+      displayName: line.displayName,
+      accessMode: 'host-vowifi-only',
+    } as never)).rejects.toThrow('LINE_ADD_REQUEST_INVALID')
+    await expect(updateManagedLine(line.id, {
+      displayName: line.displayName,
+      managedModemId: line.managedModemId,
+    } as never)).rejects.toThrow('LINE_UPDATE_REQUEST_INVALID')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -715,6 +705,24 @@ describe('Line egress API client', () => {
     await expect(putLineEgressBinding('line_AQEBAQEBAQEBAQEBAQEBAQ', { mode: 'direct', countryCode: 'GB' })).rejects.toThrow('LINE_EGRESS_REQUEST_INVALID')
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('accepts the explicit unconfigured response but never as a writable mode', async () => {
+    const unconfigured = {
+      ...binding,
+      mode: 'unconfigured' as const,
+      countryCode: '',
+      countryName: '',
+      listenerPort: 0,
+      ready: false,
+      readinessReason: 'EGRESS_NOT_CONFIGURED' as const,
+    }
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ bindings: [unconfigured] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listLineEgressBindings()).resolves.toEqual([unconfigured])
+    await expect(putLineEgressBinding(binding.lineId, { mode: 'unconfigured', countryCode: '' } as never)).rejects.toThrow('LINE_EGRESS_REQUEST_INVALID')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('Host VoWiFi API client', () => {
@@ -732,13 +740,14 @@ describe('Host VoWiFi API client', () => {
     countryName: '英国',
     registeredAt: '2026-08-04T21:07:41Z',
     nextRefreshAt: '2026-08-04T21:32:41Z',
+    phoneNumber: '+447700900123',
     attempt: 1,
     lastErrorCode: '',
   }
 
   it('lists state and sends CSRF-protected activation mutations', async () => {
     document.cookie = 'simplus_csrf=vowifi-csrf; path=/'
-    const stopped = { ...online, desiredActive: false, state: 'stopped' as const, stage: '', online: false, registeredAt: '', nextRefreshAt: '' }
+    const stopped = { ...online, desiredActive: false, state: 'stopped' as const, stage: '', online: false, registeredAt: '', nextRefreshAt: '', phoneNumber: '' }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ lines: [online] }))
       .mockResolvedValueOnce(Response.json(online, { status: 202 }))
@@ -761,38 +770,10 @@ describe('Host VoWiFi API client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ lines: [{ ...online, online: false }] })))
     await expect(listVoWiFiLines()).rejects.toThrow('VOWIFI_RESPONSE_INVALID')
   })
-})
 
-describe('Simulator access-path API client', () => {
-  const lineId = 'line_AQEBAQEBAQEBAQEBAQEBAQ'
-  const state = {
-    lineId,
-    mode: 'mihomo-required',
-    mihomoState: 'failed',
-    lineState: 'offline',
-    authentication: 'simulated-aka-complete',
-    epdg: 'blocked',
-    ims: 'offline',
-    directFallback: false,
-  }
-
-  it('uses stable business Line IDs for list and update', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ lines: [state] }))
-      .mockResolvedValueOnce(Response.json(state))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(listAccessPaths()).resolves.toEqual([state])
-    await expect(configureAccessPath(lineId, { mode: 'mihomo-required', mihomoState: 'failed' })).resolves.toEqual(state)
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/v1/access-paths/${lineId}`)
-  })
-
-  it('rejects the former hard-coded Simulator Line before transport', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(configureAccessPath('simulator-line-1', { mode: 'direct', mihomoState: 'stopped' })).rejects.toThrow('ACCESS_PATH_REQUEST_INVALID')
-    expect(fetchMock).not.toHaveBeenCalled()
+  it('rejects a private IMS identity as a phone number', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ lines: [{ ...online, phoneNumber: '234150123456789' }] })))
+    await expect(listVoWiFiLines()).rejects.toThrow('VOWIFI_RESPONSE_INVALID')
   })
 })
 

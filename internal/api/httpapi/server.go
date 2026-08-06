@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/leonfox28/simplus/internal/api/openapi"
-	accessapp "github.com/leonfox28/simplus/internal/application/accesspath"
 	authapp "github.com/leonfox28/simplus/internal/application/auth"
 	callapp "github.com/leonfox28/simplus/internal/application/calls"
 	contactapp "github.com/leonfox28/simplus/internal/application/contacts"
@@ -34,8 +33,6 @@ import (
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
-	"github.com/leonfox28/simplus/internal/domain/accesspath"
 	"github.com/leonfox28/simplus/internal/domain/call"
 	"github.com/leonfox28/simplus/internal/domain/contact"
 	domaineuicc "github.com/leonfox28/simplus/internal/domain/euicc"
@@ -79,12 +76,6 @@ type MihomoSubscriptionManager interface {
 	Nodes(context.Context, string) ([]mihomodomain.Node, error)
 }
 
-type MihomoEgressManager interface {
-	List(context.Context) ([]mihomoapp.EgressProfileView, error)
-	Create(context.Context, string, string, string, string, string, string, bool) (mihomoapp.EgressProfileView, error)
-	Update(context.Context, string, string, string, string, string, string, string, bool) (mihomoapp.EgressProfileView, error)
-	Delete(context.Context, string) error
-}
 type MihomoConfigManager interface {
 	Status(context.Context) (mihomoapp.ConfigStatus, error)
 	GenerateAndPublish(context.Context) (mihomoapp.ConfigStatus, error)
@@ -134,11 +125,6 @@ type EUICCManager interface {
 	State(context.Context) (domaineuicc.State, error)
 	Switch(context.Context, string) (domaineuicc.State, error)
 }
-type AccessPathManager interface {
-	List(context.Context) ([]accesspath.State, error)
-	Configure(context.Context, string, string, string) (accesspath.State, error)
-}
-
 type LineEgressManager interface {
 	List(context.Context) ([]lineegressapp.View, error)
 	Put(context.Context, string, string, string) (lineegressapp.View, error)
@@ -161,8 +147,8 @@ type ManagedModemManager interface {
 type ManagedLineManager interface {
 	List(context.Context) ([]linedomain.View, error)
 	Candidates(context.Context) ([]linedomain.Candidate, error)
-	Add(context.Context, string, string, accessmode.Mode) (linedomain.View, error)
-	Update(context.Context, string, string, accessmode.Mode) (linedomain.View, error)
+	Add(context.Context, string, string) (linedomain.View, error)
+	Update(context.Context, string, string) (linedomain.View, error)
 }
 
 type Server struct {
@@ -174,14 +160,12 @@ type Server struct {
 	contacts            ContactManager
 	calls               CallManager
 	euicc               EUICCManager
-	accessPaths         AccessPathManager
 	lineEgress          LineEgressManager
 	vowifi              VoWiFiManager
 	modems              ManagedModemManager
 	lines               ManagedLineManager
 	mihomoCore          MihomoCoreManager
 	mihomoSubscriptions MihomoSubscriptionManager
-	mihomoEgress        MihomoEgressManager
 	mihomoConfig        MihomoConfigManager
 	mihomoRuntime       MihomoRuntimeManager
 	mihomoDashboard     MihomoDashboardManager
@@ -199,13 +183,6 @@ func WithMihomoCore(server *Server, manager MihomoCoreManager) *Server {
 func WithMihomoSubscriptions(server *Server, manager MihomoSubscriptionManager) *Server {
 	if server != nil {
 		server.mihomoSubscriptions = manager
-	}
-	return server
-}
-
-func WithMihomoEgress(server *Server, manager MihomoEgressManager) *Server {
-	if server != nil {
-		server.mihomoEgress = manager
 	}
 	return server
 }
@@ -276,13 +253,6 @@ func WithEUICC(server *Server, manager EUICCManager) *Server {
 	}
 	return server
 }
-func WithAccessPaths(server *Server, manager AccessPathManager) *Server {
-	if server != nil {
-		server.accessPaths = manager
-	}
-	return server
-}
-
 func New(
 	healthService *health.Service,
 	setupService *setupapp.Service,
@@ -700,36 +670,6 @@ func (server *Server) GetSetupInventory(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		server.logger.ErrorContext(r.Context(), "setup inventory snapshot failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "SETUP_INVENTORY_UNAVAILABLE", Retryable: true})
-		return
-	}
-	writeJSON(w, http.StatusOK, inventoryResponse(snapshot))
-}
-
-func (server *Server) PutSetupSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileID string) {
-	if _, ok := server.requireSetupHardwareStage(w, r); !ok {
-		return
-	}
-	var request openapi.PutAccessModeRequest
-	if err := decodeJSON(w, r, &request); err != nil || !request.AccessMode.Valid() {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "ACCESS_MODE_REQUEST_INVALID", Retryable: false})
-		return
-	}
-	mode, err := accessmode.Parse(string(request.AccessMode))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "ACCESS_MODE_REQUEST_INVALID", Retryable: false})
-		return
-	}
-	snapshot, err := server.inventory.PutAccessMode(r.Context(), profileID, mode)
-	if err != nil {
-		switch {
-		case errors.Is(err, inventory.ErrSubscriptionProfileNotFound):
-			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "SUBSCRIPTION_PROFILE_NOT_FOUND", Retryable: false})
-		case errors.Is(err, inventory.ErrInvalidAccessMode):
-			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "ACCESS_MODE_REQUEST_INVALID", Retryable: false})
-		default:
-			server.logger.ErrorContext(r.Context(), "setup access mode update failed", "profile_id", profileID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "ACCESS_MODE_PERSIST_FAILED", Retryable: true})
-		}
 		return
 	}
 	writeJSON(w, http.StatusOK, inventoryResponse(snapshot))
@@ -1354,96 +1294,6 @@ func mihomoNodeResponses(nodes []mihomodomain.Node) []openapi.MihomoNode {
 	return result
 }
 
-func (server *Server) ListMihomoEgressProfiles(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireAdministrator(w, r, false); !ok {
-		return
-	}
-	if server.mihomoEgress == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MIHOMO_EGRESS_UNAVAILABLE", Retryable: true})
-		return
-	}
-	items, err := server.mihomoEgress.List(r.Context())
-	if err != nil {
-		server.writeMihomoEgressError(w, r, err)
-		return
-	}
-	response := make([]openapi.MihomoEgressProfile, 0, len(items))
-	for _, item := range items {
-		response = append(response, mihomoEgressResponse(item))
-	}
-	writeJSON(w, http.StatusOK, openapi.MihomoEgressProfileList{Profiles: response})
-}
-func (server *Server) CreateMihomoEgressProfile(w http.ResponseWriter, r *http.Request) {
-	if _, ok := server.requireAdministrator(w, r, true); !ok {
-		return
-	}
-	if server.mihomoEgress == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MIHOMO_EGRESS_UNAVAILABLE", Retryable: true})
-		return
-	}
-	var request openapi.MihomoEgressProfileMutation
-	if err := decodeJSON(w, r, &request); err != nil {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MIHOMO_EGRESS_REQUEST_INVALID", Retryable: false})
-		return
-	}
-	item, err := server.mihomoEgress.Create(r.Context(), request.DisplayName, request.SubscriptionId, request.LineId, string(request.SelectionType), request.SelectedNodeId, request.SelectedCountryCode, request.Enabled)
-	if err != nil {
-		server.writeMihomoEgressError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, mihomoEgressResponse(item))
-}
-func (server *Server) UpdateMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileID string) {
-	if _, ok := server.requireAdministrator(w, r, true); !ok {
-		return
-	}
-	if server.mihomoEgress == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MIHOMO_EGRESS_UNAVAILABLE", Retryable: true})
-		return
-	}
-	var request openapi.MihomoEgressProfileMutation
-	if err := decodeJSON(w, r, &request); err != nil {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MIHOMO_EGRESS_REQUEST_INVALID", Retryable: false})
-		return
-	}
-	item, err := server.mihomoEgress.Update(r.Context(), profileID, request.DisplayName, request.SubscriptionId, request.LineId, string(request.SelectionType), request.SelectedNodeId, request.SelectedCountryCode, request.Enabled)
-	if err != nil {
-		server.writeMihomoEgressError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, mihomoEgressResponse(item))
-}
-func (server *Server) DeleteMihomoEgressProfile(w http.ResponseWriter, r *http.Request, profileID string) {
-	if _, ok := server.requireAdministrator(w, r, true); !ok {
-		return
-	}
-	if server.mihomoEgress == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MIHOMO_EGRESS_UNAVAILABLE", Retryable: true})
-		return
-	}
-	if err := server.mihomoEgress.Delete(r.Context(), profileID); err != nil {
-		server.writeMihomoEgressError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-func (server *Server) writeMihomoEgressError(w http.ResponseWriter, r *http.Request, err error) {
-	switch {
-	case errors.Is(err, mihomoapp.ErrEgressProfileInvalid):
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MIHOMO_EGRESS_REQUEST_INVALID", Retryable: false})
-	case errors.Is(err, mihomoapp.ErrEgressProfileNotFound):
-		writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MIHOMO_EGRESS_NOT_FOUND", Retryable: false})
-	case errors.Is(err, mihomoapp.ErrSubscriptionNotFound):
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_NOT_FOUND", Retryable: false})
-	default:
-		server.logger.WarnContext(r.Context(), "Mihomo egress operation failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MIHOMO_EGRESS_PERSIST_FAILED", Retryable: true})
-	}
-}
-func mihomoEgressResponse(item mihomoapp.EgressProfileView) openapi.MihomoEgressProfile {
-	return openapi.MihomoEgressProfile{Id: item.ID, DisplayName: item.DisplayName, SubscriptionId: item.SubscriptionID, LineId: item.LineID, SelectionType: openapi.MihomoEgressProfileSelectionType(item.SelectionType), SelectedNodeId: item.SelectedNodeID, SelectedNodeName: item.SelectedNodeName, SelectedCountryCode: item.SelectedCountryCode, SelectedCountryName: item.SelectedCountryName, SourceCidr: item.SourceCIDR, Enabled: item.Enabled, Ready: item.Ready, ReadinessReason: openapi.MihomoEgressProfileReadinessReason(item.ReadinessReason)}
-}
-
 func (server *Server) ListLineEgressBindings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := server.requireAdministrator(w, r, false); !ok {
 		return
@@ -1485,8 +1335,8 @@ func (server *Server) PutLineEgressBinding(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "LINE_EGRESS_REQUEST_INVALID", Retryable: false})
 		case errors.Is(err, lineegressapp.ErrLineNotFound):
 			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "LINE_NOT_FOUND", Retryable: false})
-		case errors.Is(err, lineegressapp.ErrLineMode):
-			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "LINE_NOT_HOST_VOWIFI", Retryable: false})
+		case errors.Is(err, lineegressapp.ErrLineUnsupported):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "LINE_VOWIFI_UNSUPPORTED", Retryable: false})
 		default:
 			server.logger.WarnContext(r.Context(), "line egress update failed", "error", err)
 			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "LINE_EGRESS_PERSIST_FAILED", Retryable: true})
@@ -1587,7 +1437,7 @@ func voWiFiStateResponse(item vowifidomain.State) openapi.VoWiFiLineState {
 		State:         openapi.VoWiFiLineStateState(item.State), Stage: item.Stage, Online: item.Online,
 		EgressMode: openapi.VoWiFiLineStateEgressMode(item.EgressMode), CountryCode: item.CountryCode,
 		CountryName: item.CountryName, RegisteredAt: registeredAt, NextRefreshAt: nextRefresh,
-		Attempt: item.Attempt, LastErrorCode: item.LastErrorCode,
+		PhoneNumber: item.PhoneNumber, Attempt: item.Attempt, LastErrorCode: item.LastErrorCode,
 	}
 }
 
@@ -1958,55 +1808,6 @@ func (server *Server) GetEUICCState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, euiccResponse(state))
 }
 
-func (server *Server) ListAccessPaths(w http.ResponseWriter, r *http.Request) {
-	if !server.requireBusinessAPI(w, r) {
-		return
-	}
-	if server.accessPaths == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "ACCESS_PATHS_UNAVAILABLE", Retryable: false})
-		return
-	}
-	states, err := server.accessPaths.List(r.Context())
-	if err != nil {
-		server.logger.ErrorContext(r.Context(), "access paths failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "ACCESS_PATHS_READ_FAILED", Retryable: true})
-		return
-	}
-	values := make([]openapi.AccessPathState, 0, len(states))
-	for _, state := range states {
-		values = append(values, accessPathResponse(state))
-	}
-	writeJSON(w, http.StatusOK, openapi.AccessPathListResponse{Lines: values})
-}
-func (server *Server) ConfigureAccessPath(w http.ResponseWriter, r *http.Request, lineID string) {
-	if !server.requireBusinessAPI(w, r) {
-		return
-	}
-	if server.accessPaths == nil {
-		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "ACCESS_PATHS_UNAVAILABLE", Retryable: false})
-		return
-	}
-	var request openapi.AccessPathRequest
-	if decodeJSON(w, r, &request) != nil {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "ACCESS_PATH_REQUEST_INVALID", Retryable: false})
-		return
-	}
-	state, err := server.accessPaths.Configure(r.Context(), lineID, string(request.Mode), string(request.MihomoState))
-	if err != nil {
-		if errors.Is(err, accessapp.ErrInvalid) {
-			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "ACCESS_PATH_REQUEST_INVALID", Retryable: false})
-		} else {
-			server.logger.ErrorContext(r.Context(), "access path update failed", "error", err)
-			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "ACCESS_PATH_PERSIST_FAILED", Retryable: true})
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, accessPathResponse(state))
-}
-func accessPathResponse(state accesspath.State) openapi.AccessPathState {
-	return openapi.AccessPathState{LineId: state.LineID, Mode: openapi.AccessPathStateMode(state.Mode), MihomoState: openapi.AccessPathStateMihomoState(state.MihomoState), LineState: openapi.AccessPathStateLineState(state.LineState), Authentication: openapi.SimulatedAkaComplete, Epdg: openapi.AccessPathStateEpdg(state.EPDG), Ims: openapi.AccessPathStateIms(state.IMS), DirectFallback: false}
-}
-
 func (server *Server) ActivateEUICCProfile(w http.ResponseWriter, r *http.Request, profileID string) {
 	if !server.requireBusinessAPI(w, r) {
 		return
@@ -2331,8 +2132,12 @@ func (server *Server) ListLineCandidates(w http.ResponseWriter, r *http.Request)
 		candidates = append(candidates, openapi.LineCandidate{
 			CandidateId: item.CandidateID, ManagedModemId: item.ManagedModemID,
 			ManagedModemDisplayName: item.ManagedModemDisplayName,
+			ManagedModemModel:       item.ManagedModemModel, ManagedModemSerialNumber: item.ManagedModemSerialNumber,
 			SubscriptionDisplayHint: item.SubscriptionDisplayHint,
-			Capabilities:            hardwareCapabilitiesResponse(item.Capabilities), Addable: item.Addable,
+			HomeOperatorName:        item.HomeOperatorName, HomeOperatorCode: item.HomeOperatorCode,
+			SimPresence:  openapi.ManagedModemSIMPresence(item.SIMPresence),
+			Capabilities: hardwareCapabilitiesResponse(item.Capabilities), Addable: item.Addable,
+			ReadinessReason: openapi.LineCandidateReadinessReason(item.Readiness),
 		})
 	}
 	writeJSON(w, http.StatusOK, openapi.LineCandidateList{Candidates: candidates})
@@ -2351,7 +2156,7 @@ func (server *Server) AddManagedLine(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "LINE_ADD_REQUEST_INVALID", Retryable: false})
 		return
 	}
-	item, err := server.lines.Add(r.Context(), request.CandidateId, request.DisplayName, accessmode.Mode(request.AccessMode))
+	item, err := server.lines.Add(r.Context(), request.CandidateId, request.DisplayName)
 	if err != nil {
 		server.writeManagedLineError(w, r, err, true)
 		return
@@ -2373,7 +2178,7 @@ func (server *Server) UpdateManagedLine(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "LINE_UPDATE_REQUEST_INVALID", Retryable: false})
 		return
 	}
-	item, err := server.lines.Update(r.Context(), lineID, request.DisplayName, accessmode.Mode(request.AccessMode))
+	item, err := server.lines.Update(r.Context(), lineID, request.DisplayName)
 	if err != nil {
 		server.writeManagedLineError(w, r, err, false)
 		return
@@ -2407,8 +2212,9 @@ func managedLineResponse(item linedomain.View) openapi.ManagedLine {
 	return openapi.ManagedLine{
 		Id: item.ID, DisplayName: item.DisplayName, ManagedModemId: item.ManagedModemID,
 		ManagedModemDisplayName: item.ManagedModemDisplayName,
-		SubscriptionDisplayHint: item.SubscriptionDisplayHint, AccessMode: openapi.AccessMode(item.AccessMode),
-		State: openapi.ManagedLineState(item.State), Capabilities: hardwareCapabilitiesResponse(item.Capabilities),
+		ManagedModemModel:       item.ManagedModemModel, ManagedModemSerialNumber: item.ManagedModemSerialNumber,
+		SubscriptionDisplayHint: item.SubscriptionDisplayHint,
+		State:                   openapi.ManagedLineState(item.State), Capabilities: hardwareCapabilitiesResponse(item.Capabilities),
 		CreatedAt: item.CreatedAt.UTC(),
 	}
 }
@@ -2556,52 +2362,6 @@ func (server *Server) GetHardwareTopology(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, hardwareTopologyResponse(topology))
 }
 
-func (server *Server) PutSubscriptionProfileAccessMode(w http.ResponseWriter, r *http.Request, profileID string) {
-	if !server.requireBusinessAPI(w, r) {
-		return
-	}
-	var request openapi.PutAccessModeRequest
-	if err := decodeJSON(w, r, &request); err != nil || !request.AccessMode.Valid() {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{
-			Code:      "ACCESS_MODE_REQUEST_INVALID",
-			Retryable: false,
-		})
-		return
-	}
-	mode, err := accessmode.Parse(string(request.AccessMode))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, openapi.ApiError{
-			Code:      "ACCESS_MODE_REQUEST_INVALID",
-			Retryable: false,
-		})
-		return
-	}
-
-	snapshot, err := server.inventory.PutAccessMode(r.Context(), profileID, mode)
-	if err != nil {
-		switch {
-		case errors.Is(err, inventory.ErrSubscriptionProfileNotFound):
-			writeJSON(w, http.StatusNotFound, openapi.ApiError{
-				Code:      "SUBSCRIPTION_PROFILE_NOT_FOUND",
-				Retryable: false,
-			})
-		case errors.Is(err, inventory.ErrInvalidAccessMode):
-			writeJSON(w, http.StatusBadRequest, openapi.ApiError{
-				Code:      "ACCESS_MODE_REQUEST_INVALID",
-				Retryable: false,
-			})
-		default:
-			server.logger.ErrorContext(r.Context(), "access mode update failed", "profile_id", profileID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{
-				Code:      "ACCESS_MODE_PERSIST_FAILED",
-				Retryable: true,
-			})
-		}
-		return
-	}
-	writeJSON(w, http.StatusOK, inventoryResponse(snapshot))
-}
-
 func setupHardwareReviewInput(topology inventory.Topology) (setupapp.HardwareReviewInput, error) {
 	topologyDigest, err := inventory.SetupDigest(topology)
 	if err != nil {
@@ -2644,9 +2404,6 @@ func setupHardwareReviewInput(topology inventory.Topology) (setupapp.HardwareRev
 			ID:                    line.ID,
 			PhysicalDeviceID:      line.PhysicalDeviceID,
 			SubscriptionProfileID: line.SubscriptionProfileID,
-			AccessMode:            string(line.AccessMode),
-			AccessModeConfigured:  line.AccessModeConfigured,
-			RFSafety:              line.RFSafety,
 		})
 	}
 	return setupapp.HardwareReviewInput{TopologyDigest: topologyDigest, Devices: devices, Lines: lines}, nil
@@ -2674,10 +2431,7 @@ func inventoryResponse(snapshot inventory.Snapshot) openapi.InventoryResponse {
 			SubscriptionProfileId: line.SubscriptionProfileID,
 			DisplayName:           line.DisplayName,
 			Generation:            int64(line.Generation),
-			AccessMode:            openapi.AccessMode(line.AccessMode),
-			AccessModeConfigured:  line.AccessModeConfigured,
 			State:                 openapi.LineState(line.State),
-			RfSafety:              openapi.RFSafetyState(line.RFSafety),
 		})
 	}
 	return openapi.InventoryResponse{Generation: int64(snapshot.Generation), Revision: snapshot.Revision, ObservedAt: snapshot.ObservedAt, Devices: devices, Lines: lines}
@@ -2732,7 +2486,7 @@ func hardwareTopologyResponse(topology inventory.Topology) openapi.HardwareTopol
 		profiles = append(profiles, openapi.SubscriptionProfileDetail{
 			Id: profile.ID, SimMediaId: profile.SIMMediaID, DisplayName: profile.DisplayName,
 			State: openapi.SubscriptionProfileState(profile.State), DisplayIdentityHint: profile.DisplayIdentityHint,
-			Generation: int64(profile.Generation), AccessMode: openapi.AccessMode(profile.AccessMode), AccessModeConfigured: profile.AccessModeConfigured,
+			Generation: int64(profile.Generation),
 		})
 	}
 	groups := make([]openapi.ResourceGroupDetail, 0, len(topology.ResourceGroups))
@@ -2753,8 +2507,7 @@ func hardwareTopologyResponse(topology inventory.Topology) openapi.HardwareTopol
 			Id: line.ID, PhysicalDeviceId: line.PhysicalDeviceID, ModemFunctionId: line.ModemFunctionID,
 			SubscriptionProfileId: line.SubscriptionProfileID, ResourceGroupId: line.ResourceGroupID,
 			DisplayName: line.DisplayName, Generation: int64(line.Generation), Capabilities: hardwareCapabilitiesResponse(line.Capabilities),
-			AccessMode: openapi.AccessMode(line.AccessMode), AccessModeConfigured: line.AccessModeConfigured,
-			State: openapi.LineState(line.State), RfSafety: openapi.RFSafetyState(line.RFSafety),
+			State: openapi.LineState(line.State),
 		})
 	}
 	return openapi.HardwareTopologyResponse{
@@ -2802,7 +2555,6 @@ func (server *Server) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
 		Version:           snapshot.Version,
 		ApiVersion:        openapi.HealthResponseApiVersion(snapshot.APIVersion),
 		InstallationState: openapi.InstallationState(snapshot.InstallationState),
-		RfSafety:          openapi.RFSafetyState(snapshot.RFSafety),
 		Backend:           openapi.BackendKind(snapshot.Backend),
 		DatabaseCount:     snapshot.DatabaseCount,
 	})

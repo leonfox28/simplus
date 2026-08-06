@@ -139,7 +139,9 @@ func TestAgentSourceMaterializesReadySIMAsStableHardwareLineIndependentlyOfRF(t 
 			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID, SnapshotGeneration: 5, SnapshotRevision: revision,
 			Devices: []agentapi.DeviceProbe{{
 				DeviceID: "usb-1-3", State: agentapi.ProbeStateComplete, RF: agentapi.RFObservation{State: agentapi.RFStateOn},
-				SIM:           agentapi.SIMObservation{State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady, IdentityFingerprint: fingerprint, DisplayIdentityHint: "ICCID •••• 2115"},
+				SIM: agentapi.SIMObservation{State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady,
+					IdentityFingerprint: fingerprint, DisplayIdentityHint: "ICCID •••• 2115",
+					HomeOperatorName: "VOXI", HomeOperatorCode: "234-15"},
 				SignalMetrics: agentapi.SignalObservation{State: agentapi.SignalStateUnknown}, Registrations: []agentapi.RegistrationObservation{},
 				CurrentNetwork: agentapi.NetworkObservation{SelectionMode: agentapi.NetworkSelectionUnknown}, ActiveCallCount: &zeroCalls,
 			}},
@@ -156,7 +158,8 @@ func TestAgentSourceMaterializesReadySIMAsStableHardwareLineIndependentlyOfRF(t 
 	if line.ID != "agent-line-"+fingerprint[:32] || !line.Capabilities.SIMAccess || !line.Capabilities.SIMAPDU || !line.Capabilities.HostVoWiFiAuth {
 		t.Fatalf("line = %#v", line)
 	}
-	if topology.SIMMedia[0].IdentityFingerprint != fingerprint || topology.SubscriptionProfiles[0].DisplayIdentityHint != "ICCID •••• 2115" {
+	if topology.SIMMedia[0].IdentityFingerprint != fingerprint || topology.SubscriptionProfiles[0].DisplayIdentityHint != "ICCID •••• 2115" ||
+		topology.SubscriptionProfiles[0].HomeOperatorName != "VOXI" || topology.SubscriptionProfiles[0].HomeOperatorCode != "234-15" {
 		t.Fatalf("identity topology = %#v", topology)
 	}
 }

@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-04
 - 修订：[`0003`](0003-v1-read-only-hardware.md) 对 ML307A Host VoWiFi 实验的全面禁止
+- 后续修订：[`0017`](0017-managed-modems-and-capability-adapters.md) 与 [`0019`](0019-line-identity-and-communication-paths.md) 将 RF 从 Line/Host VoWiFi 产品运行条件中解耦；本记录的 RF Off 仅保留为当次 HIL 证据边界
 
 ## 背景
 

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
@@ -47,13 +46,12 @@ func TestVoWiFiAcceptedSubmissionIsFinalizedByLaterRPACK(t *testing.T) {
 	service, stores := newTestService(t, gateway)
 	line := inventory.Line{
 		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
-		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
-		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
+		ModemFunctionID: "modem-function", State: inventory.LineReady,
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
 	service.inbox, service.reports = gateway, gateway
-	service.UseHostVoWiFiTransport(messagingAccessGuard(true))
+	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	sent, err := service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_report_01", LineID: line.ID,
 		Destination: "+447700900456", Body: "accepted over IMS",
@@ -168,14 +166,13 @@ func TestVoWiFiGatewayAllowsHostLineWithoutCellularSMSCapability(t *testing.T) {
 	service, stores := newTestService(t, gateway)
 	line := inventory.Line{
 		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
-		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
-		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
+		ModemFunctionID: "modem-function", State: inventory.LineReady,
 		Capabilities: hardware.Capabilities{SMS: false, HostVoWiFiAuth: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
 	service.inbox = gateway
 	service.reports = gateway
-	service.UseHostVoWiFiTransport(messagingAccessGuard(true))
+	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	result, err := service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_012345", LineID: line.ID, Destination: "+447700900456", Body: "sent over IMS",
 	})
@@ -192,7 +189,7 @@ func TestVoWiFiGatewayAllowsHostLineWithoutCellularSMSCapability(t *testing.T) {
 	}
 }
 
-func TestVoWiFiGatewayDoesNotCaptureCellularSMSLine(t *testing.T) {
+func TestVoWiFiGatewayRequiresHostVoWiFiCapability(t *testing.T) {
 	fake := &fakeVoWiFiSMSAPI{}
 	gateway, err := NewVoWiFiSMSGateway(fake)
 	if err != nil {
@@ -202,10 +199,10 @@ func TestVoWiFiGatewayDoesNotCaptureCellularSMSLine(t *testing.T) {
 	line := inventory.Line{
 		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
 		ModemFunctionID: "modem-function", State: inventory.LineReady,
-		AccessMode: accessmode.CellularNative, Capabilities: hardware.Capabilities{SMS: true},
+		Capabilities: hardware.Capabilities{SMS: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
-	service.UseHostVoWiFiTransport(messagingAccessGuard(true))
+	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	_, err = service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_012345", LineID: line.ID, Destination: "+447700900456", Body: "must not route",
 	})
@@ -223,8 +220,7 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	}
 	line := inventory.Line{
 		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
-		ModemFunctionID: "modem-function", State: inventory.LineReady, RFSafety: inventory.RFSafetyOff,
-		AccessMode: accessmode.HostVoWiFiOnly, AccessModeConfigured: true,
+		ModemFunctionID: "modem-function", State: inventory.LineReady,
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
 	}
 	body := strings.Repeat("a", 161)
@@ -246,7 +242,7 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstService.UseHostVoWiFiTransport(messagingAccessGuard(true))
+	firstService.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	result, err := firstService.SyncInbound(ctx)
 	if err != nil || result.Persisted != 0 || result.Acknowledged != 1 || len(first.ackRequests) != 1 {
 		t.Fatalf("first sync=%#v acks=%#v error=%v", result, first.ackRequests, err)
@@ -275,7 +271,7 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondService.UseHostVoWiFiTransport(messagingAccessGuard(true))
+	secondService.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	result, err = secondService.SyncInbound(ctx)
 	if err != nil || result.Persisted != 1 || result.Acknowledged != 1 || len(second.ackRequests) != 1 {
 		t.Fatalf("second sync=%#v acks=%#v error=%v", result, second.ackRequests, err)

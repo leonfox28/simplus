@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
-	"github.com/leonfox28/simplus/internal/domain/accessmode"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
 )
@@ -42,7 +41,7 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 		if line.State != inventory.LineReady || !service.supportsSMS(line) {
 			continue
 		}
-		if line.AccessMode == accessmode.HostVoWiFiOnly && (service.accessPaths == nil || !service.accessPaths.Available(ctx, line.ID)) {
+		if service.hostVoWiFiSMS && (service.availability == nil || !service.availability.Available(ctx, line.ID)) {
 			continue
 		}
 		lineResult, err := service.syncInboundLine(ctx, line)

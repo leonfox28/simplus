@@ -313,42 +313,11 @@ paths:
         "200": { description: Selected configuration status, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoConfigStatus" } } } }
         "400": { description: Subscription artifact is not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409": { description: Current core rejected the stored configuration, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-  /api/v1/mihomo/egress-profiles:
-    get:
-      operationId: listMihomoEgressProfiles
-      tags: [mihomo]
-      summary: List Host VoWiFi-only egress selections
-      responses:
-        "200": { description: Egress profiles, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileList" } } } }
-    post:
-      operationId: createMihomoEgressProfile
-      tags: [mihomo]
-      summary: Create an egress profile without starting Mihomo
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileMutation" } } } }
-      responses:
-        "201": { description: Created profile, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfile" } } } }
-        "400": { description: Invalid selection, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-  /api/v1/mihomo/egress-profiles/{profileId}:
-    parameters:
-      - { name: profileId, in: path, required: true, schema: { type: string, pattern: "^egress_[A-Za-z0-9_-]{22}$" } }
-    put:
-      operationId: updateMihomoEgressProfile
-      tags: [mihomo]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfileMutation" } } } }
-      responses:
-        "200": { description: Updated profile, content: { application/json: { schema: { $ref: "#/components/schemas/MihomoEgressProfile" } } } }
-        "404": { description: Profile not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-    delete:
-      operationId: deleteMihomoEgressProfile
-      tags: [mihomo]
-      responses:
-        "204": { description: Deleted }
-        "404": { description: Profile not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/line-egress-bindings:
     get:
       operationId: listLineEgressBindings
       tags: [lines]
-      summary: List effective direct or Mihomo-country bindings for current Lines
+      summary: List explicit direct, Mihomo-country, or unconfigured egress state for current Lines
       responses:
         "200": { description: Line egress bindings, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBindingList" } } } }
   /api/v1/lines/{lineId}/egress:
@@ -357,13 +326,13 @@ paths:
     put:
       operationId: putLineEgressBinding
       tags: [lines]
-      summary: Persist a Line egress choice without rewriting or restarting Mihomo
+      summary: Persist an explicit direct or Mihomo-country Line egress choice without rewriting or restarting Mihomo
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBindingMutation" } } } }
       responses:
         "200": { description: Updated Line egress binding, content: { application/json: { schema: { $ref: "#/components/schemas/LineEgressBinding" } } } }
         "400": { description: Invalid mode or unavailable country, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "404": { description: Line not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: Line is not configured for Host VoWiFi, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Line does not support Host VoWiFi, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/vowifi-lines:
     get:
       operationId: listVoWiFiLines
@@ -382,7 +351,7 @@ paths:
       responses:
         "202": { description: Activation accepted, content: { application/json: { schema: { $ref: "#/components/schemas/VoWiFiLineState" } } } }
         "404": { description: Line not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: "Line, SIM, RF or egress is not ready", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: "Line, SIM/Profile capability, or explicit egress is not ready", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "503": { description: Host VoWiFi runtime unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/vowifi-lines/{lineId}/deactivate:
     parameters:
@@ -568,35 +537,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/v1/access-paths:
-    get:
-      operationId: listAccessPaths
-      summary: List Simulator Host VoWiFi and egress states
-      tags: [access-paths]
-      responses:
-        "200": { description: Per-line states, content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathListResponse" } } } }
-        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "503": { description: Access paths unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-  /api/v1/access-paths/{lineId}:
-    put:
-      operationId: configureAccessPath
-      summary: Configure Simulator direct or mihomo-required egress
-      tags: [access-paths]
-      parameters:
-        - name: lineId
-          in: path
-          required: true
-          schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathRequest" } } }
-      responses:
-        "200": { description: Persisted fail-closed state, content: { application/json: { schema: { $ref: "#/components/schemas/AccessPathState" } } } }
-        "400": { description: Invalid state, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
-        "503": { description: Access paths unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/euicc:
     get:
       operationId: getEUICCState
@@ -941,14 +881,15 @@ paths:
         "500": { description: Managed Lines could not be read, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
     post:
       operationId: addManagedLine
-      summary: Create a stable Line from one current managed-modem SIM/Profile candidate
+      summary: Create only a stable Line identity from one current managed-modem SIM/Profile candidate
+      description: Revalidates the transient candidate and persists its immutable binding plus display name; does not change RF, Mihomo, Host VoWiFi, SMS, or calls.
       tags: [lines]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/AddManagedLineRequest" } } }
       responses:
         "201": { description: Line created, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedLine" } } } }
-        "400": { description: "Candidate, name, or access mode is invalid", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "400": { description: "Candidate or name is invalid", content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "404": { description: Candidate is no longer present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409": { description: Candidate is already represented by a Line, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
@@ -956,10 +897,11 @@ paths:
   /api/v1/line-candidates:
     get:
       operationId: listLineCandidates
-      summary: List current SIM/Profile candidates on administrator-added modems
+      summary: List current Line candidates and typed readiness for every administrator-added modem
+      description: Candidate IDs are transient observations. Responses contain bounded display metadata and capabilities, never SIM identity fingerprints, runtime hardware targets, sysfs paths, or device nodes.
       tags: [lines]
       responses:
-        "200": { description: Current unadded Line candidates, content: { application/json: { schema: { $ref: "#/components/schemas/LineCandidateList" } } } }
+        "200": { description: Current addable and unavailable Line candidates, content: { application/json: { schema: { $ref: "#/components/schemas/LineCandidateList" } } } }
         "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409": { description: The instance is not ready for business APIs, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "500": { description: Current Line candidates could not be resolved, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
@@ -968,14 +910,14 @@ paths:
       - { name: lineId, in: path, required: true, schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" } }
     put:
       operationId: updateManagedLine
-      summary: Update a Line display name and access mode without rebinding hardware
+      summary: Update a Line display name without rebinding hardware
       tags: [lines]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/UpdateManagedLineRequest" } } }
       responses:
         "200": { description: Line updated, content: { application/json: { schema: { $ref: "#/components/schemas/ManagedLine" } } } }
-        "400": { description: Name or access mode is invalid, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "400": { description: Name is invalid, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "404": { description: Managed Line was not found, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "500": { description: Managed Line could not be updated, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
@@ -1048,67 +990,6 @@ paths:
         "503":
           description: Equipment identity is temporarily unavailable
           content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
-  /api/v1/subscription-profiles/{profileId}/access-mode:
-    put:
-      operationId: putSubscriptionProfileAccessMode
-      summary: Persist the administrator-selected access mode for one subscription profile
-      tags: [inventory]
-      parameters:
-        - name: profileId
-          in: path
-          required: true
-          schema:
-            type: string
-            pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PutAccessModeRequest"
-      responses:
-        "200":
-          description: Updated inventory snapshot
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InventoryResponse"
-        "400":
-          description: The request body or access mode is invalid
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: The subscription profile is not present in the current inventory
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "409":
-          description: The instance has not completed setup or is not ready for business APIs
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "421":
-          description: The HTTP authority is not a permitted loopback host
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "500":
-          description: The access mode could not be persisted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "504":
-          description: The request exceeded the bounded control-plane deadline
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
   /api/v1/setup/status:
     get:
       operationId: getSetupStatus
@@ -1577,77 +1458,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-  /api/v1/setup/subscription-profiles/{profileId}/access-mode:
-    put:
-      operationId: putSetupSubscriptionProfileAccessMode
-      summary: Persist a setup-time access mode without enabling RF
-      tags: [setup]
-      parameters:
-        - name: profileId
-          in: path
-          required: true
-          schema:
-            type: string
-            pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PutAccessModeRequest"
-      responses:
-        "200":
-          description: Updated setup inventory remains RF Off
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InventoryResponse"
-        "400":
-          description: Access mode is invalid
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "401":
-          description: No live setup session is present
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "404":
-          description: Subscription profile was not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "409":
-          description: HTTPS setup is incomplete or setup is unavailable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "421":
-          description: The HTTP authority is not a permitted loopback host
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "500":
-          description: Access mode could not be persisted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "504":
-          description: The request exceeded the bounded control-plane deadline
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
   /api/v1/setup/hardware/confirm:
     post:
       operationId: confirmSetupHardware
-      summary: Confirm the current RF-Off inventory and all per-profile access modes
+      summary: Confirm the current read-only hardware inventory
       tags: [setup]
       responses:
         "200":
@@ -1657,7 +1471,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SetupSessionResponse"
         "400":
-          description: A line lacks an access mode or is not RF Off
+          description: The current hardware topology is invalid
           content:
             application/json:
               schema:
@@ -1968,9 +1782,6 @@ components:
         hardwareInventoryDigest:
           type: string
           maxLength: 64
-    RFSafetyState:
-      type: string
-      enum: [off, not-present, unknown]
     BackendKind:
       type: string
       enum: [simulator, hardware, replay]
@@ -1980,19 +1791,9 @@ components:
     PhysicalDeviceState:
       type: string
       enum: [available, unavailable]
-    AccessMode:
-      type: string
-      enum: [cellular-native, host-vowifi-only, hold-rf-off]
     LineState:
       type: string
-      enum: [awaiting-access-mode, ready, unavailable]
-    PutAccessModeRequest:
-      type: object
-      additionalProperties: false
-      required: [accessMode]
-      properties:
-        accessMode:
-          $ref: "#/components/schemas/AccessMode"
+      enum: [ready, unavailable]
     PhysicalDeviceSummary:
       type: object
       additionalProperties: false
@@ -2038,10 +1839,7 @@ components:
         - physicalDeviceId
         - subscriptionProfileId
         - displayName
-        - accessMode
-        - accessModeConfigured
         - state
-        - rfSafety
         - generation
       properties:
         id:
@@ -2057,14 +1855,8 @@ components:
           type: string
           minLength: 1
           maxLength: 120
-        accessMode:
-          $ref: "#/components/schemas/AccessMode"
-        accessModeConfigured:
-          type: boolean
         state:
           $ref: "#/components/schemas/LineState"
-        rfSafety:
-          $ref: "#/components/schemas/RFSafetyState"
         generation:
           type: integer
           format: int64
@@ -2178,14 +1970,15 @@ components:
     ManagedLine:
       type: object
       additionalProperties: false
-      required: [id, displayName, managedModemId, managedModemDisplayName, subscriptionDisplayHint, accessMode, state, capabilities, createdAt]
+      required: [id, displayName, managedModemId, managedModemDisplayName, managedModemModel, managedModemSerialNumber, subscriptionDisplayHint, state, capabilities, createdAt]
       properties:
         id: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         displayName: { type: string, minLength: 1, maxLength: 120 }
         managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
+        managedModemModel: { type: string, maxLength: 128, description: Current bounded AT model result; empty when unavailable and displayed as read failure by the Web UI }
+        managedModemSerialNumber: { type: string, maxLength: 128, description: Current bounded USB Serial; empty when unavailable and displayed as read failure by the Web UI }
         subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
-        accessMode: { $ref: "#/components/schemas/AccessMode" }
         state: { $ref: "#/components/schemas/ManagedLineState" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
         createdAt: { type: string, format: date-time }
@@ -2198,14 +1991,22 @@ components:
     LineCandidate:
       type: object
       additionalProperties: false
-      required: [candidateId, managedModemId, managedModemDisplayName, subscriptionDisplayHint, capabilities, addable]
+      required: [candidateId, managedModemId, managedModemDisplayName, managedModemModel, managedModemSerialNumber, subscriptionDisplayHint, homeOperatorName, homeOperatorCode, simPresence, capabilities, addable, readinessReason]
       properties:
-        candidateId: { type: string, pattern: "^line-candidate-[0-9a-f]{32}$" }
+        candidateId: { type: string, pattern: "^line-candidate-[0-9a-f]{32}$", description: Transient opaque observation token revalidated at create time }
         managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
-        subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
+        managedModemModel: { type: string, maxLength: 128 }
+        managedModemSerialNumber: { type: string, maxLength: 128 }
+        subscriptionDisplayHint: { type: string, maxLength: 64 }
+        homeOperatorName: { type: string, maxLength: 64, description: Bounded EF_SPN name for the active profile; empty when unavailable }
+        homeOperatorCode: { type: string, pattern: "^$|^[0-9]{3}-[0-9]{2,3}$", description: Home MCC-MNC derived inside the Agent without exposing IMSI }
+        simPresence: { $ref: "#/components/schemas/ManagedModemSIMPresence" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
         addable: { type: boolean }
+        readinessReason:
+          type: string
+          enum: [READY, MODEM_OFFLINE, SIM_ABSENT, SIM_UNAVAILABLE, ALREADY_ADDED, BINDING_CONFLICT]
     LineCandidateList:
       type: object
       additionalProperties: false
@@ -2215,18 +2016,16 @@ components:
     AddManagedLineRequest:
       type: object
       additionalProperties: false
-      required: [candidateId, displayName, accessMode]
+      required: [candidateId, displayName]
       properties:
         candidateId: { type: string, pattern: "^line-candidate-[0-9a-f]{32}$" }
         displayName: { type: string, minLength: 1, maxLength: 120 }
-        accessMode: { $ref: "#/components/schemas/AccessMode" }
     UpdateManagedLineRequest:
       type: object
       additionalProperties: false
-      required: [displayName, accessMode]
+      required: [displayName]
       properties:
         displayName: { type: string, minLength: 1, maxLength: 120 }
-        accessMode: { $ref: "#/components/schemas/AccessMode" }
     ModemCandidate:
       type: object
       additionalProperties: false
@@ -2311,7 +2110,7 @@ components:
     SubscriptionProfileDetail:
       type: object
       additionalProperties: false
-      required: [id, simMediaId, displayName, state, displayIdentityHint, generation, accessMode, accessModeConfigured]
+      required: [id, simMediaId, displayName, state, displayIdentityHint, generation]
       properties:
         id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
         simMediaId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
@@ -2319,8 +2118,6 @@ components:
         state: { $ref: "#/components/schemas/SubscriptionProfileState" }
         displayIdentityHint: { type: string, minLength: 1, maxLength: 64 }
         generation: { $ref: "#/components/schemas/HardwareGeneration" }
-        accessMode: { $ref: "#/components/schemas/AccessMode" }
-        accessModeConfigured: { type: boolean }
     ResourceGroupDetail:
       type: object
       additionalProperties: false
@@ -2350,7 +2147,7 @@ components:
     HardwareLineDetail:
       type: object
       additionalProperties: false
-      required: [id, physicalDeviceId, modemFunctionId, subscriptionProfileId, resourceGroupId, displayName, generation, capabilities, accessMode, accessModeConfigured, state, rfSafety]
+      required: [id, physicalDeviceId, modemFunctionId, subscriptionProfileId, resourceGroupId, displayName, generation, capabilities, state]
       properties:
         id: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
         physicalDeviceId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
@@ -2360,10 +2157,7 @@ components:
         displayName: { type: string, minLength: 1, maxLength: 256 }
         generation: { $ref: "#/components/schemas/HardwareGeneration" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
-        accessMode: { $ref: "#/components/schemas/AccessMode" }
-        accessModeConfigured: { type: boolean }
         state: { $ref: "#/components/schemas/LineState" }
-        rfSafety: { $ref: "#/components/schemas/RFSafetyState" }
     HardwareTopologyResponse:
       type: object
       additionalProperties: false
@@ -2469,35 +2263,6 @@ components:
           minItems: 1
           maxItems: 16
           items: { $ref: "#/components/schemas/EUICCProfile" }
-    AccessPathState:
-      type: object
-      additionalProperties: false
-      required: [lineId, mode, mihomoState, lineState, authentication, epdg, ims, directFallback]
-      properties:
-        lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
-        mode: { type: string, enum: [direct, mihomo-required] }
-        mihomoState: { type: string, enum: [running, stopped, failed] }
-        lineState: { type: string, enum: [online, offline] }
-        authentication: { type: string, enum: [simulated-aka-complete] }
-        epdg: { type: string, enum: [connected, blocked] }
-        ims: { type: string, enum: [registered, offline] }
-        directFallback: { type: boolean, enum: [false] }
-    AccessPathRequest:
-      type: object
-      additionalProperties: false
-      required: [mode, mihomoState]
-      properties:
-        mode: { type: string, enum: [direct, mihomo-required] }
-        mihomoState: { type: string, enum: [running, stopped, failed] }
-    AccessPathListResponse:
-      type: object
-      additionalProperties: false
-      required: [lines]
-      properties:
-        lines:
-          type: array
-          maxItems: 1024
-          items: { $ref: "#/components/schemas/AccessPathState" }
     CallListResponse:
       type: object
       additionalProperties: false
@@ -2670,7 +2435,6 @@ components:
         - version
         - apiVersion
         - installationState
-        - rfSafety
         - backend
         - databaseCount
       properties:
@@ -2683,8 +2447,6 @@ components:
           enum: [v1]
         installationState:
           $ref: "#/components/schemas/InstallationState"
-        rfSafety:
-          $ref: "#/components/schemas/RFSafetyState"
         backend:
           $ref: "#/components/schemas/BackendKind"
         databaseCount:
@@ -2790,54 +2552,18 @@ components:
       properties:
         subscription: { $ref: "#/components/schemas/MihomoSubscription" }
         nodes: { type: array, maxItems: 10000, items: { $ref: "#/components/schemas/MihomoNode" } }
-    MihomoEgressProfile:
-      type: object
-      additionalProperties: false
-      required: [id, displayName, subscriptionId, lineId, selectionType, selectedNodeId, selectedNodeName, selectedCountryCode, selectedCountryName, sourceCidr, enabled, ready, readinessReason]
-      properties:
-        id: { type: string, pattern: "^egress_[A-Za-z0-9_-]{22}$" }
-        displayName: { type: string, minLength: 1, maxLength: 80 }
-        subscriptionId: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" }
-        lineId: { type: string, minLength: 1, maxLength: 160 }
-        selectionType: { type: string, enum: [node, country] }
-        selectedNodeId: { type: string, pattern: "^$|^node_[A-Za-z0-9_-]{22}$" }
-        selectedNodeName: { type: string, maxLength: 120 }
-        selectedCountryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
-        selectedCountryName: { type: string, maxLength: 80 }
-        sourceCidr: { type: string, maxLength: 64 }
-        enabled: { type: boolean }
-        ready: { type: boolean }
-        readinessReason: { type: string, enum: [READY, PROFILE_DISABLED, CORE_NOT_INSTALLED, SUBSCRIPTION_DISABLED, SUBSCRIPTION_NOT_READY, NODE_NOT_FOUND, COUNTRY_NOT_FOUND] }
-    MihomoEgressProfileMutation:
-      type: object
-      additionalProperties: false
-      required: [displayName, subscriptionId, lineId, selectionType, selectedNodeId, selectedCountryCode, enabled]
-      properties:
-        displayName: { type: string, minLength: 1, maxLength: 80 }
-        subscriptionId: { type: string, pattern: "^subscription_[A-Za-z0-9_-]{22}$" }
-        lineId: { type: string, minLength: 1, maxLength: 160 }
-        selectionType: { type: string, enum: [node, country] }
-        selectedNodeId: { type: string, pattern: "^$|^node_[A-Za-z0-9_-]{22}$" }
-        selectedCountryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
-        enabled: { type: boolean }
-    MihomoEgressProfileList:
-      type: object
-      additionalProperties: false
-      required: [profiles]
-      properties:
-        profiles: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/MihomoEgressProfile" } }
     LineEgressBinding:
       type: object
       additionalProperties: false
       required: [lineId, mode, countryCode, countryName, listenerPort, ready, readinessReason]
       properties:
         lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
-        mode: { type: string, enum: [direct, mihomo-country] }
+        mode: { type: string, enum: [unconfigured, direct, mihomo-country] }
         countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
         countryName: { type: string, maxLength: 80 }
         listenerPort: { type: integer, minimum: 0, maximum: 65535 }
         ready: { type: boolean }
-        readinessReason: { type: string, enum: [READY, LINE_NOT_HOST_VOWIFI, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
+        readinessReason: { type: string, enum: [READY, EGRESS_NOT_CONFIGURED, LINE_VOWIFI_UNSUPPORTED, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
     LineEgressBindingMutation:
       type: object
       additionalProperties: false
@@ -2854,20 +2580,21 @@ components:
     VoWiFiLineState:
       type: object
       additionalProperties: false
-      required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, attempt, lastErrorCode]
+      required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, phoneNumber, attempt, lastErrorCode]
       properties:
         lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         desiredActive: { type: boolean }
         eligible: { type: boolean }
-        readinessCode: { type: string, enum: [READY, LINE_NOT_HOST_VOWIFI, LINE_HARDWARE_NOT_READY, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
+        readinessCode: { type: string, enum: [READY, EGRESS_NOT_CONFIGURED, LINE_VOWIFI_UNSUPPORTED, LINE_HARDWARE_NOT_READY, SUBSCRIPTION_NOT_SELECTED, COUNTRY_NOT_FOUND, MIHOMO_NOT_RUNNING, MIHOMO_RESTART_REQUIRED] }
         state: { type: string, enum: [stopped, starting, connecting, registering, online, reconnecting, stopping, failed] }
         stage: { type: string, maxLength: 64 }
         online: { type: boolean }
-        egressMode: { type: string, enum: [direct, mihomo-country] }
+        egressMode: { type: string, enum: [unconfigured, direct, mihomo-country] }
         countryCode: { type: string, pattern: "^$|^[A-Z]{2}$" }
         countryName: { type: string, maxLength: 80 }
         registeredAt: { type: string, maxLength: 64 }
         nextRefreshAt: { type: string, maxLength: 64 }
+        phoneNumber: { type: string, pattern: "^$|^\\+[1-9][0-9]{2,14}$", maxLength: 16, description: E.164 phone number authorized by IMS registration; empty when unavailable }
         attempt: { type: integer, minimum: 0, maximum: 1000000 }
         lastErrorCode: { type: string, maxLength: 64 }
     VoWiFiLineStateList:

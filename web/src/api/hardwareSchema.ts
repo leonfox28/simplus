@@ -51,10 +51,6 @@ function isLabel(value: unknown, maximum = 256): value is string {
   )
 }
 
-function isAccessMode(value: unknown): boolean {
-  return value === 'cellular-native' || value === 'host-vowifi-only' || value === 'hold-rf-off'
-}
-
 export function isHardwareCapabilities(value: unknown): value is HardwareCapabilities {
   if (!isRecord(value)) return false
   const capabilityKeys = [
@@ -157,17 +153,14 @@ function isMedia(value: unknown): value is SIMMediaDetail {
 }
 
 function isProfile(value: unknown): value is SubscriptionProfileDetail {
-  if (!isRecord(value) || !hasExactKeys(value, ['id', 'simMediaId', 'displayName', 'state', 'displayIdentityHint', 'generation', 'accessMode', 'accessModeConfigured'])) return false
+  if (!isRecord(value) || !hasExactKeys(value, ['id', 'simMediaId', 'displayName', 'state', 'displayIdentityHint', 'generation'])) return false
   return (
     isID(value.id) &&
     isID(value.simMediaId) &&
     isLabel(value.displayName) &&
     (value.state === 'active' || value.state === 'inactive' || value.state === 'locked') &&
     isLabel(value.displayIdentityHint, 64) &&
-    isGeneration(value.generation) &&
-    isAccessMode(value.accessMode) &&
-    typeof value.accessModeConfigured === 'boolean' &&
-    (value.accessModeConfigured || value.accessMode === 'hold-rf-off')
+    isGeneration(value.generation)
   )
 }
 
@@ -201,9 +194,7 @@ function isGroup(value: unknown): value is ResourceGroupDetail {
 }
 
 function isLine(value: unknown): value is HardwareLineDetail {
-  if (!isRecord(value) || !hasExactKeys(value, ['id', 'physicalDeviceId', 'modemFunctionId', 'subscriptionProfileId', 'resourceGroupId', 'displayName', 'generation', 'capabilities', 'accessMode', 'accessModeConfigured', 'state', 'rfSafety'])) return false
-  const state = value.state === 'awaiting-access-mode' || value.state === 'ready' || value.state === 'unavailable'
-  const rf = value.rfSafety === 'off' || value.rfSafety === 'not-present' || value.rfSafety === 'unknown'
+  if (!isRecord(value) || !hasExactKeys(value, ['id', 'physicalDeviceId', 'modemFunctionId', 'subscriptionProfileId', 'resourceGroupId', 'displayName', 'generation', 'capabilities', 'state'])) return false
   return (
     isID(value.id) &&
     isID(value.physicalDeviceId) &&
@@ -213,11 +204,7 @@ function isLine(value: unknown): value is HardwareLineDetail {
     isLabel(value.displayName) &&
     isGeneration(value.generation) &&
     isHardwareCapabilities(value.capabilities) &&
-    isAccessMode(value.accessMode) &&
-    typeof value.accessModeConfigured === 'boolean' &&
-    state &&
-    rf &&
-    (value.accessModeConfigured || (value.accessMode === 'hold-rf-off' && value.state === 'awaiting-access-mode'))
+    (value.state === 'ready' || value.state === 'unavailable')
   )
 }
 
@@ -334,9 +321,7 @@ export function isHardwareTopologyResponse(value: unknown): value is HardwareTop
     const item = profile ? media.get(profile.simMediaId) : undefined
     const slot = item ? slots.get(item.simSlotId) : undefined
     const device = devices.get(line.physicalDeviceId)
-    const expectedState = device?.state === 'unavailable' || profile?.state === 'locked'
-      ? 'unavailable'
-      : line.accessModeConfigured ? 'ready' : 'awaiting-access-mode'
+    const expectedState = device?.state === 'unavailable' || profile?.state === 'locked' ? 'unavailable' : 'ready'
     if (
       !device ||
       !fn ||
@@ -346,7 +331,6 @@ export function isHardwareTopologyResponse(value: unknown): value is HardwareTop
       (profile !== undefined && group !== undefined && profile.generation > group.generation) ||
       (group !== undefined && group.generation > line.generation) ||
       line.state !== expectedState ||
-      line.rfSafety !== 'off' ||
       fn.physicalDeviceId !== line.physicalDeviceId ||
       !capabilitiesSubset(line.capabilities, fn.capabilities) ||
       (line.capabilities.cellularVoice && !line.capabilities.digitalVoiceMedia) ||
@@ -355,8 +339,8 @@ export function isHardwareTopologyResponse(value: unknown): value is HardwareTop
       !group ||
       group.physicalDeviceId !== line.physicalDeviceId ||
       !group.modemFunctionIds.includes(line.modemFunctionId) ||
-      !group.resources.includes('radio-control') ||
       !group.resources.includes('sim-access') ||
+      (line.capabilities.rfControl && !group.resources.includes('radio-control')) ||
       (line.capabilities.sms && !group.resources.includes('sms-storage')) ||
       ((line.capabilities.cellularVoice || line.capabilities.digitalVoiceMedia) && !group.resources.includes('voice-media')) ||
       (line.capabilities.simApdu && !group.resources.includes('sim-apdu')) ||

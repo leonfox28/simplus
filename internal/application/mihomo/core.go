@@ -32,6 +32,10 @@ type CoreStatus struct {
 	InstalledAt  time.Time `json:"installedAt"`
 }
 
+type CoreStatusReader interface {
+	Status() (CoreStatus, error)
+}
+
 type CoreManager struct {
 	Root       string
 	Releases   *ReleaseClient
