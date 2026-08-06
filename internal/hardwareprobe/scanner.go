@@ -165,7 +165,11 @@ func (scanner *Scanner) probeLocked(ctx context.Context, snapshot agentapi.Snaps
 func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapter, vendorID, productID, manufacturer, product string) (agentapi.DeviceReport, error) {
 	bcdDevice, _ := readAttribute(path, "bcdDevice", 16)
 	serial, serialErr := readAttribute(path, "serial", 128)
+	serial = safeText(serial, 128)
 	serialPresent := serialErr == nil && serial != ""
+	if !serialPresent {
+		serial = ""
+	}
 	serialFingerprint := ""
 	if serialPresent && scanner.Identities != nil {
 		value := adapter.Profile() + "\x00" + vendorID + ":" + productID + "\x00" + serial
@@ -184,7 +188,7 @@ func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapt
 		USB: agentapi.USBIdentity{
 			VendorID: vendorID, ProductID: productID, BCDDevice: strings.ToLower(bcdDevice),
 			Manufacturer: safeText(manufacturer, 128), Product: safeText(product, 128),
-			SerialPresent: serialPresent, SerialFingerprint: serialFingerprint,
+			SerialPresent: serialPresent, SerialNumber: serial, SerialFingerprint: serialFingerprint,
 			Configuration: configuration, InterfaceCount: len(interfaces),
 		},
 		Interfaces: interfaces,

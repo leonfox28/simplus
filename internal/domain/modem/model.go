@@ -49,6 +49,7 @@ type View struct {
 	ID           string
 	DisplayName  string
 	Model        string
+	SerialNumber string
 	Transport    string
 	State        string
 	Capabilities hardware.Capabilities
@@ -61,12 +62,16 @@ type View struct {
 // valid only for selecting the current observation in Add; it is not a stable
 // business identity.
 type Candidate struct {
-	CandidateID  string
-	Model        string
-	Transport    string
-	Support      string
-	Addable      bool
-	Readiness    string
-	Capabilities hardware.Capabilities
-	SIMPresence  string
+	CandidateID   string
+	USBAddress    string
+	USBVendorID   string
+	USBProductID  string
+	USBSerialHint string
+	Model         string
+	Transport     string
+	Support       string
+	Addable       bool
+	Readiness     string
+	Capabilities  hardware.Capabilities
+	SIMPresence   string
 }

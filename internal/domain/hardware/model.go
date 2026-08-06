@@ -61,8 +61,13 @@ type Capabilities struct {
 type PhysicalDevice struct {
 	ID                           string
 	DisplayName                  string
+	ModemModel                   string
 	Transport                    string
 	State                        string
+	USBAddress                   string
+	USBVendorID                  string
+	USBProductID                 string
+	USBSerialNumber              string
 	EquipmentIdentityFingerprint string
 	USBSerialFingerprint         string
 	Generation                   uint64

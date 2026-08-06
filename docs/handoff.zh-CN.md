@@ -29,7 +29,8 @@
 ### 真实硬件与 Host VoWiFi
 
 - Agent 使用统一 adapter registry 识别 QDC507 与 ML307A，不为每个型号复制平台协议；
-- 动态发现候选与管理员已添加模组已经分离；模组页只展示持久 `ManagedModem`，“添加模组”对话框才扫描未添加候选；
+- 动态发现候选与管理员已添加模组已经分离；模组页主表只显示 `AT+CGMM` 实时型号、直接读取的 USB Serial 序列号、默认掩码且按需实时读取的 IMEI、在线状态、SIM 插入状态和射频开关，型号不可读时明确显示“读取失败”且不回退 Adapter 名称；“添加模组”对话框才扫描未添加候选，并以单选表格显示相对 USB 地址、VID:PID、同一 AT 型号结果和 USB Serial 的本机脱敏短标识；
+- IMEI 不进入普通列表或数据库；只有管理员点击显示时才通过带 Agent/快照/设备代际约束的类型化操作读取，并在返回前核对持久指纹，响应禁止缓存，隐藏或刷新即从页面状态清除；
 - `ManagedModem` 以 ML307A IMEI 的每实例 HMAC 指纹稳定绑定，USB Serial 指纹只作辅助，USB 拓扑名与设备节点只作本次扫描定位；旧端口绑定在原设备仍可确认时一次性提升；
 - 线路页只展示管理员显式创建的持久 Line；添加时从已添加模组当前 SIM/Profile 候选建立 `ManagedModem + 身份 + 卡槽` 绑定，稳定业务 ID 不依赖 USB 位置或 Agent 临时 Line；
 - 短信、通话、Mihomo 出口和 Host VoWiFi 已全部改用稳定 Line 目录。模组离线、SIM/Profile 更换、卡槽不符或身份冲突时原 Line fail closed，不自动改绑；

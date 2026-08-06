@@ -87,11 +87,12 @@ type RFControlAdapter interface {
 }
 
 // EquipmentIdentityAdapter declares the fixed, read-only modem command used
-// to obtain the equipment identity. The raw identity never crosses the
-// hardware boundary; the Agent converts it to an instance-scoped fingerprint.
+// to obtain the equipment identity. The model adapter validates the raw value;
+// the Agent normally converts it to an instance-scoped fingerprint and only
+// discloses it through the dedicated, fenced identity-read operation.
 type EquipmentIdentityAdapter interface {
 	Adapter
-	ReadEquipmentIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (string, error)
+	ReadEquipmentIdentity(context.Context, attransport.Query) (string, error)
 }
 
 type Registry struct {

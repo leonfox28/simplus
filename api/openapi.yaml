@@ -1016,6 +1016,38 @@ paths:
         "500":
           description: RF operation failed
           content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+  /api/v1/modems/{modemId}/equipment-identity:
+    post:
+      operationId: readManagedModemEquipmentIdentity
+      summary: Read one online managed modem's IMEI on explicit administrator request
+      tags: [inventory]
+      parameters:
+        - name: modemId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
+      responses:
+        "200":
+          description: Current IMEI read directly from the resolved modem; never persisted
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content: { application/json: { schema: { $ref: "#/components/schemas/ManagedModemEquipmentIdentity" } } }
+        "401":
+          description: No live administrator session is present
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "404":
+          description: Managed modem was not found
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "409":
+          description: Modem is offline or its identity changed during the read
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "422":
+          description: Equipment identity read is unsupported for this modem
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
+        "503":
+          description: Equipment identity is temporarily unavailable
+          content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } }
   /api/v1/subscription-profiles/{profileId}/access-mode:
     put:
       operationId: putSubscriptionProfileAccessMode
@@ -2113,17 +2145,24 @@ components:
     ManagedModem:
       type: object
       additionalProperties: false
-      required: [id, displayName, model, transport, state, capabilities, rfState, simPresence, addedAt]
+      required: [id, displayName, model, serialNumber, transport, state, capabilities, rfState, simPresence, addedAt]
       properties:
         id: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         displayName: { type: string, minLength: 1, maxLength: 120 }
-        model: { type: string, minLength: 1, maxLength: 120 }
+        model: { type: string, maxLength: 128 }
+        serialNumber: { type: string, maxLength: 128 }
         transport: { $ref: "#/components/schemas/DeviceTransport" }
         state: { $ref: "#/components/schemas/ManagedModemState" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
         rfState: { $ref: "#/components/schemas/ManagedModemRFState" }
         simPresence: { $ref: "#/components/schemas/ManagedModemSIMPresence" }
         addedAt: { type: string, format: date-time }
+    ManagedModemEquipmentIdentity:
+      type: object
+      additionalProperties: false
+      required: [imei]
+      properties:
+        imei: { type: string, pattern: "^[0-9]{15}$" }
     ManagedModemList:
       type: object
       additionalProperties: false
@@ -2191,10 +2230,14 @@ components:
     ModemCandidate:
       type: object
       additionalProperties: false
-      required: [candidateId, model, transport, supportStatus, addable, readinessReason, capabilities, simPresence]
+      required: [candidateId, usbAddress, vendorId, productId, usbSerialHint, model, transport, supportStatus, addable, readinessReason, capabilities, simPresence]
       properties:
         candidateId: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" }
-        model: { type: string, minLength: 1, maxLength: 120 }
+        usbAddress: { type: string, maxLength: 64, pattern: "^$|^[0-9]+-[0-9]+(?:\\.[0-9]+)*$" }
+        vendorId: { type: string, maxLength: 4, pattern: "^$|^[0-9a-f]{4}$" }
+        productId: { type: string, maxLength: 4, pattern: "^$|^[0-9a-f]{4}$" }
+        usbSerialHint: { type: string, maxLength: 32 }
+        model: { type: string, maxLength: 128 }
         transport: { $ref: "#/components/schemas/DeviceTransport" }
         supportStatus: { $ref: "#/components/schemas/ModemSupportStatus" }
         addable: { type: boolean }

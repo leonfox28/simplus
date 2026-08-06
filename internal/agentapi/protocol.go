@@ -183,6 +183,7 @@ type USBIdentity struct {
 	Manufacturer      string `json:"manufacturer,omitempty"`
 	Product           string `json:"product,omitempty"`
 	SerialPresent     bool   `json:"serialPresent"`
+	SerialNumber      string `json:"serialNumber,omitempty"`
 	SerialFingerprint string `json:"serialFingerprint,omitempty"`
 	Configuration     int    `json:"configuration,omitempty"`
 	InterfaceCount    int    `json:"interfaceCount"`

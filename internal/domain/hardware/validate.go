@@ -15,6 +15,8 @@ var (
 	ErrInvalidSnapshot = errors.New("hardware snapshot is invalid")
 	identifierPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	usbAddressPattern  = regexp.MustCompile(`^[0-9]+-[0-9]+(?:\.[0-9]+)*$`)
+	usbIdentifier      = regexp.MustCompile(`^[0-9a-f]{4}$`)
 )
 
 const maxEntitiesPerKind = 1024
@@ -36,8 +38,14 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 	devices := make(map[string]PhysicalDevice, len(snapshot.Devices))
 	for _, device := range snapshot.Devices {
 		if !validID(device.ID) || !validLabel(device.DisplayName) || !validEntityGeneration(device.Generation, snapshot.Generation) ||
+			(device.ModemModel != "" && (!validLabel(device.ModemModel) || len(device.ModemModel) > 128)) ||
 			!oneOf(device.Transport, TransportUSB, TransportUART, TransportSimulated) ||
 			!oneOf(device.State, DeviceAvailable, DeviceUnavailable) ||
+			(device.USBAddress != "" && !usbAddressPattern.MatchString(device.USBAddress)) ||
+			(device.USBVendorID != "" && !usbIdentifier.MatchString(device.USBVendorID)) ||
+			(device.USBProductID != "" && !usbIdentifier.MatchString(device.USBProductID)) ||
+			(device.USBVendorID == "") != (device.USBProductID == "") ||
+			(device.USBSerialNumber != "" && (!validLabel(device.USBSerialNumber) || len(device.USBSerialNumber) > 128)) ||
 			(device.EquipmentIdentityFingerprint != "" && !fingerprintPattern.MatchString(device.EquipmentIdentityFingerprint)) ||
 			(device.USBSerialFingerprint != "" && !fingerprintPattern.MatchString(device.USBSerialFingerprint)) {
 			return Snapshot{}, ErrInvalidSnapshot

@@ -54,9 +54,9 @@ simplusd typed SMS/Call/eUICC API
           └── ML307A adapter
 ```
 
-`internal/modemadapter` 当前负责 USB identity、显示名称、固定端点角色、型号 AT 探测计划、SIM/设备身份、SIM AKA/IMS、RF 控制及证据化能力；`hardwareprobe.Scanner` 只通过 registry 选择模型和编排类型化能力，重叠的匹配规则 fail closed。QDC507 只解析已验证的 `primary-at` interface 2 和 QMI interface 4；ML307A 根据官方 V1.0.1 拨号手册与本机 HIL 固定解析 `2ecc:3012` 的 interface 2 为 primary AT。这里固定的是 USB interface 的功能角色，不是 `/dev/ttyUSB*` 或 `N-P` 物理端口；设备节点和 sysfs 拓扑都在每次扫描时重新解析。看到 tty、QMI 或 UAC 只构成硬件证据，不自动注册 SMS、Call 或数字音频业务能力。
+`internal/modemadapter` 当前负责 USB identity、内部显示名称、固定端点角色、型号 AT 探测计划、SIM/设备身份、SIM AKA/IMS、RF 控制及证据化能力；`hardwareprobe.Scanner` 只通过 registry 选择模型和编排类型化能力，重叠的匹配规则 fail closed。QDC507 只解析已验证的 `primary-at` interface 2 和 QMI interface 4；ML307A 根据官方 V1.0.1 拨号手册与本机 HIL 固定解析 `2ecc:3012` 的 interface 2 为 primary AT。这里固定的是 USB interface 的功能角色，不是 `/dev/ttyUSB*` 或 `N-P` 物理端口；设备节点和 sysfs 拓扑都在每次扫描时重新解析。看到 tty、QMI 或 UAC 只构成硬件证据，不自动注册 SMS、Call 或数字音频业务能力。Adapter 的内部显示名称不能作为 Web 型号回退值；模组页与候选列表的型号只使用只读 `AT+CGMM` 结果，模组离线、命令失败、空值或非法响应统一显示“读取失败”。
 
-动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。Agent 将原始 USB Serial 和 IMEI 留在进程边界内，只向内部 inventory 传递每实例 HMAC 指纹；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹，USB Serial 指纹只作辅助。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
+动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。添加对话框可以为人工辨认显示本次扫描的相对 USB 拓扑地址、VID:PID 和 USB Serial 每实例 HMAC 的短标识；这些字段不参与业务分支、不成为持久绑定，也不包含原始 IMEI、`/dev` 节点或 sysfs 绝对路径。USB 描述符的原始 Serial 被产品定义为可直接显示的模组元数据：Agent 对它做长度和控制字符限制，已添加模组在线时由普通列表直接展示，但它不落入 Managed Modem 记录、不参与绑定或业务控制；对应的每实例 HMAC 指纹仍只作辅助观察。普通 probe、inventory、模组列表和数据库只以 HMAC 处理 IMEI；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹。管理员在模组页点击显示按钮时，可以通过独立的鉴权 POST 实时读取当前在线模组的 IMEI：请求以 Managed Modem ID 进入，经过当前 Agent/快照/设备代际约束并再次核对持久 IMEI 指纹，响应固定为 `no-store`，原值不落库、不进入普通日志，隐藏或刷新后从页面状态清除。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
 
 Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称、接入方式及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md)。
 
@@ -75,7 +75,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 ```
 
 - 上层表达业务意图，例如“读取 SIM 插入状态”“启用射频”“发送短信”；下层返回统一的类型化状态、结果和错误。型号 adapter 才负责把这些意图映射为该型号的固定 AT/QMI/其他协议动作；
-- `profile`、型号名、USB VID/PID、interface number、sysfs 或 `/dev` 路径只能出现在发现、registry、adapter 或运行时硬件边界；AT/QMI 命令和厂商响应格式只能由型号 adapter/业务 driver 持有，通用 transport 不选择命令。应用层、Line、短信、电话、Host VoWiFi、Web 和公开 API 不得据此分支；
+- `profile`、型号名、USB VID/PID、interface number、sysfs 或 `/dev` 路径只能在发现、registry、adapter 或运行时硬件边界参与实现选择；AT/QMI 命令和厂商响应格式只能由型号 adapter/业务 driver 持有，通用 transport 不选择命令。添加模组候选 API 可以只读展示相对 USB 地址、VID:PID 和脱敏序列标识，但应用层、Line、短信、电话、Host VoWiFi 与 Web 控制流程不得据此分支；
 - 业务层只持有稳定业务 ID 和能力结果。把稳定 `ManagedModem`/Line 解析到本次扫描的物理设备、端点与 adapter，只能发生在运行时硬件边界；设备移动或实现替换不能迫使业务对象改绑；
 - 同一能力在不同型号上的实现差异必须收敛到该能力的小接口。若现有契约不足，先依据当前真实纵切扩展或新增最小类型化能力，不能在上层增加 `if model == ...`、传递任意命令或建立巨型“万能模组”接口；
 - 不支持、尚未验证和当前不可用必须作为能力证据或类型化状态显式返回，不能由上层猜测，也不能静默回退另一型号或另一 transport；
@@ -106,7 +106,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 
 - React 19 + Ant Design Pro 单页应用，使用 Umi Max 路由和 ProLayout；
 - 登录、基础初始化以及左侧导航的模组、线路、短信、语音、Mihomo、通知和系统设置页面均使用同一套管理后台组件；
-- 模组页只展示管理员已添加的模组；“添加模组”对话框展示未添加候选的型号、支持状态、类型化不可添加原因和能力；
+- 模组页只展示管理员已添加的模组，主表固定为型号、USB Serial 序列号、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、支持状态、类型化不可添加原因和能力；
 - 线路页只展示管理员创建的持久 Line；“添加线路”从已添加模组的当前 SIM/Profile 候选创建绑定，并组合维护接入方式、`direct`/Mihomo 国家出口和 Host VoWiFi 激活意图；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
 - 不把 Agent 协议、AT 指令或内部 fencing 模型泄漏到 UI。

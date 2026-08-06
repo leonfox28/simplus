@@ -33,19 +33,18 @@ func TestML307AICCIDIsOnlyReturnedAsAKeyedPseudonymAndMaskedHint(t *testing.T) {
 	}
 }
 
-func TestML307AIMEIIsOnlyReturnedAsAKeyedPseudonym(t *testing.T) {
-	fingerprint := strings.Repeat("d", 64)
+func TestML307AIMEIParserRequiresAValidCheckDigitAndTerminalResponse(t *testing.T) {
 	lines := []string{"+CGSN: 490154203237518", "OK"}
-	if actual := pseudonymizedEquipmentIMEI(lines, fixedIdentityPseudonymizer{value: fingerprint}); actual != fingerprint {
-		t.Fatalf("IMEI fingerprint = %q", actual)
+	if actual := equipmentIMEI(lines); actual != "490154203237518" {
+		t.Fatalf("IMEI = %q", actual)
 	}
 	for _, invalid := range [][]string{
 		{"+CGSN: 490154203237519", "OK"},
 		{"+CGSN: 490154203237518", "ERROR"},
 		{"4901542032375180", "OK"},
 	} {
-		if actual := pseudonymizedEquipmentIMEI(invalid, fixedIdentityPseudonymizer{value: fingerprint}); actual != "" {
-			t.Fatalf("invalid IMEI produced fingerprint %q", actual)
+		if actual := equipmentIMEI(invalid); actual != "" {
+			t.Fatalf("invalid IMEI was accepted: %q", actual)
 		}
 	}
 }

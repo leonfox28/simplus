@@ -63,7 +63,7 @@ func TestStableDeviceIDNormalizesHubPortSeparators(t *testing.T) {
 	}
 }
 
-func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
+func TestScannerDiscoversKnownDevicesWithDisplayableUSBSerialAndStableFingerprint(t *testing.T) {
 	root := t.TempDir()
 	usbRoot := filepath.Join(root, "sys", "bus", "usb", "devices")
 	devRoot := filepath.Join(root, "dev")
@@ -71,7 +71,7 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 	mustMkdir(t, devRoot)
 	writeUSBDevice(t, usbRoot, "1-1", map[string]string{
 		"idVendor": "2c7c", "idProduct": "0125", "manufacturer": "BAIWANG", "product": "Baiwang",
-		"serial": "must-not-leave-sysfs", "bcdDevice": "0318", "bConfigurationValue": "1",
+		"serial": "QDC507-SERIAL-0001", "bcdDevice": "0318", "bConfigurationValue": "1",
 	})
 	writeInterface(t, usbRoot, "1-1:1.2", 2, "ff", "00", "00", "option", "ttyUSB2")
 	writeInterface(t, usbRoot, "1-1:1.4", 4, "ff", "ff", "ff", "qmi_wwan", "")
@@ -81,7 +81,7 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 	mustMkdir(t, filepath.Join(usbRoot, "1-1:1.5", "sound", "card0"))
 	writeUSBDevice(t, usbRoot, "1-3", map[string]string{
 		"idVendor": "2ecc", "idProduct": "3012", "manufacturer": "CMIOT", "product": "ML307A",
-		"serial": "another-secret", "bcdDevice": "0100", "bConfigurationValue": "1",
+		"serial": "ML307A-SERIAL-0001", "bcdDevice": "0100", "bConfigurationValue": "1",
 	})
 	writeInterface(t, usbRoot, "1-3:1.2", 2, "ff", "00", "00", "option", "ttyUSB6")
 	writeUSBDevice(t, usbRoot, "2-1", map[string]string{"idVendor": "1234", "idProduct": "5678", "product": "ignored"})
@@ -96,19 +96,13 @@ func TestScannerDiscoversKnownDevicesWithoutExposingUSBSerial(t *testing.T) {
 		t.Fatalf("devices = %#v", devices)
 	}
 	qdc := devices[0]
-	if qdc.ID != "usb-1-1" || qdc.Profile != agentapi.ProfileQDC507 || !qdc.USB.SerialPresent {
+	if qdc.ID != "usb-1-1" || qdc.Profile != agentapi.ProfileQDC507 || !qdc.USB.SerialPresent ||
+		qdc.USB.SerialNumber != "QDC507-SERIAL-0001" || devices[1].USB.SerialNumber != "ML307A-SERIAL-0001" {
 		t.Fatalf("qdc = %#v", qdc)
 	}
 	if !fingerprintPattern.MatchString(qdc.USB.SerialFingerprint) || !fingerprintPattern.MatchString(devices[1].USB.SerialFingerprint) ||
 		qdc.USB.SerialFingerprint == devices[1].USB.SerialFingerprint {
 		t.Fatalf("USB serial fingerprints were not stable, distinct pseudonyms: %#v", devices)
-	}
-	encoded, err := json.Marshal(devices)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "must-not-leave-sysfs") || strings.Contains(string(encoded), "another-secret") {
-		t.Fatalf("raw serial leaked: %s", encoded)
 	}
 	if !hasCapability(qdc, "usb-uac", agentapi.EvidenceObserved) || !hasCapability(qdc, "digital-voice-media", agentapi.EvidenceUnverified) {
 		t.Fatalf("qdc capabilities = %#v", qdc.Capabilities)

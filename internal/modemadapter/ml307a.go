@@ -61,19 +61,19 @@ func (ML307A) ReadSIMPresence(ctx context.Context, query attransport.Query) (age
 	return standardat.SIMObservation(lines, nil), nil
 }
 
-func (ML307A) ReadEquipmentIdentity(ctx context.Context, query attransport.Query, identities IdentityPseudonymizer) (string, error) {
-	if query == nil || identities == nil {
+func (ML307A) ReadEquipmentIdentity(ctx context.Context, query attransport.Query) (string, error) {
+	if query == nil {
 		return "", errors.New("equipment identity is unavailable")
 	}
 	lines, err := query(ctx, "AT+CGSN=1", 2*time.Second)
 	if err != nil {
 		return "", errors.New("equipment identity query failed")
 	}
-	fingerprint := pseudonymizedEquipmentIMEI(lines, identities)
-	if fingerprint == "" {
+	imei := equipmentIMEI(lines)
+	if imei == "" {
 		return "", errors.New("equipment identity response is invalid")
 	}
-	return fingerprint, nil
+	return imei, nil
 }
 
 func (ML307A) ReadSIMIdentity(ctx context.Context, query attransport.Query, identities IdentityPseudonymizer) (string, string, error) {

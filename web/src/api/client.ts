@@ -58,6 +58,9 @@ type ApiError = components['schemas']['ApiError']
 type PhysicalDeviceSummary = components['schemas']['PhysicalDeviceSummary']
 
 const idPattern = /^[a-z0-9][a-z0-9-]{0,63}$/
+const usbAddressPattern = /^[0-9]+-[0-9]+(?:\.[0-9]+)*$/
+const usbIdentifierPattern = /^[0-9a-f]{4}$/
+const usbSerialHintPattern = /^USB •••• [0-9A-F]{8}$/
 const businessLineIdPattern = /^line_[A-Za-z0-9_-]{22}$/
 const historicalLineIdPattern = /^[A-Za-z0-9_-]{1,64}$/
 const bootstrapCodePattern = /^[A-Za-z0-9_-]{43}$/
@@ -774,7 +777,8 @@ function isManagedModem(value: unknown): value is ManagedModem {
   return (
     typeof candidate.id === 'string' && /^modem_[A-Za-z0-9_-]{22}$/.test(candidate.id) &&
     typeof candidate.displayName === 'string' && candidate.displayName.trim() === candidate.displayName && candidate.displayName.length > 0 && candidate.displayName.length <= 120 &&
-    typeof candidate.model === 'string' && candidate.model.trim() === candidate.model && candidate.model.length > 0 && candidate.model.length <= 120 &&
+    typeof candidate.model === 'string' && candidate.model.trim() === candidate.model && candidate.model.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.model) &&
+    typeof candidate.serialNumber === 'string' && candidate.serialNumber.trim() === candidate.serialNumber && candidate.serialNumber.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.serialNumber) &&
     (candidate.transport === 'simulated' || candidate.transport === 'usb' || candidate.transport === 'uart') &&
 	(candidate.state === 'online' || candidate.state === 'offline') &&
 	isHardwareCapabilities(candidate.capabilities) &&
@@ -789,7 +793,12 @@ function isModemCandidate(value: unknown): value is ModemCandidate {
   const candidate = value as Partial<ModemCandidate>
   return (
     typeof candidate.candidateId === 'string' && idPattern.test(candidate.candidateId) &&
-    typeof candidate.model === 'string' && candidate.model.trim() === candidate.model && candidate.model.length > 0 && candidate.model.length <= 120 &&
+    typeof candidate.usbAddress === 'string' && (candidate.usbAddress === '' || usbAddressPattern.test(candidate.usbAddress)) &&
+    typeof candidate.vendorId === 'string' && (candidate.vendorId === '' || usbIdentifierPattern.test(candidate.vendorId)) &&
+    typeof candidate.productId === 'string' && (candidate.productId === '' || usbIdentifierPattern.test(candidate.productId)) &&
+    (candidate.vendorId === '') === (candidate.productId === '') &&
+    typeof candidate.usbSerialHint === 'string' && (candidate.usbSerialHint === '' || usbSerialHintPattern.test(candidate.usbSerialHint)) &&
+    typeof candidate.model === 'string' && candidate.model.trim() === candidate.model && candidate.model.length <= 128 && !/[\u0000-\u001f\u007f]/.test(candidate.model) &&
     (candidate.transport === 'simulated' || candidate.transport === 'usb' || candidate.transport === 'uart') &&
 	(candidate.supportStatus === 'supported' || candidate.supportStatus === 'not-ready') &&
 	typeof candidate.addable === 'boolean' && candidate.addable === (candidate.supportStatus === 'supported') &&
@@ -856,6 +865,38 @@ export async function setManagedModemRFState(
   )
   if (!isManagedModem(response)) throw new Error('MODEM_RESPONSE_INVALID')
   return response
+}
+
+function isIMEI(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^[0-9]{15}$/.test(value)) return false
+  let sum = 0
+  for (let index = 0; index < value.length; index += 1) {
+    let digit = Number(value[index])
+    if (index % 2 === 1) {
+      digit *= 2
+      if (digit > 9) digit -= 9
+    }
+    sum += digit
+  }
+  return sum % 10 === 0
+}
+
+export async function readManagedModemIMEI(modemId: string, signal?: AbortSignal): Promise<string> {
+  if (!/^modem_[A-Za-z0-9_-]{22}$/.test(modemId)) throw new Error('MODEM_IDENTITY_REQUEST_INVALID')
+  const response = await requestJSON(
+    `/api/v1/modems/${encodeURIComponent(modemId)}/equipment-identity`,
+    signal,
+    'MODEM_IDENTITY_NETWORK_UNAVAILABLE',
+    'MODEM_IDENTITY_RESPONSE_INVALID',
+    'MODEM_IDENTITY',
+    { method: 'POST' },
+  )
+  if (typeof response !== 'object' || response === null || Object.keys(response).length !== 1) {
+    throw new Error('MODEM_IDENTITY_RESPONSE_INVALID')
+  }
+  const imei = (response as { imei?: unknown }).imei
+  if (!isIMEI(imei)) throw new Error('MODEM_IDENTITY_RESPONSE_INVALID')
+  return imei
 }
 
 function isManagedLine(value: unknown): value is ManagedLine {

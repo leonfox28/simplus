@@ -47,6 +47,16 @@ type fakeRFController struct {
 	enabled    bool
 }
 
+type fakeEquipmentIdentityReader struct {
+	identity   EquipmentIdentity
+	hardwareID string
+}
+
+func (reader *fakeEquipmentIdentityReader) Read(_ context.Context, hardwareID string) (EquipmentIdentity, error) {
+	reader.hardwareID = hardwareID
+	return reader.identity, nil
+}
+
 func (controller *fakeRFController) State(_ context.Context, hardwareID string) (string, error) {
 	controller.hardwareID = hardwareID
 	return controller.state, nil
@@ -73,7 +83,10 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 	source := &topologySource{topology: inventory.Topology{
 		Devices: []hardware.PhysicalDevice{{
 			ID: "agent-usb-1-3", DisplayName: "China Mobile IoT ML307A", Transport: hardware.TransportUSB,
-			State: hardware.DeviceAvailable, EquipmentIdentityFingerprint: equipmentIdentity, USBSerialFingerprint: usbSerialIdentity,
+			ModemModel: "ML307A",
+			USBAddress: "1-3", USBVendorID: "2ecc", USBProductID: "3012",
+			USBSerialNumber: "ML307A-SERIAL-0001",
+			State:           hardware.DeviceAvailable, EquipmentIdentityFingerprint: equipmentIdentity, USBSerialFingerprint: usbSerialIdentity,
 		}},
 		ModemFunctions: []hardware.ModemFunction{{
 			ID: "agent-usb-1-3-modem", PhysicalDeviceID: "agent-usb-1-3", Capabilities: capabilities,
@@ -92,13 +105,16 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 	service.now = func() time.Time { return now }
 	rf := &fakeRFController{state: domain.RFStateOff}
 	service.UseRFController(rf)
+	identityReader := &fakeEquipmentIdentityReader{identity: EquipmentIdentity{IMEI: "490154203237518", Fingerprint: equipmentIdentity}}
+	service.UseEquipmentIdentityReader(identityReader)
 
 	candidates, err := service.Candidates(t.Context())
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("candidates=%#v error=%v", candidates, err)
 	}
 	if !candidates[0].Addable || candidates[0].Support != domain.SupportSupported || candidates[0].Readiness != domain.ReadinessReady || !candidates[0].Capabilities.HostVoWiFiAuth ||
-		candidates[0].SIMPresence != domain.SIMPresencePresent {
+		candidates[0].SIMPresence != domain.SIMPresencePresent || candidates[0].USBAddress != "1-3" ||
+		candidates[0].USBVendorID != "2ecc" || candidates[0].USBProductID != "3012" || candidates[0].USBSerialHint != "USB •••• BBBBBBBB" {
 		t.Fatalf("candidate=%#v", candidates[0])
 	}
 
@@ -107,7 +123,7 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 		t.Fatal(err)
 	}
 	if added.ID != "modem_AQEBAQEBAQEBAQEBAQEBAQ" || added.State != domain.StateOnline || added.RFState != domain.RFStateUnknown ||
-		added.SIMPresence != domain.SIMPresencePresent || added.AddedAt != now {
+		added.Model != "ML307A" || added.SerialNumber != "ML307A-SERIAL-0001" || added.SIMPresence != domain.SIMPresencePresent || added.AddedAt != now {
 		t.Fatalf("added=%#v", added)
 	}
 	if len(repository.records) != 1 || repository.records[0].EquipmentIdentityFingerprint != equipmentIdentity ||
@@ -124,12 +140,16 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 
 	views, err := service.List(t.Context())
 	if err != nil || len(views) != 1 || views[0].State != domain.StateOnline || views[0].RFState != domain.RFStateOff ||
-		views[0].SIMPresence != domain.SIMPresencePresent || rf.hardwareID != "agent-usb-1-3" {
+		views[0].Model != "ML307A" || views[0].SerialNumber != "ML307A-SERIAL-0001" || views[0].SIMPresence != domain.SIMPresencePresent || rf.hardwareID != "agent-usb-1-3" {
 		t.Fatalf("online views=%#v error=%v", views, err)
 	}
 	changed, err := service.SetRFState(t.Context(), added.ID, true)
 	if err != nil || changed.RFState != domain.RFStateOn || !rf.enabled || rf.hardwareID != "agent-usb-1-3" {
 		t.Fatalf("RF change=%#v controller=%#v error=%v", changed, rf, err)
+	}
+	imei, err := service.ReadEquipmentIdentity(t.Context(), added.ID)
+	if err != nil || imei != "490154203237518" || identityReader.hardwareID != "agent-usb-1-3" {
+		t.Fatalf("IMEI=%q hardware=%q error=%v", imei, identityReader.hardwareID, err)
 	}
 	source.topology.Devices[0].ID = "agent-usb-2-4"
 	source.topology.ModemFunctions[0].PhysicalDeviceID = "agent-usb-2-4"
@@ -146,8 +166,38 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 	source.topology = inventory.Topology{}
 	views, err = service.List(t.Context())
 	if err != nil || len(views) != 1 || views[0].State != domain.StateOffline || !views[0].Capabilities.RFControl ||
-		views[0].SIMPresence != domain.SIMPresenceUnknown {
+		views[0].Model != "" || views[0].SIMPresence != domain.SIMPresenceUnknown {
 		t.Fatalf("offline views=%#v error=%v", views, err)
+	}
+	if _, err := service.ReadEquipmentIdentity(t.Context(), added.ID); !errors.Is(err, ErrEquipmentIdentityUnavailable) {
+		t.Fatalf("offline identity error=%v", err)
+	}
+}
+
+func TestManagedModemIdentityReadRejectsAMismatchedCurrentIdentity(t *testing.T) {
+	stableFingerprint := strings.Repeat("a", 64)
+	source := &topologySource{topology: inventory.Topology{
+		Devices: []hardware.PhysicalDevice{{
+			ID: "agent-usb-1-3", DisplayName: "ML307A", Transport: hardware.TransportUSB,
+			State: hardware.DeviceAvailable, EquipmentIdentityFingerprint: stableFingerprint,
+		}},
+		ModemFunctions: []hardware.ModemFunction{{
+			ID: "agent-usb-1-3-modem", PhysicalDeviceID: "agent-usb-1-3", Capabilities: hardware.Capabilities{SIMAccess: true},
+		}},
+	}}
+	repository := &memoryRepository{records: []domain.Record{{
+		ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", EquipmentIdentityFingerprint: stableFingerprint,
+		DisplayName: "ML307A", Model: "ML307A", Transport: hardware.TransportUSB,
+	}}}
+	service, err := New(repository, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.UseEquipmentIdentityReader(&fakeEquipmentIdentityReader{identity: EquipmentIdentity{
+		IMEI: "490154203237518", Fingerprint: strings.Repeat("b", 64),
+	}})
+	if _, err := service.ReadEquipmentIdentity(t.Context(), repository.records[0].ID); !errors.Is(err, ErrIdentityConflict) {
+		t.Fatalf("mismatched identity error=%v", err)
 	}
 }
 

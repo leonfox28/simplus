@@ -33,6 +33,7 @@ import {
   putSetupStorage,
   putSetupSubscriptionProfileAccessMode,
   putSubscriptionProfileAccessMode,
+  readManagedModemIMEI,
   deactivateVoWiFiLine,
   sendSMSMessage,
   updateManagedLine,
@@ -578,10 +579,11 @@ describe('managed Modem API client', () => {
   }
   const modem = {
     id: 'modem_AQEBAQEBAQEBAQEBAQEBAQ', displayName: 'ML307A', model: 'ML307A', transport: 'usb',
-    state: 'online', capabilities, rfState: 'off', simPresence: 'present', addedAt: '2026-08-05T12:00:00Z',
+    serialNumber: 'ML307A-SERIAL-0001', state: 'online', capabilities, rfState: 'off', simPresence: 'present', addedAt: '2026-08-05T12:00:00Z',
   }
   const candidate = {
-    candidateId: 'agent-usb-1-3', model: 'ML307A', transport: 'usb', supportStatus: 'supported',
+    candidateId: 'agent-usb-1-3', usbAddress: '1-3', vendorId: '2ecc', productId: '3012',
+    usbSerialHint: 'USB •••• 01234567', model: 'ML307A', transport: 'usb', supportStatus: 'supported',
     addable: true, readinessReason: 'READY', capabilities, simPresence: 'absent',
   }
 
@@ -607,6 +609,30 @@ describe('managed Modem API client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ candidates: [invalid] })))
 
     await expect(listModemCandidates()).rejects.toThrow('MODEM_CANDIDATE_RESPONSE_INVALID')
+  })
+
+  it('rejects an absolute USB path in candidate display metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      candidates: [{ ...candidate, usbAddress: '/sys/bus/usb/devices/1-3' }],
+    })))
+
+    await expect(listModemCandidates()).rejects.toThrow('MODEM_CANDIDATE_RESPONSE_INVALID')
+  })
+
+  it('reads a valid IMEI only from the dedicated no-payload operation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ imei: '490154203237518' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(readManagedModemIMEI(modem.id)).resolves.toBe('490154203237518')
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(path).toBe(`/api/v1/modems/${modem.id}/equipment-identity`)
+    expect(init.method).toBe('POST')
+  })
+
+  it('rejects an IMEI with an invalid check digit', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ imei: '490154203237519' })))
+
+    await expect(readManagedModemIMEI(modem.id)).rejects.toThrow('MODEM_IDENTITY_RESPONSE_INVALID')
   })
 })
 

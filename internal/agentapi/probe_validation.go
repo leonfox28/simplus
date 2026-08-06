@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var simIdentityHintPattern = regexp.MustCompile(`^ICCID •••• [0-9]{4}$`)
@@ -51,6 +53,10 @@ func validateDeviceProbe(device DeviceProbe) error {
 	}
 	if device.Identity.EquipmentIdentityFingerprint != "" && !isSHA256Hex(device.Identity.EquipmentIdentityFingerprint) {
 		return errors.New("equipment identity must be an instance-scoped fingerprint")
+	}
+	if !validOptionalProbeText(device.Identity.Manufacturer, 128) || !validOptionalProbeText(device.Identity.Model, 128) ||
+		!validOptionalProbeText(device.Identity.Revision, 128) {
+		return errors.New("modem identity text is invalid")
 	}
 	if !oneOf(device.SIM.State, SIMStatePresent, SIMStateAbsent, SIMStateLocked, SIMStateUnknown) {
 		return fmt.Errorf("invalid SIM state %q", device.SIM.State)
@@ -158,6 +164,21 @@ func validateDeviceProbe(device DeviceProbe) error {
 		return errors.New("complete probe requires a known RF state and activeCallCount")
 	}
 	return nil
+}
+
+func validOptionalProbeText(value string, limit int) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) > limit || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
 }
 
 func oneOf(value string, allowed ...string) bool {

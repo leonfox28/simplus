@@ -155,6 +155,7 @@ type ManagedModemManager interface {
 	Candidates(context.Context) ([]modemdomain.Candidate, error)
 	Add(context.Context, string) (modemdomain.View, error)
 	SetRFState(context.Context, string, bool) (modemdomain.View, error)
+	ReadEquipmentIdentity(context.Context, string) (string, error)
 }
 
 type ManagedLineManager interface {
@@ -2429,7 +2430,9 @@ func (server *Server) ListModemCandidates(w http.ResponseWriter, r *http.Request
 	candidates := make([]openapi.ModemCandidate, 0, len(items))
 	for _, item := range items {
 		candidates = append(candidates, openapi.ModemCandidate{
-			CandidateId: item.CandidateID, Model: item.Model, Transport: openapi.DeviceTransport(item.Transport),
+			CandidateId: item.CandidateID, UsbAddress: item.USBAddress,
+			VendorId: item.USBVendorID, ProductId: item.USBProductID, UsbSerialHint: item.USBSerialHint,
+			Model: item.Model, Transport: openapi.DeviceTransport(item.Transport),
 			SupportStatus: openapi.ModemSupportStatus(item.Support), Addable: item.Addable,
 			ReadinessReason: openapi.ModemCandidateReadinessReason(item.Readiness),
 			Capabilities:    hardwareCapabilitiesResponse(item.Capabilities), SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence),
@@ -2503,9 +2506,37 @@ func (server *Server) SetManagedModemRFState(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, managedModemResponse(item))
 }
 
+func (server *Server) ReadManagedModemEquipmentIdentity(w http.ResponseWriter, r *http.Request, modemID string) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.modems == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_MANAGEMENT_UNAVAILABLE", Retryable: true})
+		return
+	}
+	imei, err := server.modems.ReadEquipmentIdentity(r.Context(), modemID)
+	if err != nil {
+		switch {
+		case errors.Is(err, modemapp.ErrModemNotFound):
+			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MODEM_NOT_FOUND", Retryable: false})
+		case errors.Is(err, modemapp.ErrIdentityConflict):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_IDENTITY_CONFLICT", Retryable: true})
+		case errors.Is(err, modemapp.ErrEquipmentIdentityUnavailable):
+			writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MODEM_IDENTITY_UNAVAILABLE", Retryable: true})
+		default:
+			server.logger.WarnContext(r.Context(), "managed modem identity read failed", "modem_id", modemID, "error", err)
+			writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MODEM_IDENTITY_UNAVAILABLE", Retryable: true})
+		}
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, http.StatusOK, openapi.ManagedModemEquipmentIdentity{Imei: imei})
+}
+
 func managedModemResponse(item modemdomain.View) openapi.ManagedModem {
 	return openapi.ManagedModem{
-		Id: item.ID, DisplayName: item.DisplayName, Model: item.Model,
+		Id: item.ID, DisplayName: item.DisplayName, Model: item.Model, SerialNumber: item.SerialNumber,
 		Transport: openapi.DeviceTransport(item.Transport), State: openapi.ManagedModemState(item.State),
 		Capabilities: hardwareCapabilitiesResponse(item.Capabilities), RfState: openapi.ManagedModemRFState(item.RFState),
 		SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence), AddedAt: item.AddedAt,

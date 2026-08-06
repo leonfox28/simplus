@@ -33,23 +33,23 @@ func (response *ErrorResponse) Is(target error) bool {
 }
 
 func NewHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
-	return newHandler(monitor, commands, nil, logger, false, smsBackends...)
+	return newHandler(monitor, commands, nil, nil, logger, false, smsBackends...)
 }
 
 // NewReadOnlyHardwareHandler is the production V1 hardware boundary. Its
 // signature deliberately provides no way to inject command or SMS backends.
 func NewReadOnlyHardwareHandler(monitor *Monitor, logger *slog.Logger) http.Handler {
-	return newHandler(monitor, nil, nil, logger, true)
+	return newHandler(monitor, nil, nil, nil, logger, true)
 }
 
 // NewManagedHardwareHandler exposes read-only discovery plus the narrowly
 // typed RF state setter. It still has no route for arbitrary commands, paths,
 // SMS, calls, or eUICC mutations.
-func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, logger *slog.Logger) http.Handler {
-	return newHandler(monitor, nil, rf, logger, false)
+func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger) http.Handler {
+	return newHandler(monitor, nil, rf, identity, logger, false)
 }
 
-func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
+func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
@@ -68,6 +68,9 @@ func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, logge
 		}
 		if rf != nil {
 			features = append(features, FeatureRFControl)
+		}
+		if identity != nil {
+			features = append(features, FeatureEquipmentIdentityRead)
 		}
 		if smsBackend != nil {
 			features = append(features, FeatureSMS)
@@ -209,10 +212,59 @@ func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, logge
 			writeJSON(w, http.StatusOK, response)
 		})
 	}
+	if identity != nil {
+		mux.HandleFunc("POST /v1/equipment-identity/read", func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+			decoder.DisallowUnknownFields()
+			var request EquipmentIdentityReadRequest
+			if err := decoder.Decode(&request); err != nil {
+				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid equipment identity request"})
+				return
+			}
+			if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "request must contain one JSON object"})
+				return
+			}
+			response, err := identity.Read(r.Context(), request)
+			if err != nil {
+				status, apiError := classifyEquipmentIdentityError(err)
+				logger.Warn("equipment identity request rejected", "device_id", request.DeviceID, "code", apiError.Code)
+				writeJSON(w, status, apiError)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+			writeJSON(w, http.StatusOK, response)
+		})
+	}
 	if smsBackend != nil {
 		registerSMSHandlers(mux, monitor, smsBackend, logger)
 	}
 	return mux
+}
+
+func classifyEquipmentIdentityError(err error) (int, ErrorResponse) {
+	status := http.StatusServiceUnavailable
+	response := ErrorResponse{Code: "EQUIPMENT_IDENTITY_UNAVAILABLE", Detail: "equipment identity is unavailable", Retryable: true}
+	switch {
+	case errors.Is(err, ErrEquipmentIdentityRequestInvalid):
+		status = http.StatusBadRequest
+		response = ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid equipment identity request"}
+	case errors.Is(err, ErrEquipmentIdentityAgentStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "AGENT_INSTANCE_STALE", Detail: "Agent instance changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrEquipmentIdentitySnapshotStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SNAPSHOT_STALE", Detail: "hardware snapshot changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrEquipmentIdentityDeviceStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "DEVICE_GENERATION_STALE", Detail: "device generation changed; refresh before retrying", Retryable: true}
+	case errors.Is(err, ErrEquipmentIdentityUnsupported):
+		status = http.StatusUnprocessableEntity
+		response = ErrorResponse{Code: "EQUIPMENT_IDENTITY_UNSUPPORTED", Detail: "equipment identity read is unsupported for this device"}
+	}
+	return status, response
 }
 
 func classifyRFError(err error) (int, ErrorResponse) {

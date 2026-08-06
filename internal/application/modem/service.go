@@ -9,6 +9,7 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,16 +19,21 @@ import (
 )
 
 var (
-	ErrCandidateNotFound = errors.New("modem candidate was not found")
-	ErrCandidateNotReady = errors.New("modem candidate is not ready to add")
-	ErrAlreadyManaged    = errors.New("modem candidate is already managed")
-	ErrCandidateInvalid  = errors.New("modem candidate id is invalid")
-	ErrModemNotFound     = errors.New("managed modem was not found")
-	ErrRFUnavailable     = errors.New("managed modem RF control is unavailable")
-	ErrIdentityConflict  = errors.New("modem equipment identity is not unique")
+	ErrCandidateNotFound            = errors.New("modem candidate was not found")
+	ErrCandidateNotReady            = errors.New("modem candidate is not ready to add")
+	ErrAlreadyManaged               = errors.New("modem candidate is already managed")
+	ErrCandidateInvalid             = errors.New("modem candidate id is invalid")
+	ErrModemNotFound                = errors.New("managed modem was not found")
+	ErrRFUnavailable                = errors.New("managed modem RF control is unavailable")
+	ErrIdentityConflict             = errors.New("modem equipment identity is not unique")
+	ErrEquipmentIdentityUnavailable = errors.New("managed modem equipment identity is unavailable")
 )
 
-var candidateIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+var (
+	candidateIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	imeiPattern        = regexp.MustCompile(`^[0-9]{15}$`)
+	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 type Repository interface {
 	ListManagedModems(context.Context) ([]domain.Record, error)
@@ -44,12 +50,22 @@ type RFController interface {
 	Set(context.Context, string, bool) (string, error)
 }
 
+type EquipmentIdentity struct {
+	IMEI        string
+	Fingerprint string
+}
+
+type EquipmentIdentityReader interface {
+	Read(context.Context, string) (EquipmentIdentity, error)
+}
+
 type Service struct {
 	repository Repository
 	inventory  Inventory
 	random     io.Reader
 	now        func() time.Time
 	rf         RFController
+	identity   EquipmentIdentityReader
 
 	mu sync.Mutex
 }
@@ -57,6 +73,12 @@ type Service struct {
 func (service *Service) UseRFController(controller RFController) {
 	if service != nil {
 		service.rf = controller
+	}
+}
+
+func (service *Service) UseEquipmentIdentityReader(reader EquipmentIdentityReader) {
+	if service != nil {
+		service.identity = reader
 	}
 }
 
@@ -85,7 +107,7 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 	views := make([]domain.View, 0, len(records))
 	for _, record := range records {
 		view := domain.View{
-			ID: record.ID, DisplayName: record.DisplayName, Model: record.Model,
+			ID: record.ID, DisplayName: record.DisplayName, Model: "",
 			Transport: record.Transport, State: domain.StateOffline,
 			Capabilities: record.Capabilities, RFState: domain.RFStateUnknown,
 			SIMPresence: domain.SIMPresenceUnknown, AddedAt: record.CreatedAt,
@@ -93,6 +115,7 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 		if current, ok := managedObservation(record, observed, byEquipment); ok {
 			view.State = domain.StateOnline
 			view.Model = current.model
+			view.SerialNumber = current.serialNumber
 			view.Transport = current.transport
 			view.Capabilities = current.capabilities
 			view.SIMPresence = current.simPresence
@@ -153,16 +176,22 @@ func (service *Service) Candidates(ctx context.Context) ([]domain.Candidate, err
 			support = domain.SupportSupported
 		}
 		candidates = append(candidates, domain.Candidate{
-			CandidateID: id, Model: current.model, Transport: current.transport,
+			CandidateID: id, USBAddress: current.usbAddress,
+			USBVendorID: current.usbVendorID, USBProductID: current.usbProductID,
+			USBSerialHint: shortUSBSerialHint(current.usbSerialIdentity),
+			Model:         current.model, Transport: current.transport,
 			Support: support, Addable: addable, Readiness: readiness, Capabilities: current.capabilities,
 			SIMPresence: current.simPresence,
 		})
 	}
 	sort.Slice(candidates, func(left, right int) bool {
-		if candidates[left].Model == candidates[right].Model {
-			return candidates[left].CandidateID < candidates[right].CandidateID
+		if candidates[left].USBAddress != candidates[right].USBAddress {
+			return candidates[left].USBAddress < candidates[right].USBAddress
 		}
-		return candidates[left].Model < candidates[right].Model
+		if candidates[left].Model != candidates[right].Model {
+			return candidates[left].Model < candidates[right].Model
+		}
+		return candidates[left].CandidateID < candidates[right].CandidateID
 	})
 	return candidates, nil
 }
@@ -208,16 +237,20 @@ func (service *Service) Add(ctx context.Context, candidateID string) (domain.Vie
 		return domain.View{}, fmt.Errorf("create managed modem id: %w", err)
 	}
 	now := service.now().UTC()
+	persistedModel := current.model
+	if persistedModel == "" {
+		persistedModel = current.displayName
+	}
 	record := domain.Record{
 		ID: id, EquipmentIdentityFingerprint: current.equipmentIdentity, USBSerialFingerprint: current.usbSerialIdentity,
-		DisplayName: current.model, Model: current.model,
+		DisplayName: current.displayName, Model: persistedModel,
 		Transport: current.transport, Capabilities: current.capabilities, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := service.repository.CreateManagedModem(ctx, record); err != nil {
 		return domain.View{}, fmt.Errorf("persist managed modem: %w", err)
 	}
 	return domain.View{
-		ID: id, DisplayName: record.DisplayName, Model: record.Model, Transport: record.Transport,
+		ID: id, DisplayName: record.DisplayName, Model: current.model, SerialNumber: current.serialNumber, Transport: record.Transport,
 		State: domain.StateOnline, Capabilities: record.Capabilities, RFState: domain.RFStateUnknown,
 		SIMPresence: current.simPresence, AddedAt: now,
 	}, nil
@@ -268,10 +301,62 @@ func (service *Service) SetRFState(ctx context.Context, modemID string, enabled 
 		return domain.View{}, fmt.Errorf("set managed modem RF state: %w", err)
 	}
 	return domain.View{
-		ID: selected.ID, DisplayName: selected.DisplayName, Model: selected.Model,
+		ID: selected.ID, DisplayName: selected.DisplayName, Model: current.model, SerialNumber: current.serialNumber,
 		Transport: current.transport, State: domain.StateOnline, Capabilities: current.capabilities,
 		RFState: state, SIMPresence: current.simPresence, AddedAt: selected.CreatedAt,
 	}, nil
+}
+
+func (service *Service) ReadEquipmentIdentity(ctx context.Context, modemID string) (string, error) {
+	if service == nil || service.identity == nil {
+		return "", ErrEquipmentIdentityUnavailable
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	records, err := service.repository.ListManagedModems(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list managed modems before identity read: %w", err)
+	}
+	var selected *domain.Record
+	for index := range records {
+		if records[index].ID == modemID {
+			selected = &records[index]
+			break
+		}
+	}
+	if selected == nil {
+		return "", ErrModemNotFound
+	}
+	topology, err := service.inventory.Topology(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read managed modem before identity read: %w", err)
+	}
+	observed := observations(topology)
+	records, err = service.promoteLegacyBindings(ctx, records, observed)
+	if err != nil {
+		return "", err
+	}
+	for index := range records {
+		if records[index].ID == modemID {
+			selected = &records[index]
+			break
+		}
+	}
+	current, online := managedObservation(*selected, observed, observationsByEquipment(observed))
+	if !online {
+		return "", ErrEquipmentIdentityUnavailable
+	}
+	identity, err := service.identity.Read(ctx, current.id)
+	if err != nil {
+		return "", fmt.Errorf("read managed modem equipment identity: %w", err)
+	}
+	if !imeiPattern.MatchString(identity.IMEI) || !fingerprintPattern.MatchString(identity.Fingerprint) {
+		return "", ErrEquipmentIdentityUnavailable
+	}
+	if identity.Fingerprint != selected.EquipmentIdentityFingerprint {
+		return "", ErrIdentityConflict
+	}
+	return identity.IMEI, nil
 }
 
 func (service *Service) newID() (string, error) {
@@ -284,7 +369,12 @@ func (service *Service) newID() (string, error) {
 
 type observation struct {
 	id                string
+	displayName       string
+	usbAddress        string
+	usbVendorID       string
+	usbProductID      string
 	model             string
+	serialNumber      string
 	transport         string
 	equipmentIdentity string
 	usbSerialIdentity string
@@ -300,7 +390,9 @@ func observations(topology inventory.Topology) map[string]observation {
 			continue
 		}
 		result[device.ID] = observation{
-			id: device.ID, model: device.DisplayName, transport: device.Transport,
+			id: device.ID, displayName: device.DisplayName, usbAddress: device.USBAddress,
+			usbVendorID: device.USBVendorID, usbProductID: device.USBProductID,
+			model: device.ModemModel, serialNumber: device.USBSerialNumber, transport: device.Transport,
 			equipmentIdentity: device.EquipmentIdentityFingerprint, usbSerialIdentity: device.USBSerialFingerprint,
 			simPresence: domain.SIMPresenceUnknown,
 		}
@@ -333,6 +425,13 @@ func observations(topology inventory.Topology) map[string]observation {
 		result[slot.PhysicalDeviceID] = current
 	}
 	return result
+}
+
+func shortUSBSerialHint(fingerprint string) string {
+	if len(fingerprint) != 64 {
+		return ""
+	}
+	return "USB •••• " + strings.ToUpper(fingerprint[len(fingerprint)-8:])
 }
 
 func observationsByEquipment(observed map[string]observation) map[string][]observation {

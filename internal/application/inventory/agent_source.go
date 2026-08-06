@@ -62,17 +62,20 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 		capabilities := mapAgentCapabilities(device)
 		observation, observed := probeByDevice[device.ID]
 		equipmentIdentity := ""
+		modemModel := ""
 		if observed {
 			equipmentIdentity = observation.Identity.EquipmentIdentityFingerprint
+			modemModel = observation.Identity.Model
 		}
 		backend := hardware.BackendDirectAT
 		if observedCapability(device, "qmi-control") {
 			backend = hardware.BackendDirectQMI
 		}
 		snapshot.Devices = append(snapshot.Devices, hardware.PhysicalDevice{
-			ID: deviceID, DisplayName: device.DisplayName, Transport: hardware.TransportUSB,
+			ID: deviceID, DisplayName: device.DisplayName, ModemModel: modemModel, Transport: hardware.TransportUSB,
 			State: hardware.DeviceAvailable, EquipmentIdentityFingerprint: equipmentIdentity,
-			USBSerialFingerprint: device.USB.SerialFingerprint, Generation: device.Generation,
+			USBAddress: device.PhysicalPath, USBVendorID: device.USB.VendorID, USBProductID: device.USB.ProductID,
+			USBSerialNumber: device.USB.SerialNumber, USBSerialFingerprint: device.USB.SerialFingerprint, Generation: device.Generation,
 		})
 		if !controlObserved {
 			// Keep descriptor-only candidates visible without inventing operable functions, slots or resources.

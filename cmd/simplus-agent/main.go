@@ -139,8 +139,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	rfService := agentapi.NewRFService(monitor, scanner)
+	equipmentIdentityService := agentapi.NewEquipmentIdentityService(monitor, scanner)
 	server := &http.Server{
-		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, logger), ReadHeaderTimeout: 3 * time.Second,
+		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, equipmentIdentityService, logger), ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	var simAKAServer *http.Server

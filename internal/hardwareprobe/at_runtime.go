@@ -48,8 +48,10 @@ func (runtime atRuntime) Probe(ctx context.Context, endpoint string, adapter mod
 	result = standardat.ExecuteProbe(ctx, query, plan, presenceAdapter.ReadSIMPresence)
 	result.Endpoint = endpoint
 	if identityAdapter, supported := adapter.(modemadapter.EquipmentIdentityAdapter); supported {
-		if fingerprint, identityErr := identityAdapter.ReadEquipmentIdentity(ctx, query, runtime.identities); identityErr == nil {
-			result.Identity.EquipmentIdentityFingerprint = fingerprint
+		if imei, identityErr := identityAdapter.ReadEquipmentIdentity(ctx, query); identityErr == nil && runtime.identities != nil {
+			if fingerprint, fingerprintErr := runtime.identities.Pseudonym("modem-imei-v1", []byte(imei)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
+				result.Identity.EquipmentIdentityFingerprint = fingerprint
+			}
 		}
 	}
 	if result.SIM.State == agentapi.SIMStatePresent && result.SIM.PrimaryLockState == agentapi.PrimaryLockReady {
@@ -61,6 +63,26 @@ func (runtime atRuntime) Probe(ctx context.Context, endpoint string, adapter mod
 		}
 	}
 	return result
+}
+
+func (runtime atRuntime) ReadEquipmentIdentity(ctx context.Context, endpoint string, adapter modemadapter.EquipmentIdentityAdapter) (agentapi.EquipmentIdentityObservation, error) {
+	if runtime.opener == nil || runtime.identities == nil || adapter == nil {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
+	}
+	session, err := runtime.opener.Open(endpoint)
+	if err != nil {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
+	}
+	defer session.Close()
+	imei, err := adapter.ReadEquipmentIdentity(ctx, session.Query)
+	if err != nil {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
+	}
+	fingerprint, err := runtime.identities.Pseudonym("modem-imei-v1", []byte(imei))
+	if err != nil || !fingerprintPattern.MatchString(fingerprint) {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
+	}
+	return agentapi.EquipmentIdentityObservation{IMEI: imei, Fingerprint: fingerprint}, nil
 }
 
 func (runtime atRuntime) ReadSIMAKAIdentity(ctx context.Context, endpoint string, adapter modemadapter.SIMAuthAdapter, identityFingerprint string) (string, error) {

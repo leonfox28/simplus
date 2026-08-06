@@ -60,13 +60,41 @@ func TestReadOnlyHardwareHandlerCannotExposeMutationRoutes(t *testing.T) {
 	}
 	for _, route := range []string{
 		"/v1/commands/radio/ensure-off", "/v1/sms/list", "/v1/sms/read", "/v1/sms/send", "/v1/sms/acknowledge",
-		"/v1/sim/aka/identity", "/v1/sim/aka/authenticate",
+		"/v1/sim/aka/identity", "/v1/sim/aka/authenticate", "/v1/equipment-identity/read",
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, route, strings.NewReader(`{}`)))
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("read-only route %s status = %d, want 404", route, response.Code)
 		}
+	}
+}
+
+func TestManagedHardwareHandlerDisclosesEquipmentIdentityOnlyThroughNoStoreRoute(t *testing.T) {
+	monitor := newMonitor(&monitorScanner{devices: []DeviceReport{{
+		ID: "usb-1-3", DisplayName: "ML307A", PhysicalPath: "1-3", Profile: ProfileML307A,
+	}}}, "01234567-89ab-cdef-0123-456789abcdef", 1)
+	snapshot, err := monitor.Refresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := NewEquipmentIdentityService(monitor, &fakeEquipmentIdentityBackend{observation: EquipmentIdentityObservation{
+		IMEI: "490154203237518", Fingerprint: strings.Repeat("a", 64),
+	}})
+	handler := NewManagedHardwareHandler(monitor, nil, identity, nil)
+	body, err := json.Marshal(EquipmentIdentityReadRequest{
+		AgentInstanceID: snapshot.AgentInstanceID, SnapshotGeneration: snapshot.Generation,
+		SnapshotRevision: snapshot.Revision, DeviceID: snapshot.Devices[0].ID,
+		DeviceGeneration: snapshot.Devices[0].Generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/equipment-identity/read", strings.NewReader(string(body))))
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(response.Body.String(), `"imei":"490154203237518"`) {
+		t.Fatalf("status=%d cache=%q body=%s", response.Code, response.Header().Get("Cache-Control"), response.Body.String())
 	}
 }
 

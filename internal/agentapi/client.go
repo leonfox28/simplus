@@ -122,6 +122,18 @@ func (client *Client) SetRFState(ctx context.Context, request RFSetRequest) (RFS
 	return response, nil
 }
 
+func (client *Client) ReadEquipmentIdentity(ctx context.Context, request EquipmentIdentityReadRequest) (EquipmentIdentityReadResponse, error) {
+	var response EquipmentIdentityReadResponse
+	if err := client.request(ctx, http.MethodPost, "/v1/equipment-identity/read", request, &response); err != nil {
+		return EquipmentIdentityReadResponse{}, err
+	}
+	if response.ProtocolVersion != ProtocolVersion || response.AgentInstanceID != request.AgentInstanceID ||
+		response.DeviceID != request.DeviceID || !validIMEI(response.IMEI) || !isSHA256Hex(response.Fingerprint) {
+		return EquipmentIdentityReadResponse{}, errors.New("invalid equipment identity response")
+	}
+	return response, nil
+}
+
 func (client *Client) ListSMS(ctx context.Context, request SMSListRequest) (SMSListResponse, error) {
 	if err := validateSMSListRequest(request); err != nil {
 		return SMSListResponse{}, err

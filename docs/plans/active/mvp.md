@@ -37,7 +37,8 @@
 
 - [x] 持久化 `ManagedModem`，将动态发现候选和管理员配置分成两个真相源；
 - [x] 提供只读候选扫描、已添加模组列表和显式添加 API；
-- [x] 重做模组页，只展示已添加模组，并以“添加模组”对话框展示未添加候选的型号、系统支持状态和能力；
+- [x] 重做模组页，只展示已添加模组，并以“添加模组”单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、系统支持状态和能力；
+- [x] 将已添加模组主表收敛为 `AT+CGMM` 实时型号、直接显示的 USB Serial 序列号、按需显示的 IMEI、在线状态、SIM 插入状态和射频开关；型号读取失败不回退 Adapter 名称，序列号仅作在线展示，IMEI 只实时读取并核对稳定指纹，不进入列表或持久存储；
 - [x] 以 ML307A IMEI 的每实例 HMAC 指纹稳定绑定 `ManagedModem`，USB Serial 指纹作为辅助，sysfs 拓扑仅作运行时定位，并兼容一次性提升旧端口绑定；
 - [x] 将 Host VoWiFi 的产品就绪条件与 RF 状态解耦，同时保留“真实证据仅覆盖 RF Off”的兼容性说明；
 - [x] 只建立 ML307A `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`；设备身份、SIM 插入状态和 Line 绑定身份独立探测，插卡状态保持只读，上电 RF 策略在命令语义、读回和获准 HIL 前保持不可操作；

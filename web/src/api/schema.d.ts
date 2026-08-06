@@ -858,6 +858,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/modems/{modemId}/equipment-identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read one online managed modem's IMEI on explicit administrator request */
+        post: operations["readManagedModemEquipmentIdentity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/subscription-profiles/{profileId}/access-mode": {
         parameters: {
             query?: never;
@@ -1271,6 +1288,7 @@ export interface components {
             id: string;
             displayName: string;
             model: string;
+            serialNumber: string;
             transport: components["schemas"]["DeviceTransport"];
             state: components["schemas"]["ManagedModemState"];
             capabilities: components["schemas"]["HardwareCapabilities"];
@@ -1278,6 +1296,9 @@ export interface components {
             simPresence: components["schemas"]["ManagedModemSIMPresence"];
             /** Format: date-time */
             addedAt: string;
+        };
+        ManagedModemEquipmentIdentity: {
+            imei: string;
         };
         ManagedModemList: {
             modems: components["schemas"]["ManagedModem"][];
@@ -1321,6 +1342,10 @@ export interface components {
         };
         ModemCandidate: {
             candidateId: string;
+            usbAddress: string;
+            vendorId: string;
+            productId: string;
+            usbSerialHint: string;
             model: string;
             transport: components["schemas"]["DeviceTransport"];
             supportStatus: components["schemas"]["ModemSupportStatus"];
@@ -4619,6 +4644,74 @@ export interface operations {
             };
             /** @description RF operation failed */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    readManagedModemEquipmentIdentity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                modemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current IMEI read directly from the resolved modem; never persisted */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedModemEquipmentIdentity"];
+                };
+            };
+            /** @description No live administrator session is present */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Managed modem was not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Modem is offline or its identity changed during the read */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Equipment identity read is unsupported for this modem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Equipment identity is temporarily unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

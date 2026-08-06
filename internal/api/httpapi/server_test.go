@@ -62,11 +62,18 @@ type testVoWiFiManager struct {
 }
 
 type testManagedModemManager struct {
-	items      []modemdomain.View
-	candidates []modemdomain.Candidate
-	added      string
-	rfModemID  string
-	rfEnabled  bool
+	items           []modemdomain.View
+	candidates      []modemdomain.Candidate
+	added           string
+	rfModemID       string
+	rfEnabled       bool
+	imei            string
+	identityModemID string
+}
+
+func (manager *testManagedModemManager) ReadEquipmentIdentity(_ context.Context, modemID string) (string, error) {
+	manager.identityModemID = modemID
+	return manager.imei, nil
 }
 
 type testManagedLineManager struct {
@@ -259,13 +266,16 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 	addedAt := time.Date(2026, 8, 5, 13, 0, 0, 0, time.UTC)
 	capabilities := hardware.Capabilities{SIMAccess: true, SIMAPDU: true, HostVoWiFiAuth: true, RFControl: true}
 	manager := &testManagedModemManager{
+		imei: "490154203237518",
 		items: []modemdomain.View{{
 			ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", DisplayName: "ML307A", Model: "ML307A",
-			Transport: hardware.TransportUSB, State: modemdomain.StateOnline, Capabilities: capabilities,
+			SerialNumber: "ML307A-SERIAL-0001",
+			Transport:    hardware.TransportUSB, State: modemdomain.StateOnline, Capabilities: capabilities,
 			RFState: modemdomain.RFStateOff, SIMPresence: modemdomain.SIMPresencePresent, AddedAt: addedAt,
 		}},
 		candidates: []modemdomain.Candidate{{
-			CandidateID: "agent-usb-1-1", Model: "QDC507", Transport: hardware.TransportUSB,
+			CandidateID: "agent-usb-1-1", USBAddress: "1-1", USBVendorID: "2c7c", USBProductID: "0125",
+			USBSerialHint: "USB •••• 01234567", Model: "QDC507", Transport: hardware.TransportUSB,
 			Support: modemdomain.SupportSupported, Addable: true, Capabilities: hardware.Capabilities{SIMAccess: true},
 			Readiness: modemdomain.ReadinessReady, SIMPresence: modemdomain.SIMPresenceAbsent,
 		}},
@@ -279,6 +289,7 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, listRequest)
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"id":"modem_AQEBAQEBAQEBAQEBAQEBAQ"`) ||
+		!strings.Contains(listResponse.Body.String(), `"serialNumber":"ML307A-SERIAL-0001"`) ||
 		!strings.Contains(listResponse.Body.String(), `"simPresence":"present"`) ||
 		strings.Contains(listResponse.Body.String(), "hardwareDeviceId") {
 		t.Fatalf("list status=%d body=%s", listResponse.Code, listResponse.Body.String())
@@ -289,6 +300,10 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 	scanResponse := httptest.NewRecorder()
 	handler.ServeHTTP(scanResponse, scanRequest)
 	if scanResponse.Code != http.StatusOK || !strings.Contains(scanResponse.Body.String(), `"candidateId":"agent-usb-1-1"`) ||
+		!strings.Contains(scanResponse.Body.String(), `"usbAddress":"1-1"`) ||
+		!strings.Contains(scanResponse.Body.String(), `"vendorId":"2c7c"`) ||
+		!strings.Contains(scanResponse.Body.String(), `"productId":"0125"`) ||
+		!strings.Contains(scanResponse.Body.String(), `"usbSerialHint":"USB •••• 01234567"`) ||
 		!strings.Contains(scanResponse.Body.String(), `"supportStatus":"supported"`) ||
 		!strings.Contains(scanResponse.Body.String(), `"readinessReason":"READY"`) ||
 		!strings.Contains(scanResponse.Body.String(), `"simPresence":"absent"`) {
@@ -311,6 +326,15 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 	handler.ServeHTTP(rfResponse, rfRequest)
 	if rfResponse.Code != http.StatusOK || manager.rfModemID != "modem_AQEBAQEBAQEBAQEBAQEBAQ" || !manager.rfEnabled || !strings.Contains(rfResponse.Body.String(), `"rfState":"on"`) {
 		t.Fatalf("RF status=%d body=%s call=(%q,%v)", rfResponse.Code, rfResponse.Body.String(), manager.rfModemID, manager.rfEnabled)
+	}
+
+	identityRequest := httptest.NewRequest(http.MethodPost, "/api/v1/modems/modem_AQEBAQEBAQEBAQEBAQEBAQ/equipment-identity", nil)
+	identityRequest.Host = "127.0.0.1:8080"
+	identityResponse := httptest.NewRecorder()
+	handler.ServeHTTP(identityResponse, identityRequest)
+	if identityResponse.Code != http.StatusOK || manager.identityModemID != "modem_AQEBAQEBAQEBAQEBAQEBAQ" ||
+		identityResponse.Header().Get("Cache-Control") != "no-store" || identityResponse.Body.String() != `{"imei":"490154203237518"}`+"\n" {
+		t.Fatalf("identity status=%d body=%s modem=%q cache=%q", identityResponse.Code, identityResponse.Body.String(), manager.identityModemID, identityResponse.Header().Get("Cache-Control"))
 	}
 }
 

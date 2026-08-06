@@ -158,6 +158,7 @@ func run() int {
 	}
 	if hardwareAgentClient != nil {
 		managedModemService.UseRFController(modemapp.NewAgentRFController(hardwareAgentClient))
+		managedModemService.UseEquipmentIdentityReader(modemapp.NewAgentEquipmentIdentityReader(hardwareAgentClient))
 	}
 	managedLineService, err := lineapp.New(stores, inventoryService)
 	if err != nil {

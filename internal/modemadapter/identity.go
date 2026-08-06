@@ -35,8 +35,8 @@ func pseudonymizedICCID(lines []string, responsePrefix string, pseudonymizer Ide
 	return "", ""
 }
 
-func pseudonymizedEquipmentIMEI(lines []string, pseudonymizer IdentityPseudonymizer) string {
-	if pseudonymizer == nil || !attransport.HasTerminalOK(lines) {
+func equipmentIMEI(lines []string) string {
+	if !attransport.HasTerminalOK(lines) {
 		return ""
 	}
 	for _, line := range lines {
@@ -47,11 +47,7 @@ func pseudonymizedEquipmentIMEI(lines []string, pseudonymizer IdentityPseudonymi
 		if !imeiPattern.MatchString(value) || !validIMEICheckDigit(value) {
 			continue
 		}
-		fingerprint, err := pseudonymizer.Pseudonym("modem-imei-v1", []byte(value))
-		if err == nil && fingerprintPattern.MatchString(fingerprint) {
-			return fingerprint
-		}
-		return ""
+		return value
 	}
 	return ""
 }

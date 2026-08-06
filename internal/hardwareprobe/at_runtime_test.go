@@ -77,7 +77,7 @@ func TestATRuntimeDelegatesCommandsToAdapterCapabilitiesAndClosesSession(t *test
 	if probe.State != agentapi.ProbeStateFailed || probe.ErrorCode != agentapi.ErrorCallStateUnknown {
 		t.Fatalf("probe state = %#v", probe)
 	}
-	if probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" || probe.SIM.DisplayIdentityHint != "ICCID •••• 2115" {
+	if probe.Identity.Model != "ML307A" || probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" || probe.SIM.DisplayIdentityHint != "ICCID •••• 2115" {
 		t.Fatalf("independent identity observations = %#v", probe)
 	}
 	if opener.endpoint != "/dev/fixture-ml307a" || !session.closed {

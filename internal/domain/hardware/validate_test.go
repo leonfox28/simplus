@@ -69,6 +69,14 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 		}},
 		{name: "uac without cellular digital voice", mutate: func(snapshot *Snapshot) { snapshot.ModemFunctions[0].Capabilities.USBUAC = true }},
 		{name: "malformed equipment identity", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].EquipmentIdentityFingerprint = "raw-imei" }},
+		{name: "control character in reported modem model", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].ModemModel = "ML307A\n" }},
+		{name: "absolute USB path", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].USBAddress = "/sys/bus/usb/devices/1-3" }},
+		{name: "partial USB identifier pair", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].USBVendorID = "2ecc" }},
+		{name: "malformed USB product identifier", mutate: func(snapshot *Snapshot) {
+			snapshot.Devices[0].USBVendorID = "2ecc"
+			snapshot.Devices[0].USBProductID = "301Z"
+		}},
+		{name: "control character in USB serial", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].USBSerialNumber = "serial\nvalue" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

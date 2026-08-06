@@ -2,8 +2,6 @@ package modem
 
 import (
 	"context"
-	"errors"
-	"strings"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 	domain "github.com/leonfox28/simplus/internal/domain/modem"
@@ -53,23 +51,10 @@ func (controller *AgentRFController) Set(ctx context.Context, hardwareDeviceID s
 }
 
 func (controller *AgentRFController) target(ctx context.Context, hardwareDeviceID string) (agentapi.Snapshot, agentapi.DeviceReport, string, error) {
-	if controller == nil || controller.client == nil || !strings.HasPrefix(hardwareDeviceID, "agent-") {
+	if controller == nil {
 		return agentapi.Snapshot{}, agentapi.DeviceReport{}, "", ErrRFUnavailable
 	}
-	agentDeviceID := strings.TrimPrefix(hardwareDeviceID, "agent-")
-	if agentDeviceID == "" || len(agentDeviceID) > 128 {
-		return agentapi.Snapshot{}, agentapi.DeviceReport{}, "", ErrRFUnavailable
-	}
-	snapshot, err := controller.client.Snapshot(ctx, true)
-	if err != nil {
-		return agentapi.Snapshot{}, agentapi.DeviceReport{}, "", err
-	}
-	for _, device := range snapshot.Devices {
-		if device.ID == agentDeviceID {
-			return snapshot, device, agentDeviceID, nil
-		}
-	}
-	return snapshot, agentapi.DeviceReport{}, agentDeviceID, errors.New("managed modem is offline")
+	return resolveAgentTarget(ctx, controller.client, hardwareDeviceID, ErrRFUnavailable)
 }
 
 func normalizeRFState(state string) string {

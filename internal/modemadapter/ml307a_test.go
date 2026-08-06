@@ -26,7 +26,7 @@ func TestML307AIdentityCapabilitiesOwnTheirFixedQueries(t *testing.T) {
 		}
 	}
 	identity := fixedIdentityPseudonymizer{value: fingerprint}
-	if got, err := adapter.ReadEquipmentIdentity(t.Context(), query, identity); err != nil || got != fingerprint {
+	if got, err := adapter.ReadEquipmentIdentity(t.Context(), query); err != nil || got != "490154203237518" {
 		t.Fatalf("equipment identity = %q, error = %v", got, err)
 	}
 	if got, hint, err := adapter.ReadSIMIdentity(t.Context(), query, identity); err != nil || got != fingerprint || hint != "ICCID •••• 2115" {
