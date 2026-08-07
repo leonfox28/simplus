@@ -1,8 +1,27 @@
 # Simplus
 
-Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台，用统一的 Web 界面管理 4G/5G 模组、线路、短信、电话、可拔插 eUICC 已安装 Profile，以及 Host VoWiFi 的专用网络出口。
+Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台，通过统一的 Web 界面管理
+4G/5G 模组、线路、短信、电话、可拔插 eUICC 已安装 Profile，以及 Host VoWiFi 的专用
+网络出口。
 
-项目采用单管理员模型，不以公网 SaaS、多租户平台、通用代理网关或完整 eSIM RSP 平台为目标。
+项目采用单管理员模型，不以公网 SaaS、多租户平台、通用代理网关或完整 eSIM RSP 平台
+为目标。
+
+> [!WARNING]
+> 本项目仍处于快速开发阶段。功能、接口、数据结构和部署方式可能随时迭代，且不保证
+> 现有功能的可用性、稳定性或向后兼容性。请勿将当前版本用于生产环境、关键通信或其他
+> 无法容忍服务中断和数据丢失的场景；升级或重建前请自行备份数据。
+
+## 当前状态
+
+当前部署运行形态已从宿主机原生进程迁移到 Docker Compose。仓库通过 `control`、
+`agent` 和 `netd` 三个镜像划分管理面、硬件访问与网络权限；Compose 中的 `app` 服务
+运行 control 镜像，并由 `data-init` 和 `bootstrap` 完成数据目录初始化及首次管理员创建。
+
+容器部署已经在 Debian 13/amd64 开发虚拟机完成镜像构建、隔离 smoke、真实模组发现、
+Mihomo、Host VoWiFi 和单段自号码短信回环验证；clean Debian 虚拟机上的完整安装、升级
+与卸载生命周期仍待验收。因此当前 Compose 仍属于部署候选，而不是稳定发布版本。原生
+systemd 安装仅作为过渡回退保留，不能与容器同时占用模组或管理端口。
 
 ## 当前能力
 
@@ -12,11 +31,64 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 - QDC507 与 ML307A 的类型化硬件识别、固定端点角色和只读状态探测；
 - Mihomo core、订阅、国家分组、共享 DoH、TPROXY 生命周期和 Zashboard 管理；
 - ML307A Host VoWiFi 的 SIM AKA、ePDG、Gm IPsec、IMS 注册、保活、提前刷新和服务恢复；
-- 三镜像 Docker Compose production 候选、受限原生开发 Agent 和局域网 Web 入口。
+- Docker Compose 下相互隔离的 control、agent、netd 镜像，以及类型化健康检查和持久化
+  数据目录。
 
-真实硬件的普通短信、电话、数字音频和 eUICC 切换仍未开放。默认 Agent 不提供任意 AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独立实现、验证和明确授权。
+真实硬件的普通蜂窝短信、电话、数字音频和 eUICC 切换仍未开放。默认 Agent 不提供任意
+AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独立实现、验证和明确授权。
+
+## Docker Compose 部署
+
+当前支持边界为 Debian 13、Linux amd64、rootful Docker Engine 和 Docker Compose
+2.24 或更新版本。Docker Desktop、Podman、ARM64、rootless Docker、user namespace
+remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信任局域网，不能直接暴露
+到公网。
+
+首次部署前，在仓库根目录完成一次性宿主准备和检查：
+
+```bash
+sudo bash scripts/release/prepare-container-host.sh
+bash scripts/release/check-container-host.sh "$PWD"
+```
+
+使用已经发布的固定版本启动，不要使用 `latest`。下面以 Compose 模板当前默认版本为例：
+
+```bash
+export SIMPLUS_IMAGE_TAG=v0.1.0
+export SIMPLUS_HTTP_PORT=8080
+export SIMPLUS_CONTROLLER_PORT=19090
+export SIMPLUS_DEVICE_GID=20
+
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs bootstrap
+```
+
+`SIMPLUS_DEVICE_GID` 必须与宿主 ttyUSB 设备所属组的数字 GID 一致；Debian 的 `dialout`
+通常为 `20`。`bootstrap` 只在全新实例首次启动时输出 `simplus_admin` 的随机密码，请立即
+保存并在首次登录后修改。管理后台默认位于 `http://<host-lan-ip>:8080`。
+
+持久数据保存在 Compose 文件旁的 `./data/core` 和 `./data/agent`。`docker compose down`
+会删除容器和临时运行对象，但保留这些目录；容器部署不会自动读取或迁移旧原生安装的
+`/var/lib/simplus` 数据。
+
+如果尚无可拉取的发布 tag，或需要从当前源码验收容器，可以先在本地构建三个镜像：
+
+```bash
+make container-build CONTAINER_IMAGE_TAG=dev
+make container-config CONTAINER_IMAGE_TAG=dev
+export SIMPLUS_IMAGE_TAG=dev
+docker compose up -d
+```
+
+完整的宿主要求、权限模型、生命周期、更新方式和故障处理见
+[Docker Compose 部署与原生过渡](docs/installation.md)。
 
 ## 本地开发
+
+日常 Go/Web 开发、测试、Simulator 和前端热更新仍直接使用本机工具链，不需要进入开发
+容器：
 
 ```bash
 make dev-toolchain
@@ -26,19 +98,9 @@ make test
 make dev-sim
 ```
 
-默认开发入口为 `http://127.0.0.1:5173`，API 只监听 `127.0.0.1:8080`。需要从受信任局域网中的另一台设备访问时运行：
-
-```bash
-make dev-sim-lan
-```
-
-然后打开 `http://<host-lan-ip>:5173`。日常开发与验证继续直接使用本机 Go/Node/pnpm，
-不需要开发容器。真实硬件和本机 systemd Agent 的说明见[开发工作流](docs/development.md)；
-`make dev-agent-deploy` 会请求 root 权限并重启本机开发 Agent，不属于普通构建步骤。
-
-生产 Compose、一次性宿主 `option` 准备和当前容器验收边界见
-[安装与卸载](docs/installation.md)。容器 HIL 完成前，现有原生 production 安装只作为
-过渡回退，不能和容器同时占用模组或端口。
+开发入口为 `http://127.0.0.1:5173`，API 只监听 `127.0.0.1:8080`。`make dev-sim` 仅用于
+开发和模拟验证，不是正式部署方式。真实硬件、本机受限开发 Agent 和局域网调试说明见
+[Linux 本地开发工作流](docs/development.md)。
 
 ## 文档
 
@@ -54,6 +116,8 @@ make dev-sim-lan
 
 ## 许可证
 
-除另行标注的材料外，Simplus 原创部分按照 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供：允许非商业使用、修改和分发，不授予商业使用权，也不要求用户仅因修改而公开源码。该模式属于“非商业源码可用”，不是 OSI 定义的开源软件。第三方和单独许可材料见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-> 当前首要目标平台是 Debian `linux/amd64`。其他发行版和 ARM64 在核心硬件业务路径完成后再决定支持级别。
+除另行标注的材料外，Simplus 原创部分按照
+[PolyForm Noncommercial License 1.0.0](LICENSE) 提供：允许非商业使用、修改和分发，
+不授予商业使用权，也不要求用户仅因修改而公开源码。该模式属于“非商业源码可用”，
+不是 OSI 定义的开源软件。第三方和单独许可材料见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
