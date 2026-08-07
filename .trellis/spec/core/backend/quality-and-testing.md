@@ -11,7 +11,12 @@ Tests live beside the package and prove the owning contract:
   reconciliation with `t.TempDir()`.
 - HTTP tests call the real router with `httptest` and explicit cookies/CSRF.
   `internal/api/httpapi/server_test.go` covers boundary mapping, authentication,
-  trusted authorities, timeouts, panic recovery, and response privacy.
+  trusted authorities, timeouts, panic recovery, response privacy, cursor
+  presence semantics, and authenticated SSE lifecycle/deadlines.
+- Realtime tests prove bounded publication, initial/all-topic resync,
+  slow-subscriber replacement, cancellation, topic normalization, and the rule
+  that only inbound SMS/incoming calls carry generic attention. Keep payload
+  assertions privacy-sensitive; the stream is not a resource transport.
 - Protocol tests validate both ends. `internal/agentapi/protocol_test.go` feeds
   malformed typed responses to client validation, while
   `internal/agentapi/client_server_test.go` proves production route
@@ -66,13 +71,16 @@ make check-format
 make verify-generated
 make lint
 make test
+make web-e2e
 ```
 
 `make lint` currently runs `go vet` over `./cmd/... ./internal/...` and
 `actionlint` over GitHub workflows; it is not a frontend lint command.
 `make test` runs all root Go packages, the Web Vitest suite and typecheck, the
 worktree-manifest regression, and the Simulator supervisor test. Consult the
-Web frontend quality spec for browser-side expectations.
+Web frontend quality spec for browser-side expectations. `make web-e2e` runs
+deterministic Playwright desktop/mobile flows with synthetic HTTP/SSE fixtures;
+it must not trigger hardware or real communications.
 
 Run `make check-docs` for public docs/instruction-map changes and
 `make check-container-files` for container shell/config changes. Run

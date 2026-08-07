@@ -13,6 +13,7 @@ import (
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	"github.com/leonfox28/simplus/internal/domain/call"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 )
 
 const ErrorInterruptedByRestart = "CALL_INTERRUPTED_BY_RESTART"
@@ -34,7 +35,10 @@ var (
 type Repository interface {
 	CreateCall(context.Context, call.Record) (call.Record, bool, error)
 	SetCallState(context.Context, string, string, string, time.Time) (call.Record, error)
-	ListCalls(context.Context, int) ([]call.Record, error)
+	ListCallsPage(context.Context, pagination.Request) (pagination.Page[call.Record], error)
+	GetCallByOperation(context.Context, string) (call.Record, bool, error)
+	GetCallByID(context.Context, string) (call.Record, bool, error)
+	HasActiveCallForLine(context.Context, string) (bool, error)
 	ReconcileCalls(context.Context, string, time.Time) (int64, error)
 }
 type LineSource interface {
@@ -59,8 +63,32 @@ func New(ctx context.Context, repository Repository, lines LineSource) (*Service
 	return service, nil
 }
 
-func (service *Service) List(ctx context.Context) ([]call.Record, error) {
-	return service.repository.ListCalls(ctx, 100)
+type PageResult struct {
+	Calls      []call.Record
+	NextCursor string
+}
+
+func (service *Service) List(ctx context.Context, limit int, cursor string) (PageResult, error) {
+	limit, err := pagination.NormalizeLimit(limit)
+	if err != nil {
+		return PageResult{}, err
+	}
+	after, err := pagination.Decode(cursor)
+	if err != nil {
+		return PageResult{}, err
+	}
+	page, err := service.repository.ListCallsPage(ctx, pagination.Request{Limit: limit, After: after})
+	if err != nil {
+		return PageResult{}, err
+	}
+	result := PageResult{Calls: page.Items}
+	if page.Next != nil {
+		result.NextCursor, err = pagination.Encode(*page.Next)
+		if err != nil {
+			return PageResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (service *Service) Dial(ctx context.Context, operationID, lineID, number string) (call.Record, bool, error) {
@@ -126,19 +154,17 @@ func (service *Service) DTMF(ctx context.Context, id, digits string) (call.Recor
 	if !dtmfPattern.MatchString(digits) {
 		return call.Record{}, ErrInvalid
 	}
-	values, err := service.repository.ListCalls(ctx, 100)
+	value, found, err := service.repository.GetCallByID(ctx, id)
 	if err != nil {
 		return call.Record{}, err
 	}
-	for _, value := range values {
-		if value.ID == id {
-			if value.State != call.StateActive {
-				return call.Record{}, call.ErrStateConflict
-			}
-			return value, nil
-		}
+	if !found {
+		return call.Record{}, call.ErrNotFound
 	}
-	return call.Record{}, call.ErrNotFound
+	if value.State != call.StateActive {
+		return call.Record{}, call.ErrStateConflict
+	}
+	return value, nil
 }
 
 func (service *Service) transition(ctx context.Context, id string, from []string, to, reason string) (call.Record, error) {
@@ -147,23 +173,21 @@ func (service *Service) transition(ctx context.Context, id string, from []string
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	values, err := service.repository.ListCalls(ctx, 100)
+	value, found, err := service.repository.GetCallByID(ctx, id)
 	if err != nil {
 		return call.Record{}, err
 	}
-	for _, value := range values {
-		if value.ID == id {
-			ok := false
-			for _, state := range from {
-				ok = ok || value.State == state
-			}
-			if !ok {
-				return call.Record{}, call.ErrStateConflict
-			}
-			return service.repository.SetCallState(ctx, id, to, reason, service.now().UTC())
-		}
+	if !found {
+		return call.Record{}, call.ErrNotFound
 	}
-	return call.Record{}, call.ErrNotFound
+	ok := false
+	for _, state := range from {
+		ok = ok || value.State == state
+	}
+	if !ok {
+		return call.Record{}, call.ErrStateConflict
+	}
+	return service.repository.SetCallState(ctx, id, to, reason, service.now().UTC())
 }
 
 func (service *Service) requireLine(ctx context.Context, id string) error {
@@ -180,22 +204,22 @@ func (service *Service) requireLine(ctx context.Context, id string) error {
 }
 
 func (service *Service) replayOrBusy(ctx context.Context, operationID, lineID, number, direction string) (call.Record, bool, error) {
-	values, err := service.repository.ListCalls(ctx, 100)
+	value, found, err := service.repository.GetCallByOperation(ctx, operationID)
 	if err != nil {
 		return call.Record{}, false, err
 	}
-	for _, value := range values {
-		if value.OperationID == operationID {
-			if value.LineID != lineID || value.RemoteAddress != number || value.Direction != direction {
-				return call.Record{}, false, call.ErrStateConflict
-			}
-			return value, true, nil
+	if found {
+		if value.LineID != lineID || value.RemoteAddress != number || value.Direction != direction {
+			return call.Record{}, false, call.ErrStateConflict
 		}
+		return value, true, nil
 	}
-	for _, value := range values {
-		if value.LineID == lineID && (value.State == call.StateIncoming || value.State == call.StateDialing || value.State == call.StateActive) {
-			return call.Record{}, false, ErrLineBusy
-		}
+	active, err := service.repository.HasActiveCallForLine(ctx, lineID)
+	if err != nil {
+		return call.Record{}, false, err
+	}
+	if active {
+		return call.Record{}, false, ErrLineBusy
 	}
 	return call.Record{}, false, nil
 }

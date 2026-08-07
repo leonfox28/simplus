@@ -411,6 +411,17 @@ paths:
       operationId: listMessages
       summary: List the most recent durable SMS records
       tags: [messages]
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+        - name: lineId
+          in: query
+          description: Stable Line identity for a conversation; remoteAddress is required with it
+          schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
+        - name: remoteAddress
+          in: query
+          description: Conversation peer; lineId is required with it
+          schema: { type: string, pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$" }
       responses:
         "200":
           description: Most recent SMS records, newest first
@@ -420,6 +431,12 @@ paths:
                 $ref: "#/components/schemas/SMSMessageListResponse"
         "401":
           description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          description: Pagination cursor, limit, or conversation filter is invalid
           content:
             application/json:
               schema:
@@ -569,13 +586,41 @@ paths:
       operationId: listCalls
       summary: List Simulator call records
       tags: [calls]
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
           description: Recent call records
           content: { application/json: { schema: { $ref: "#/components/schemas/CallListResponse" } } }
+        "400": { description: Pagination cursor or limit is invalid, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "401": { description: No administrator session, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
         "500": { description: Calls unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "421": { description: The HTTP authority is not a permitted trusted-LAN host, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Calls are not configured for this runtime, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "504": { description: The request exceeded the bounded control-plane deadline, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/events:
+    get:
+      operationId: streamEvents
+      summary: Stream authenticated resource invalidation and attention hints
+      description: Each SSE data field is one bounded RealtimeEvent. The stream is advisory; clients resynchronize through authoritative HTTP reads.
+      tags: [events]
+      responses:
+        "200":
+          description: Server-sent event stream
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/RealtimeEvent"
+        "401": { description: No live administrator session is present, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "409": { description: Instance not ready, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "421": { description: The HTTP authority is not a permitted trusted-LAN host, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "500": { description: Event stream could not be established, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "503": { description: Administrator authentication is unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/calls/dial:
     post:
       operationId: dialCall
@@ -1585,6 +1630,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 components:
+  parameters:
+    PageLimit:
+      name: limit
+      in: query
+      description: Maximum records returned; defaults to 20
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    PageCursor:
+      name: cursor
+      in: query
+      description: Versioned opaque cursor from the previous page
+      schema: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9_-]+$" }
   schemas:
     SetupCompletionResponse:
       type: object
@@ -2270,8 +2326,13 @@ components:
       properties:
         calls:
           type: array
-          maxItems: 100
+          maxItems: 50
           items: { $ref: "#/components/schemas/Call" }
+        nextCursor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: "^[A-Za-z0-9_-]+$"
     CallStartRequest:
       type: object
       additionalProperties: false
@@ -2382,6 +2443,30 @@ components:
           minimum: 1
         nearCapacity:
           type: boolean
+        nextCursor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: "^[A-Za-z0-9_-]+$"
+    RealtimeTopic:
+      type: string
+      enum: [system, inventory, modems, lines, vowifi, messages, calls, contacts, mihomo, notifications, euicc]
+    RealtimeAttention:
+      type: string
+      enum: [sms.received, call.incoming]
+    RealtimeEvent:
+      type: object
+      additionalProperties: false
+      required: [topics]
+      properties:
+        topics:
+          type: array
+          minItems: 1
+          maxItems: 11
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/RealtimeTopic" }
+        attention:
+          $ref: "#/components/schemas/RealtimeAttention"
     SendSMSRequest:
       type: object
       additionalProperties: false

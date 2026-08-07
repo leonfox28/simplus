@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	messageapp "github.com/leonfox28/simplus/internal/application/messaging"
+	"github.com/leonfox28/simplus/internal/application/realtime"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
 	linedomain "github.com/leonfox28/simplus/internal/domain/line"
@@ -161,6 +164,19 @@ func (acceptingAuthenticator) Authenticate(context.Context, string, string, bool
 }
 func (acceptingAuthenticator) Logout(context.Context, string, string) error { return nil }
 
+type expiringAuthenticator struct{ calls atomic.Int32 }
+
+func (*expiringAuthenticator) Login(context.Context, string, string) (authapp.LoginResult, error) {
+	return authapp.LoginResult{}, nil
+}
+func (authenticator *expiringAuthenticator) Authenticate(context.Context, string, string, bool) (authapp.Session, error) {
+	if authenticator.calls.Add(1) > 1 {
+		return authapp.Session{}, authapp.ErrUnauthorized
+	}
+	return authapp.Session{User: authapp.User{Username: "admin", Locale: "en-US"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+}
+func (*expiringAuthenticator) Logout(context.Context, string, string) error { return nil }
+
 func withTestAdministratorSession(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := r.Cookie(adminSessionCookieName); err != nil {
@@ -222,7 +238,11 @@ func TestLineEgressHTTPContractUsesTypedCountryBinding(t *testing.T) {
 	}}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := New(health.New(fixedStateStore("ready"), "simulator"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
-	handler := withTestAdministratorSession(Router(WithLineEgress(server, manager)))
+	hub := realtime.NewHub()
+	subscription := hub.Subscribe()
+	defer subscription.Close()
+	<-subscription.C
+	handler := withTestAdministratorSession(Router(WithRealtime(WithLineEgress(server, manager), hub)))
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/line-egress-bindings", nil)
 	listRequest.Host = "127.0.0.1:8080"
@@ -239,6 +259,10 @@ func TestLineEgressHTTPContractUsesTypedCountryBinding(t *testing.T) {
 	handler.ServeHTTP(putResponse, putRequest)
 	if putResponse.Code != http.StatusOK || manager.lineID != testBusinessLineID || manager.mode != "mihomo-country" || manager.country != "GB" {
 		t.Fatalf("put status=%d body=%s call=(%q,%q,%q)", putResponse.Code, putResponse.Body.String(), manager.lineID, manager.mode, manager.country)
+	}
+	event := <-subscription.C
+	if event.Kind != realtime.KindUpdate || len(event.Topics) != 3 || event.Attention != "" {
+		t.Fatalf("line egress event=%#v", event)
 	}
 }
 
@@ -970,6 +994,9 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("conflict status = %d, body = %s", conflict.Code, conflict.Body.String())
 	}
+	if result, err := messagingService.SyncInbound(ctx); err != nil || result.Persisted != 1 {
+		t.Fatalf("background sync result=%#v error=%v", result, err)
+	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages", nil)
 	listRequest.Host = "127.0.0.1:8080"
@@ -993,6 +1020,54 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	}
 	if history.TotalCount != 2 || history.Capacity != messageapp.HistoryCapacity || history.NearCapacity {
 		t.Fatalf("message history capacity = %#v", history)
+	}
+	filteredRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages?lineId="+testBusinessLineID+"&remoteAddress=%2B8613800138000", nil)
+	filteredRequest.Host = "127.0.0.1:8080"
+	filteredResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(filteredResponse, filteredRequest)
+	var filtered openapi.SMSMessageListResponse
+	if filteredResponse.Code != http.StatusOK || json.Unmarshal(filteredResponse.Body.Bytes(), &filtered) != nil || len(filtered.Messages) != 1 || filtered.Messages[0].Id != sent.Id {
+		t.Fatalf("filtered status=%d body=%s", filteredResponse.Code, filteredResponse.Body.String())
+	}
+	for _, test := range []struct {
+		path string
+		code string
+	}{
+		{path: "/api/v1/messages?lineId=" + testBusinessLineID, code: "MESSAGE_FILTER_INVALID"},
+		{path: "/api/v1/messages?lineId=&remoteAddress=", code: "MESSAGE_FILTER_INVALID"},
+		{path: "/api/v1/messages?cursor=invalid", code: "PAGE_CURSOR_INVALID"},
+		{path: "/api/v1/messages?cursor=", code: "PAGE_CURSOR_INVALID"},
+		{path: "/api/v1/messages?limit=0", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/messages?limit=51", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/messages?limit=not-an-integer", code: "PAGE_LIMIT_INVALID"},
+	} {
+		invalidRequest := httptest.NewRequest(http.MethodGet, test.path, nil)
+		invalidRequest.Host = "127.0.0.1:8080"
+		invalidResponse := httptest.NewRecorder()
+		authorized.ServeHTTP(invalidResponse, invalidRequest)
+		if invalidResponse.Code != http.StatusBadRequest {
+			t.Fatalf("invalid page %s status=%d body=%s", test.path, invalidResponse.Code, invalidResponse.Body.String())
+		}
+		var pageError openapi.ApiError
+		if err := json.Unmarshal(invalidResponse.Body.Bytes(), &pageError); err != nil || pageError.Code != test.code || pageError.Retryable {
+			t.Fatalf("invalid page %s error=%#v decode=%v body=%s", test.path, pageError, err, invalidResponse.Body.String())
+		}
+	}
+	firstPageRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages?limit=1", nil)
+	firstPageRequest.Host = "127.0.0.1:8080"
+	firstPageResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(firstPageResponse, firstPageRequest)
+	var firstPage openapi.SMSMessageListResponse
+	if firstPageResponse.Code != http.StatusOK || json.Unmarshal(firstPageResponse.Body.Bytes(), &firstPage) != nil || len(firstPage.Messages) != 1 || firstPage.NextCursor == nil {
+		t.Fatalf("first page status=%d body=%s", firstPageResponse.Code, firstPageResponse.Body.String())
+	}
+	secondPageRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages?limit=1&cursor="+*firstPage.NextCursor, nil)
+	secondPageRequest.Host = "127.0.0.1:8080"
+	secondPageResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(secondPageResponse, secondPageRequest)
+	var secondPage openapi.SMSMessageListResponse
+	if secondPageResponse.Code != http.StatusOK || json.Unmarshal(secondPageResponse.Body.Bytes(), &secondPage) != nil || len(secondPage.Messages) != 1 || secondPage.Messages[0].Id == firstPage.Messages[0].Id || secondPage.NextCursor != nil {
+		t.Fatalf("second page status=%d body=%s", secondPageResponse.Code, secondPageResponse.Body.String())
 	}
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/messages/"+sent.Id, nil)
 	deleteRequest.Host = "127.0.0.1:8080"
@@ -1120,6 +1195,26 @@ func TestSimulatorCallHTTPFlowRejectsEmergencyAndPersistsHistory(t *testing.T) {
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &history) != nil || len(history.Calls) != 1 || history.Calls[0].State != openapi.CallStateEnded {
 		t.Fatalf("history status=%d body=%s", response.Code, response.Body.String())
 	}
+	for _, test := range []struct {
+		query string
+		code  string
+	}{
+		{query: "?limit=0", code: "PAGE_LIMIT_INVALID"},
+		{query: "?limit=51", code: "PAGE_LIMIT_INVALID"},
+		{query: "?limit=not-an-integer", code: "PAGE_LIMIT_INVALID"},
+		{query: "?cursor=", code: "PAGE_CURSOR_INVALID"},
+		{query: "?cursor=invalid", code: "PAGE_CURSOR_INVALID"},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/calls"+test.query, nil)
+		request.Host = "127.0.0.1:8080"
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var pageError openapi.ApiError
+		if response.Code != http.StatusBadRequest || json.Unmarshal(response.Body.Bytes(), &pageError) != nil ||
+			pageError.Code != test.code || pageError.Retryable {
+			t.Fatalf("invalid call page %s status=%d body=%s", test.query, response.Code, response.Body.String())
+		}
+	}
 }
 
 func TestHardwareTopologyReturnsRelationalResourceModel(t *testing.T) {
@@ -1240,6 +1335,162 @@ func TestTimeoutJSONReturnsStableError(t *testing.T) {
 	}
 	if body.Code != "API_TIMEOUT" || !body.Retryable {
 		t.Fatalf("body = %#v", body)
+	}
+}
+
+func TestEventStreamAuthenticatesFlushesAndCarriesOnlyBoundedHints(t *testing.T) {
+	hub := realtime.NewHub()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := WithRealtime(New(
+		health.New(fixedStateStore(setupapp.InstallationReady), "simulator"),
+		setupapp.New(fixedStateStore(setupapp.InstallationReady), nil),
+		newTestInventory(), logger, acceptingAuthenticator{}, nil,
+	), hub)
+	testServer := httptest.NewServer(Router(server))
+	defer testServer.Close()
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, testServer.URL+"/api/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: strings.Repeat("a", 43)})
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" ||
+		response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("X-Accel-Buffering") != "no" {
+		t.Fatalf("event headers status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	reader := bufio.NewReader(response.Body)
+	if frame := readSSEFrame(t, reader); frame != "retry: 3000\n" {
+		t.Fatalf("retry frame = %q", frame)
+	}
+	initial := readSSEFrame(t, reader)
+	if !strings.Contains(initial, "event: resync\n") || !strings.Contains(initial, `"topics"`) {
+		t.Fatalf("initial frame = %q", initial)
+	}
+
+	hub.Publish([]realtime.Topic{realtime.TopicMessages}, realtime.AttentionSMSReceived)
+	update := readSSEFrame(t, reader)
+	for _, expected := range []string{"event: update\n", `"topics":["messages"]`, `"attention":"sms.received"`} {
+		if !strings.Contains(update, expected) {
+			t.Fatalf("update missing %q: %q", expected, update)
+		}
+	}
+	for _, forbidden := range []string{"body", "remoteAddress", "phone", "/dev/", "IMSI", "+8613800138000", "rawError"} {
+		if strings.Contains(update, forbidden) {
+			t.Fatalf("event leaked %q: %q", forbidden, update)
+		}
+	}
+	cancel()
+}
+
+type realtimeDeadlineWriter struct {
+	header    http.Header
+	body      strings.Builder
+	deadlines []time.Time
+	flushes   int
+}
+
+func (writer *realtimeDeadlineWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *realtimeDeadlineWriter) WriteHeader(int) {}
+
+func (writer *realtimeDeadlineWriter) Write(value []byte) (int, error) {
+	return writer.body.Write(value)
+}
+
+func (writer *realtimeDeadlineWriter) FlushError() error {
+	writer.flushes++
+	return nil
+}
+
+func (writer *realtimeDeadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	writer.deadlines = append(writer.deadlines, deadline)
+	return nil
+}
+
+func TestRealtimeWriteBoundsFlushAndClearsDeadline(t *testing.T) {
+	writer := &realtimeDeadlineWriter{header: make(http.Header)}
+	started := time.Now()
+	if err := writeAndFlushRealtime(writer, func() error {
+		_, err := io.WriteString(writer, ": synthetic heartbeat\n\n")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if writer.body.String() != ": synthetic heartbeat\n\n" || writer.flushes != 1 {
+		t.Fatalf("body=%q flushes=%d", writer.body.String(), writer.flushes)
+	}
+	if len(writer.deadlines) != 2 || writer.deadlines[0].Before(started.Add(realtimeWriteTimeout-time.Second)) ||
+		!writer.deadlines[1].IsZero() {
+		t.Fatalf("write deadlines=%v", writer.deadlines)
+	}
+}
+
+func TestEventStreamRejectsMissingSessionAndClosesWhenSessionExpires(t *testing.T) {
+	hub := realtime.NewHub()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	authenticator := &expiringAuthenticator{}
+	server := WithRealtime(New(
+		health.New(fixedStateStore(setupapp.InstallationReady), "simulator"),
+		setupapp.New(fixedStateStore(setupapp.InstallationReady), nil),
+		newTestInventory(), logger, authenticator, nil,
+	), hub)
+	server.realtimeHeartbeat = 5 * time.Millisecond
+	handler := Router(server)
+	unauthorizedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	unauthorizedRequest.Host = "127.0.0.1:8080"
+	unauthorizedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedResponse, unauthorizedRequest)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized event status=%d body=%s", unauthorizedResponse.Code, unauthorizedResponse.Body.String())
+	}
+
+	testServer := httptest.NewServer(handler)
+	defer testServer.Close()
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: strings.Repeat("a", 43)})
+	response, err := testServer.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, readErr := io.Copy(io.Discard, response.Body)
+		done <- readErr
+	}()
+	select {
+	case readErr := <-done:
+		if readErr != nil {
+			t.Fatalf("expired stream read error = %v", readErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event stream remained open after session revalidation failed")
+	}
+	_ = response.Body.Close()
+}
+
+func readSSEFrame(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	var frame strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE frame: %v", err)
+		}
+		if line == "\n" {
+			return frame.String()
+		}
+		frame.WriteString(line)
 	}
 }
 

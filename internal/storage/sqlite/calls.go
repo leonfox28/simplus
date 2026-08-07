@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/domain/call"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 )
 
 func (set *Set) CreateCall(ctx context.Context, value call.Record) (call.Record, bool, error) {
@@ -55,24 +56,71 @@ WHERE call_id = ?
 }
 
 func (set *Set) ListCalls(ctx context.Context, limit int) ([]call.Record, error) {
-	rows, err := set.Calls.QueryContext(ctx, `
+	page, err := set.ListCallsPage(ctx, pagination.Request{Limit: limit})
+	return page.Items, err
+}
+
+func (set *Set) ListCallsPage(ctx context.Context, request pagination.Request) (pagination.Page[call.Record], error) {
+	if set == nil || set.Calls == nil || request.Limit < 1 || request.Limit > pagination.MaximumLimit {
+		return pagination.Page[call.Record]{}, fmt.Errorf("invalid call page request")
+	}
+	query := `
 SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason,
  created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms
-FROM call_records ORDER BY created_at_unix_ms DESC, call_id DESC LIMIT ?
-`, limit)
+FROM call_records
+ORDER BY created_at_unix_ms DESC, call_id DESC LIMIT ?`
+	args := []any{request.Limit + 1}
+	if request.After != nil {
+		query = `
+SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason,
+ created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms
+FROM call_records
+WHERE (created_at_unix_ms, call_id) < (?, ?)
+ORDER BY created_at_unix_ms DESC, call_id DESC LIMIT ?`
+		args = []any{request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit + 1}
+	}
+	rows, err := set.Calls.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list calls: %w", err)
+		return pagination.Page[call.Record]{}, fmt.Errorf("list calls: %w", err)
 	}
 	defer rows.Close()
 	values := make([]call.Record, 0)
 	for rows.Next() {
 		value, err := scanCall(rows)
 		if err != nil {
-			return nil, err
+			return pagination.Page[call.Record]{}, err
 		}
 		values = append(values, value)
 	}
-	return values, rows.Err()
+	if err := rows.Err(); err != nil {
+		return pagination.Page[call.Record]{}, err
+	}
+	page := pagination.Page[call.Record]{Items: values}
+	if len(values) > request.Limit {
+		page.Items = values[:request.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return page, nil
+}
+
+func (set *Set) GetCallByOperation(ctx context.Context, operationID string) (call.Record, bool, error) {
+	return set.callByOperation(ctx, operationID)
+}
+
+func (set *Set) GetCallByID(ctx context.Context, id string) (call.Record, bool, error) {
+	return set.callByID(ctx, id)
+}
+
+func (set *Set) HasActiveCallForLine(ctx context.Context, lineID string) (bool, error) {
+	var exists bool
+	err := set.Calls.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM call_records WHERE line_id = ? AND state IN ('incoming', 'dialing', 'active'))
+`, lineID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("read active call for line: %w", err)
+	}
+	return exists, nil
 }
 
 func (set *Set) ReconcileCalls(ctx context.Context, reason string, at time.Time) (int64, error) {

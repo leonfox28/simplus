@@ -9,6 +9,7 @@
     "api:generate": "corepack pnpm --dir web generate:api",
     "web:dev": "corepack pnpm --dir web dev",
     "web:test": "corepack pnpm --dir web test",
-    "web:build": "corepack pnpm --dir web build"
+    "web:build": "corepack pnpm --dir web build",
+    "web:e2e": "corepack pnpm --dir web e2e"
   }
 }

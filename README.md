@@ -25,7 +25,7 @@ systemd 安装仅作为过渡回退保留，不能与容器同时占用模组或
 
 ## 当前能力
 
-- Go、React、Ant Design Pro 与 SQLite 管理后台；
+- Go、SQLite，以及由 Vite、React Router、直接 Ant Design 和 TanStack Query 组成的管理后台；
 - 安装时生成唯一管理员和随机初始密码；
 - Simulator 中完整验证短信、电话、数字音频和 eUICC Profile 管理交互；
 - QDC507 与 ML307A 的类型化硬件识别、固定端点角色和只读状态探测；

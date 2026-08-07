@@ -10,7 +10,7 @@
 LAN Browser
     │ HTTP / optional external HTTPS
     ▼
-Umi Max dev server or control container static Web assets
+Vite dev server or control container Vite-built React SPA
     │ /api
     ▼
 control container: simplusd ───── ./data/core/SQLite
@@ -28,10 +28,14 @@ production 以 Docker Compose 保留三个进程/镜像的权限分离；它不�
 加载的 USB serial `option` 模块，边界见 [`0021`](decisions/0021-container-production-deployment.md)。
 当前开发 VM 的真实容器 HIL 已覆盖 Mihomo、Host VoWiFi 和单段自号码短信回环；
 clean-VM 生命周期验收完成前，原生 systemd production 路径仍作为过渡回退保留。
+Web 运行时已经按
+[`0022`](decisions/0022-vite-react-query-web-runtime.md) 原子迁移到
+Vite/React Router/TanStack Query，并直接使用 Ant Design。旧 Umi/Pro 构建输入、运行时
+与兼容壳已删除；前后端契约和 `web/dist` 仍作为同一个版本交付。
 
 ### `simplusd`（目标职责）
 
-- 提供 Web API；开发时前端由 Umi Max dev server 提供，生产由 `simplusd` 承载构建后的静态资源；
+- 提供 Web API；开发时前端由 Vite dev server 提供，生产由 `simplusd` 承载 Vite 构建后的静态资源；
 - production Web/API 固定监听 IPv4 wildcard `0.0.0.0:8080`，不依赖安装时或 DHCP 分配的具体地址；开发默认保持 loopback，公网隔离由部署网络和主机防火墙负责，见 [`0014`](decisions/0014-ipv4-wildcard-management-listener.md)；
 - 管理单一管理员会话；
 - 保存模组、短信、联系人和通话状态；
@@ -119,8 +123,31 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 
 ### Web
 
-- React 19 + Ant Design Pro 单页应用，使用 Umi Max 路由和 ProLayout；
-- 登录、基础初始化以及左侧导航的模组、线路、短信、语音、Mihomo、通知和系统设置页面均使用同一套管理后台组件；
+- 单一前端栈是 React 19、Vite、React Router Declarative Mode、直接使用的
+  Ant Design 6 与 TanStack Query；Umi Max、Ant Design Pro Components、ProLayout
+  和 Umi runtime 已原子移除，不保留第二套路由、UI 或服务端状态栈；
+- `AppProviders` 显式装配 Ant Design 与 QueryClient，`BootstrapGate` 统一处理 setup、
+  管理员 session 和 401 恢复，`AppRouter` 与响应式 `AppShell` 拥有公共/受保护路由、
+  桌面 Sider 和手机 Drawer；Login/Setup 继续使用独立页面壳；
+- `api/openapi.yaml` 由 `@hey-api/openapi-ts` 同时生成 Fetch SDK、TypeScript 类型、
+  Zod 结构 schema 和 TanStack Query keys/options。生成目录是公共
+  operation/payload/query identity 的唯一浏览器 owner；手写 runtime 只负责同源
+  cookie、double-submit CSRF、取消/超时、稳定错误和 OpenAPI 无法表达的领域跨字段
+  校验，页面不得直接调用 `fetch` 或复制 API model；
+- 服务端和 SQLite 是业务状态唯一权威。浏览器通过 HTTP 读取快照和提交 mutation，
+  TanStack Query 只保存可丢弃的页面快照；query 只有在网络或服务端明确标记可重试时
+  有界重试，mutation 默认不自动重试，敏感或业务数据不写入浏览器持久存储；
+- 同源 `GET /api/v1/events` 经过 setup、管理员 session 与可信 LAN gate，只发送有界
+  资源失效、重连 resync 与新短信/来电 attention hint。事件不携带正文、号码、身份、
+  路径、拓扑、命令或诊断材料，也不构成业务真相源；客户端只失效当前活跃 query，
+  再经 HTTP 取得权威快照，慢连接和丢失 hint 不得阻塞 mutation、后台同步或造成
+  无限队列；
+- Messages 与 Calls 使用按 `(createdAt, stable ID)` 稳定倒序的 opaque keyset cursor；
+  Messages 会话查询必须同时提供 Line 与 remote address。游标不含通信内容或身份，
+  前端只在当前 infinite query 生命周期内使用它；
+- 登录、基础初始化以及导航中的模组、线路、短信、语音、Mihomo、通知和系统设置页面
+  使用同一套直接 Ant Design 视觉语言；桌面以 Table/Sider 为主，手机以 Card/List 与
+  Drawer 为主，宽表只在自身容器滚动，加载、空、错误、部分失败和不可用原因明确可见；
 - 模组页只展示管理员已添加的模组，主表固定为型号、USB Serial 序列号、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、支持状态、类型化不可添加原因和能力；
 - 线路页只展示管理员创建的持久 Line；“添加线路”以单选表格展示所有已添加模组的当前 SIM/Profile 候选及类型化不可添加原因，创建只保存不可改绑的身份和名称；主表直接显示 IMS 注册明确返回的 E.164 手机号，无法确认时显示未获取；配置抽屉分别维护名称、显式 `direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，不出现 RF 控制；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
@@ -208,6 +235,10 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 - 超时或响应丢失时先读取模组状态，不盲目重发有费用或外部副作用的动作；
 - 不再为所有动作构建通用 ResourceGroup lease、跨层 generation/fencing 和多套 durable outcome 真相源。
 
+其中 `notify UI` 只表示发布有界资源失效/attention hint；持久结果必须先由业务服务
+写入权威状态，浏览器再通过 HTTP 重新读取。SSE 不能承载 mutation 结果或建立第二套
+事件状态。
+
 现有 `radio.ensure-off` ledger 代码与 ResourceGroup lease 可以保留为 fixture/历史基础设施，但 production Agent 不注册该命令。新的 RF 路径只接受目标开关状态，在 Agent 内串行执行固定命令并立即读回；新的 SMS/Call 纵切也不应扩展通用分布式命令平台。
 
 ## 5. 关键数据流
@@ -217,7 +248,8 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 ```text
 Web -> simplusd validation -> persist queued message
     -> typed sender -> Agent cellular SMS or simplus-netd per-Line IMS worker
-    -> persist sent/unconfirmed/failed -> Web update
+    -> persist sent/unconfirmed/failed -> bounded messages invalidation
+    -> active Web query refetches authoritative HTTP snapshot
 ```
 
 Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独立 typed gateway，把 GSM7/UCS-2 产生的 SMS-SUBMIT TPDU 封装为 RP-DATA 和 binary SIP MESSAGE。worker 收齐各分段 SIP 最终响应即返回，绝不为 RP 报告占住业务请求；SIP `202` 只把带 provider ID 的消息持久化为橙色 `unconfirmed`。后台随后消费异步 RP 报告：全部匹配的 RP-ACK 才提升为 `sent`，单段 RP-ERROR 可成为 `failed`，multipart 的部分拒绝仍是 `unconfirmed`；响应丢失或报告超时也保持 `unconfirmed` 且不自动重发。同一个 multipart 操作始终逐段各提交一次，不会因为第一段缺少报告而截断，也不会重新提交已经处理过的分段。普通 hardware cellular SMS sender 仍未接入 production Agent。
@@ -229,7 +261,8 @@ modem/IMS worker -> bounded typed read -> simplusd
     -> persist raw/decoded message
     -> confirm persistence
     -> delete/ack modem copy when applicable
-    -> Web update
+    -> bounded messages invalidation/attention
+    -> active Web query refetches authoritative HTTP snapshot
 ```
 
 Simulator 提供固定 welcome 入站消息；Host VoWiFi worker 则解析 SIP MESSAGE、network→MS RP-DATA 和 SMS-DELIVER，包括数字号码与 GSM7 字母型 TP-Originating-Address。后台执行有界同步：单段消息先落库再发送新的 SIP MESSAGE/RP-ACK；multipart 每片先进入持久 spool 再独立确认，完整且唯一的组才解码为一条可见消息。控制面重启后可继续组装，ACK 失败会保留已落库记录并重试，引用号复用导致的歧义组 fail closed。
@@ -238,7 +271,8 @@ Simulator 提供固定 welcome 入站消息；Host VoWiFi worker 则解析 SIP M
 
 ```text
 Web -> emergency/number validation -> modem worker
-    -> Agent call action -> observed call state -> Web
+    -> Agent call action -> observed call state -> bounded calls invalidation
+    -> active Web query refetches authoritative HTTP snapshot
 ```
 
 音频路径必须由硬件报告证明，不能从 USB descriptor 或 AT capability 推断。
@@ -269,6 +303,9 @@ Web -> emergency/number validation -> modem worker
 11. `simplus-netd` 是 Host VoWiFi 临时网络对象的唯一 owner，Web/API 不得传入底层网络参数。
 12. SMS over IMS 不能把 SIP 2xx 当作短信提交成功，且入站 RP-ACK 只能发生在可恢复持久化之后。
 13. 每个控制层只能依赖下一级的类型化能力契约；新增实现同一能力的模组型号不得要求上层业务按型号分支。
+14. 浏览器 mutation 和权威快照只走鉴权 HTTP；SSE 只能发送有界失效/attention hint，慢订阅者不得阻塞业务写入。
+15. 公共浏览器 operation、payload 结构和 query identity 由 OpenAPI 生成边界拥有；页面不得直接 fetch 或另建 payload 契约。
+16. Messages/Calls 分页必须使用与 SQLite 索引一致的 `(createdAt, stable ID)` keyset 顺序，不能退化为 offset。
 
 这些规则应优先由类型、测试和小型检查器强制执行，而不是在多份文档中重复描述。
 

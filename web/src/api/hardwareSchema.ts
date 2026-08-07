@@ -1,15 +1,17 @@
-import type { components } from './schema'
+import type {
+  HardwareCapabilities,
+  HardwareLineDetail,
+  HardwareTopologyResponse,
+  ModemFunctionDetail,
+  PhysicalDeviceDetail,
+  ResourceGroupDetail,
+  ResourceKind,
+  SimMediaDetail as SIMMediaDetail,
+  SimSlotDetail as SIMSlotDetail,
+  SubscriptionProfileDetail,
+} from './generated/types.gen'
 
-export type HardwareTopologyResponse = components['schemas']['HardwareTopologyResponse']
-type HardwareCapabilities = components['schemas']['HardwareCapabilities']
-type PhysicalDeviceDetail = components['schemas']['PhysicalDeviceDetail']
-type ModemFunctionDetail = components['schemas']['ModemFunctionDetail']
-type SIMSlotDetail = components['schemas']['SIMSlotDetail']
-type SIMMediaDetail = components['schemas']['SIMMediaDetail']
-type SubscriptionProfileDetail = components['schemas']['SubscriptionProfileDetail']
-type ResourceGroupDetail = components['schemas']['ResourceGroupDetail']
-type ResourceKind = components['schemas']['ResourceKind']
-type HardwareLineDetail = components['schemas']['HardwareLineDetail']
+export type { HardwareTopologyResponse }
 
 const idPattern = /^[a-z0-9][a-z0-9-]{0,63}$/
 const resourceKinds = new Set([

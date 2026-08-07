@@ -35,6 +35,22 @@ make build-linux
 
 按 `AGENTS.md` 选择与风险相称的检查；小改动不要求机械运行所有目标。
 
+Web 的目标运行时由 [`0022`](decisions/0022-vite-react-query-web-runtime.md) 固定为
+Vite + React Router Declarative Mode + 直接 `antd` + TanStack Query。常用的窄化
+前端检查是：
+
+```bash
+corepack pnpm --dir web test
+corepack pnpm --dir web typecheck
+corepack pnpm --dir web build
+corepack pnpm --dir web e2e
+```
+
+`build` 输出 `web/dist`，由 production `simplusd` 与匹配的 API 一起承载；`e2e`
+使用本地脱敏 fixture，不是硬件或真实通信测试。OpenAPI 或生成 client 发生变化时还要
+运行 `make verify-generated`。旧 Umi/Pro 输入已经删除；不要重新引入第二套路由、UI
+或服务端状态栈。
+
 ## 2. Simulator
 
 ```bash
@@ -55,7 +71,9 @@ Data: <repo>/.dev/data
 make dev-sim-lan
 ```
 
-浏览器打开 `http://<host-lan-ip>:5173`。只有 Web dev server 对 LAN 监听，API 继续使用 loopback，并由开发服务器代理。该普通 HTTP 入口只用于可信开发网络。
+浏览器打开 `http://<host-lan-ip>:5173`。只有 Vite Web dev server 对 LAN 监听，API
+继续使用 loopback，并由开发服务器代理同源 `/api`，包括有界 SSE 失效流。该普通
+HTTP 入口只用于可信开发网络。
 
 全新开发数据库需要初始化时，在运行服务的主机终端执行：
 

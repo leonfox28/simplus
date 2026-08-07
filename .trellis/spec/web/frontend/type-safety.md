@@ -4,156 +4,128 @@
 
 ## Compiler Contract
 
-`web/tsconfig.json` uses TypeScript 5.7 with `strict: true`, ES2022, the React JSX
-transform, bundler module resolution, and the `@/*` source alias. The package
-script supplies `--noEmit`; the normal check is:
+`web/tsconfig.json` uses strict TypeScript, ES2022, the React JSX transform,
+bundler module resolution, and `@/*`. The required check is:
 
 ```bash
 corepack pnpm --dir web typecheck
 ```
 
-There is no `any`-based application convention and no `@ts-ignore` or
-`@ts-expect-error` in current handwritten frontend source. API boundary helpers
-accept external data as `unknown`, and `catch` blocks in the larger pages narrow
-their caught values explicitly.
+Handwritten application code does not use `any`, blanket suppression, or broad
+casts to bypass a network boundary. Catch values remain `unknown` until
+normalized.
 
-## OpenAPI Is the Static Source of Truth
+## Generated Contract
 
-`web/src/api/schema.d.ts` is generated from `api/openapi.yaml`. Most shared API
-types in the client directly alias generated schemas:
+`api/openapi.yaml` is the source. Hey API generates the following under
+`web/src/api/generated/`:
+
+- `types.gen.ts`: request/response/discriminant types;
+- `zod.gen.ts`: request, response, and definition schemas;
+- `sdk.gen.ts`: Fetch SDK with request and response validators;
+- `@tanstack/react-query.gen.ts`: query keys/options, infinite options, and
+  mutation options;
+- client/core runtime support.
+
+Import generated types with `type` and generated operations/options by name.
+Do not create a second interface matching an OpenAPI response or manually edit
+generated output.
+
+The generated client invokes Zod validators for their validation side effect.
+It intentionally continues to return decoded JSON rather than Zod-transformed
+values; this avoids converting OpenAPI `int64` numbers to `bigint` while the
+generated TypeScript response contract is `number`.
+
+## Runtime Boundary
+
+`configureApiClient()` installs one generated client interceptor.
+`runtimeFetch()` is the sole Fetch implementation and enforces:
+
+- same-origin credentials and base URL;
+- `Accept: application/json`;
+- CSRF header on mutating business APIs, excluding login/setup;
+- endpoint-aware bounded deadlines;
+- caller abort propagation;
+- stable `ApiClientError` kinds/codes for timeout, abort, network, HTTP,
+  invalid request, and invalid success response;
+- session-expiry notification on HTTP 401.
+
+Successful JSON must pass the generated response validator. Invalid request
+Zod errors become non-retryable `REQUEST_INVALID`; malformed successful
+responses become non-retryable `API_RESPONSE_INVALID`. Pages render
+`displayApiError(error)`, never raw transport exception text.
+
+## Domain Validation Beyond OpenAPI Shape
+
+Keep relational/cross-reference checks that OpenAPI cannot express in
+`web/src/api/hardwareSchema.ts`. Current topology validation proves exact
+private-safe fields, unique IDs, valid references, generations, capability
+subsets, SIM/Profile relations, and resource-group consistency.
+
+`decodeRealtimeEvent` adds exact-key and unique-topic checks around the
+generated Zod schema. Do not place those rules in page code.
+
+## Type Placement
+
+- Generated API models stay in `api/generated`.
+- Runtime/network error types stay in `api/errors.ts`.
+- Cross-field public response checks stay in `api/hardwareSchema.ts` or a
+  similarly narrow API module.
+- Form values and view-only row types stay near the page.
+- Reusable feature transforms/types stay in `calls/`, `messages/`, or
+  `mihomo/` with focused tests.
+- Use indexed access, `Pick`, and generated discriminants instead of copying
+  fields. Use `Record<GeneratedUnion, ...>` or exhaustive switches for status
+  presentation.
+
+## Validation Matrix
+
+| Boundary failure | Browser result | Retry |
+| --- | --- | --- |
+| Request does not satisfy generated Zod schema | `REQUEST_INVALID` | No |
+| Network failure | `NETWORK_UNAVAILABLE` | Query only, bounded |
+| Client deadline | `API_TIMEOUT` | Query only when marked retryable |
+| Caller abort | `REQUEST_ABORTED` | No |
+| HTTP `ApiError` | Preserve bounded code/status/reference | Per server flag for queries |
+| HTTP 401 | Normalize error and notify session expiry | No mutation retry |
+| 2xx body fails response validation | `API_RESPONSE_INVALID` | No |
+| Hardware shape passes primitives but breaks references | Reject as invalid response | No |
+
+## Good / Base / Bad Cases
+
+- Good: add a field in OpenAPI, regenerate Go/Web, consume its generated type,
+  and add response/request regression tests.
+- Base: a page defines `type DialValues` for its form, then passes the values to
+  a generated mutation whose Zod validator enforces the API contract.
+- Bad: cast `await response.json()` to `ManagedLine[]` or duplicate an API
+  response interface in a page.
+
+## Tests Required
+
+- Runtime tests for CSRF exemptions/inclusion, same-origin credentials,
+  deadlines, abort, transport failure, invalid request, invalid response, and
+  401 session expiry.
+- Generator drift after every OpenAPI/config change.
+- Hardware schema tests for exact keys, private-field rejection, duplicate IDs,
+  broken references, and valid synthetic topology.
+- Typecheck plus focused page tests for new discriminant/state mappings.
+
+## Wrong vs Correct
 
 ```ts
-// web/src/api/client.ts
-import type { components } from './schema'
+// Wrong
+const lines = await fetch('/api/v1/lines').then((response) => response.json()) as ManagedLine[]
 
-export type ManagedModem = components['schemas']['ManagedModem']
-export type ManagedLine = components['schemas']['ManagedLine']
-export type SendSMSRequest = components['schemas']['SendSMSRequest']
+// Correct
+const query = useQuery(listManagedLinesOptions())
+const lines = query.data?.lines ?? []
 ```
-
-`web/src/api/hardwareSchema.ts` follows the same pattern for topology types.
-Regenerate the declaration with `corepack pnpm --dir web generate:api`; do not
-edit `schema.d.ts` by hand. The root `make verify-generated` target checks that
-generated contracts are current and that generation does not change unrelated
-worktree content.
-
-There are two current exceptions in `api/client.ts`: the handwritten
-`MihomoDashboardStatus` duplicates a generated schema, and `SMSHistory` repeats
-the shape of `SMSMessageListResponse` after validating it. They are existing
-exceptions, not a general pattern; do not add another parallel response type.
-
-## Static Types Do Not Validate Network Data
-
-The transport helper in `web/src/api/client.ts` deliberately returns
-`Promise<unknown>`. Every exported operation that returns successful JSON
-validates it before returning typed data:
-
-```ts
-// web/src/api/client.ts
-export async function getSystemHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const health = await requestJSON(
-    '/api/v1/system/health',
-    signal,
-    'HEALTH_NETWORK_UNAVAILABLE',
-    'HEALTH_RESPONSE_INVALID',
-    'HEALTH',
-  )
-  if (!isHealthResponse(health)) throw new Error('HEALTH_RESPONSE_INVALID')
-  return health
-}
-```
-
-Runtime guards check more than primitive shapes:
-
-- `hasExactKeys` rejects omitted and extra fields throughout topology validation
-  in `api/hardwareSchema.ts`; `api/client.ts` uses it for Line/VoWiFi shapes and
-  selected mutation requests, while other client guards validate required
-  fields without rejecting every extra response key.
-- Domain guards constrain IDs, string lengths, enum values, dates, array sizes,
-  and dependent fields. `isVoWiFiLineState`, `isManagedModem`, `isSMSMessage`,
-  and `isCall` are representative.
-- `isHardwareTopologyResponse` validates unique IDs, generations, references,
-  capability subsets, SIM/Profile relations, and resource-group consistency.
-- Domain mutations with constrained IDs or cross-field invariants validate
-  inputs before dispatch. Tests in `api/client.test.ts` assert that invalid
-  Line, egress, SMS, and Call requests do not call `fetch`. Simpler auth/setup
-  bodies currently rely on their generated request types and server validation.
-
-The project uses hand-written type guards rather than Zod, Yup, or another
-runtime schema library. Keep new validation at the API module boundary and use
-stable uppercase error codes like the existing `*_RESPONSE_INVALID` and
-`*_REQUEST_INVALID` values.
-
-## Type Placement and Derivation
-
-- Export shared request/response types from `api/client.ts`; page modules import
-  them with `type` specifiers.
-- Keep view-only types next to their page: `CountryOption` and `LineRow` in
-  `Lines.tsx`, and typed ModalForm value objects in `Mihomo.tsx`.
-- Keep feature types beside feature logic: `SMSConversation` in
-  `messages/conversations.ts` and `SimulatorMediaState` in
-  `calls/simulatorMedia.ts`.
-- Derive subsets instead of copying fields. `SIMPresenceTag`-style components
-  use indexed access (`ManagedModem['simPresence']`), message presentation uses
-  `Pick<SMSMessage, 'status' | 'errorCode'>`, and test fixture helpers accept
-  `Partial<SMSMessage>`.
-- Use `readonly` when a helper promises not to mutate input. The signature
-  `sortSMSMessagesForDisplay(messages: readonly SMSMessage[])` is backed by a
-  test that verifies it returns a copied array.
-
-## Exhaustive Domain Mappings
-
-Use a generated union as the key type for presentation maps so additions fail
-type-check until the UI handles them:
-
-```ts
-// web/src/pages/Lines.tsx
-const lineStateLabels: Record<ManagedLine['state'], string> = {
-  ready: '就绪',
-  'modem-offline': '模组离线',
-  'sim-unavailable': 'SIM / Profile 不可用',
-}
-```
-
-`candidateReasonLabels`, `readinessLabels`, and `voWiFiStateLabels` in
-`Lines.tsx` follow this shape. `messages/status.ts` uses an exhaustive switch
-over `SMSMessage['status']`. `capabilityLabels` in `Modems.tsx` is different: its
-`Array<[CapabilityKey, string]>` type constrains each selected key, but the list
-currently shows only a subset of the capability object and is not exhaustive.
-
-## Assertions and Narrowing
-
-Assertions are localized to code performing runtime checks, or to tests adapting
-a framework/mock type. Examples are `Partial<T>` candidates in `api/client.ts`,
-the topology double assertion after exact object/array/member checks and before
-cross-reference validation in `api/hardwareSchema.ts`, and `RequestInit`
-inspection in `api/client.test.ts`.
-Negative tests use `as never` specifically to prove that runtime validation
-rejects a value TypeScript would normally prevent.
-
-Do not use a broad assertion to make an unvalidated response convenient.
-Prefer a predicate (`value is T`), discriminant check, `instanceof Error`, or
-an `unknown` intermediate. Page error helpers in `Lines.tsx` and `Modems.tsx`
-demonstrate caught-value narrowing.
-
-## Current Form Typing
-
-Typing is mixed at form boundaries. Complex modal forms in `Mihomo.tsx` use
-`ModalForm<CreateSubscriptionValues>` and `ModalForm<EditSubscriptionValues>`;
-several compact `ProForm` pages let the library infer a loose values object.
-Do not claim all existing forms are generically typed. When changing a complex
-form, follow the typed Mihomo example instead of introducing a duplicate API
-response interface.
 
 ## Avoid
 
-- Do not hand-edit `schema.d.ts` or add another duplicate of a generated OpenAPI
-  response type; the dashboard status and SMS history aliases above are current
-  exceptions.
-- Do not treat a successful HTTP status or a TypeScript cast as runtime proof.
-- Do not add `any`, blanket suppressions, or double assertions outside a
-  boundary that has established the needed runtime shape.
-- Do not widen API discriminants to unconstrained `string`; keep label maps,
-  actions, and state transitions keyed by the generated unions.
-- Do not bypass request validation or send fields outside the exact API
-  contract; `api/client.test.ts` includes regression cases for legacy fields.
+- Hand-editing generated files or exporting parallel API response types.
+- Treating TypeScript casts or HTTP 2xx as runtime proof.
+- Widening generated enums to `string`.
+- Returning raw browser/server exception messages to the UI.
+- Using response-transform output whose runtime type disagrees with generated
+  TypeScript types.

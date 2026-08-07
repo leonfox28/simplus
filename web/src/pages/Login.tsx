@@ -1,36 +1,46 @@
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
-import { LoginForm, ProFormText } from '@ant-design/pro-components'
-import { Alert, App } from 'antd'
-import React, { useState } from 'react'
-import { getSetupStatus, login } from '@/api/client'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Alert, App, Button, Card, Form, Input, Typography } from 'antd'
+import { useState } from 'react'
+import { useNavigate } from 'react-router'
+import { displayApiError } from '@/api/errors'
+import { getAuthSessionQueryKey, loginMutation } from '@/api/generated/@tanstack/react-query.gen'
+
+type LoginValues = { username: string; password: string }
 
 export default function LoginPage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { message } = App.useApp()
-  const [error, setError] = useState('')
+  const [error, setError] = useState<unknown>()
+  const login = useMutation({
+    ...loginMutation(),
+    onSuccess: (session) => {
+      queryClient.setQueryData(getAuthSessionQueryKey(), session)
+      void message.success('登录成功')
+      navigate('/dashboard', { replace: true })
+    },
+    onError: setError,
+  })
   return <main className="login-page">
     <div className="login-content">
-      <LoginForm
-        title="Simplus"
-        subTitle="可信局域网通信控制后台"
-        name="login"
-        autoComplete="on"
-        containerStyle={{ width: '100%', boxSizing: 'border-box' }}
-        contentStyle={{ width: '100%', minWidth: 0, maxWidth: 328 }}
-        submitter={{ searchConfig: { submitText: '登录' }, submitButtonProps: { size: 'large' } }}
-        onFinish={async values => {
-        setError('')
-        try {
-          const session = await login({ username: String(values.username).trim(), password: String(values.password) })
-          const setup = await getSetupStatus()
-          message.success('登录成功')
-          window.location.replace(setup.setupRequired ? '/setup' : '/dashboard')
-          return true
-        } catch (e) { setError(e instanceof Error ? e.message : 'LOGIN_FAILED'); return false }
-      }}>
-        {error && <Alert type="error" showIcon message="登录失败" description={error} style={{ marginBottom: 16 }} />}
-        <ProFormText name="username" fieldProps={{ id: 'username', name: 'username', type: 'text', prefix: <UserOutlined />, autoComplete: 'username' }} placeholder="管理员用户名" rules={[{ required: true }]} />
-        <ProFormText.Password name="password" fieldProps={{ id: 'password', name: 'password', prefix: <LockOutlined />, autoComplete: 'current-password' }} placeholder="密码" rules={[{ required: true }]} />
-      </LoginForm>
+      <Card className="login-card">
+        <Typography.Title level={1}>Simplus</Typography.Title>
+        <Typography.Paragraph type="secondary">可信局域网通信控制后台</Typography.Paragraph>
+        {Boolean(error) && <Alert className="page-alert" type="error" showIcon title="登录失败" description={displayApiError(error)} />}
+        <Form<LoginValues> name="login" layout="vertical" autoComplete="on" onFinish={(values) => {
+          setError(undefined)
+          login.mutate({ body: { username: values.username.trim(), password: values.password } })
+        }}>
+          <Form.Item name="username" rules={[{ required: true, message: '请输入管理员用户名' }]}>
+            <Input id="username" name="username" type="text" prefix={<UserOutlined />} autoComplete="username" placeholder="管理员用户名" size="large" />
+          </Form.Item>
+          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+            <Input.Password id="password" name="password" prefix={<LockOutlined />} autoComplete="current-password" placeholder="密码" size="large" />
+          </Form.Item>
+          <Button block type="primary" htmlType="submit" size="large" loading={login.isPending}>登录</Button>
+        </Form>
+      </Card>
     </div>
   </main>
 }

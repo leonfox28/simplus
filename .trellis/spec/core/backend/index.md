@@ -38,8 +38,8 @@ data-flow map is `docs/architecture.md`; concrete assembly is in
 | --- | --- |
 | [Directory Structure](./directory-structure.md) | Root Go package ownership, executable assembly, generated boundaries, and test placement |
 | [Application Boundaries](./application-boundaries.md) | Typed ports, stable business identity, hardware adapters, fail-closed behavior, and side-effect ordering |
-| [API Contracts](./api-contracts.md) | OpenAPI-first public HTTP, bounded Unix protocols, authentication, timeouts, and stable errors |
-| [Storage and Migrations](./storage-and-migrations.md) | Five-dataset SQLite reality, Goose migrations, sqlc ownership, transactions, and sensitive persistence |
+| [API Contracts](./api-contracts.md) | OpenAPI-first public HTTP, cursor pagination, authenticated realtime invalidation, bounded Unix protocols, timeouts, and stable errors |
+| [Storage and Migrations](./storage-and-migrations.md) | Five-dataset SQLite reality, keyset indexes, Goose migrations, sqlc ownership, transactions, and sensitive persistence |
 | [Quality and Testing](./quality-and-testing.md) | Trusted test patterns and targeted-to-broad Go validation |
 
 ## Architecture Rules at a Glance

@@ -64,6 +64,15 @@ old rows, reopens, and verifies the message-v4/v5 and Line-v21/v22 upgrades;
 it also checks schema tampering, swapped datasets, symlinks, hard links,
 permissions, and foreign-key integrity.
 
+Messages v6 and Calls v3 add keyset-pagination indexes ordered by
+`(created_at_unix_ms DESC, message_id/call_id DESC)`. The Messages conversation
+index prefixes that tuple with `(line_id, remote_address)`. Store methods must
+use the identical tuple and strict `<` boundary, query `limit+1`, and construct
+the next cursor from the final returned record. Migration tests must downgrade,
+prove every new index is absent, preserve rows, reopen through `OpenSet`, and
+prove the indexes are recreated. Do not substitute offsets or timestamp-only
+cursors; equal timestamps require the stable-ID tiebreaker.
+
 Never edit an already released migration to make a new checkout pass. Add a
 new migration and a regression from the prior version.
 

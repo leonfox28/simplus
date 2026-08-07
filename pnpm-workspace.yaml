@@ -3,32 +3,9 @@ packages:
 
 overrides:
   '@babel/runtime@<7.26.10': 7.29.7
-  '@remix-run/router@<1.23.3': 1.23.3
-  axios@<0.33.0: 0.33.0
-  esbuild@<=0.24.2: 0.25.12
-  immer@>=7.0.0 <9.0.6: 9.0.21
   js-yaml@>=4.0.0 <4.3.1: 4.3.1
-  node-fetch@<2.6.7: 2.7.0
-  path-to-regexp@>=0.2.0 <1.9.0: 1.9.0
-  path-to-regexp@>=8.0.0 <8.4.0: 8.4.2
   postcss@<=8.5.22: 8.5.25
-  react-router@>=6.0.0 <6.30.4: 6.30.4
-  react-router-dom@>=6.0.0 <6.30.4: 6.30.4
-  vite: 6.4.3
 
 audit:
   level: moderate
-  ignore:
-    # Umi's build-only Utoo adapter is affected only on Windows; Simplus supports Linux.
-    - GHSA-frvp-7c67-39w9
-    # Umi 4 requires React Router 6. Simplus only navigates to fixed internal routes.
-    - GHSA-wrjc-x8rr-h8h6
-    - GHSA-jjmj-jmhj-qwj2
-    # Simplus builds a static SPA and does not use React Router SSR hydration.
-    - GHSA-337j-9hxr-rhxg
-
-allowBuilds:
-  core-js: true
-  core-js-pure: true
-  es5-ext: true
-  esbuild: true
+  ignore: []

@@ -2,24 +2,52 @@ html, body, #root { min-height: 100%; margin: 0; }
 html { overflow-x: hidden; }
 *, *::before, *::after { box-sizing: border-box; }
 body { min-width: 320px; overflow-x: hidden; background: #f5f7fa; }
-.login-page { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; overflow: auto; background: linear-gradient(135deg,#f0f5ff,#f5f7fa); }
-.login-content { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 32px 0; overflow-x: hidden; }
-@media (max-width: 480px) {
-  .login-content { padding: 24px 0; }
-  .login-content .ant-pro-form-login-container { padding-inline: 16px; }
-}
-.brand-subtitle { color: #8c8c8c; font-size: 10px; font-weight: 400; line-height: 1.2; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+.app-layout { min-height: 100vh; min-height: 100dvh; background: #f5f7fa; }
+.app-sider { position: sticky !important; top: 0; height: 100vh; border-right: 1px solid #f0f0f0; }
+.app-main { min-width: 0; }
+.app-header { position: sticky; z-index: 20; top: 0; height: 64px; padding: 0 24px; background: rgba(255, 255, 255, .96); border-bottom: 1px solid #f0f0f0; }
+.app-content { min-width: 0; max-width: 100%; }
+.app-brand { height: 64px; padding: 12px 20px; display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
+.app-brand span { color: #8c8c8c; font-size: 10px; font-weight: 400; }
+.account-button { display: inline-flex; align-items: center; gap: 8px; }
+
+.page-content, .public-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 24px; min-width: 0; }
+.public-page { max-width: 960px; }
+.page-header { margin-bottom: 20px; }
+.page-header .ant-typography { margin-top: 0; margin-bottom: 4px; }
+.page-alert { margin-bottom: 16px; }
+.page-section { margin-top: 16px; }
 .page-grid { display: grid; gap: 16px; }
-.page-grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-/* Keep ProLayout and page containers inside the mobile viewport; wide data remains locally scrollable. */
-.ant-pro-layout, .ant-pro-layout-container, .ant-pro-layout-content, .ant-pro-page-container, .ant-pro-page-container-children-container { min-width: 0; max-width: 100%; }
-.ant-pro-page-container-children-container { overflow-x: hidden; }
+.page-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.responsive-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 16px; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.responsive-card-list { display: grid; gap: 0.75rem; width: 100%; }
+.responsive-list-item { width: 100%; }
+.mobile-record-card { width: 100%; min-width: 0; }
+.load-more { display: flex; justify-content: center; padding-top: 16px; }
+.contact-tags { margin-top: 16px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+.login-page { min-height: 100vh; min-height: 100dvh; display: flex; overflow: auto; background: linear-gradient(135deg, #f0f5ff, #f5f7fa); }
+.login-content { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
+.login-card { width: min(100%, 390px); box-shadow: 0 16px 48px rgba(22, 119, 255, .12); }
+.setup-card { max-width: 720px; margin: 48px auto; }
+.setup-card .ant-alert { margin-bottom: 24px; }
+.full-page-state { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; }
+
+@media (max-width: 991px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-header { padding-inline: 12px; }
+}
+
 @media (max-width: 767px) {
-  .ant-pro-page-container-children-container { padding-inline: 16px !important; }
-  .ant-page-header-heading, .ant-page-header-heading-left { min-width: 0; flex-wrap: wrap; }
-  .ant-page-header-heading-sub-title { max-width: 100%; white-space: normal; }
-  .ant-pro-card .ant-pro-card-body { min-width: 0; }
-  .ant-pro-page-container .ant-form-item, .ant-pro-page-container .pro-field { width: 100% !important; max-width: 100% !important; }
-  .page-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .page-content, .public-page { padding: 16px; }
+  .page-grid.two, .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-header { align-items: stretch; }
+  .page-header > div:first-child { min-width: 0; }
+  .page-header h2 { font-size: 24px; }
+  .ant-drawer-content-wrapper, .ant-modal { max-width: 100vw; }
+  .ant-form-item { min-width: 0; }
 }

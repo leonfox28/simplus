@@ -8,8 +8,8 @@ runtime or domain that owns it:
 | Path | Current owner and evidence |
 | --- | --- |
 | `cmd/` | Per-binary flag parsing, dependency construction, lifecycle, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, and HTTP; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
-| `internal/application/` | Domain use-case services and consumer-owned ports. `internal/application/messaging/service.go` owns its repository, Line source, sender, and inbox contracts. |
-| `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/model.go` and `internal/domain/hardware/validate.go` define the normalized topology contract. |
+| `internal/application/` | Domain use-case services and consumer-owned ports. `internal/application/messaging/service.go` owns its repository, Line source, sender, and inbox contracts; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
+| `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/` defines normalized topology; `internal/domain/pagination/` owns shared opaque cursor validation/encoding. |
 | `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, and generated OpenAPI server implementation (`internal/api/httpapi/server.go`). |
 | `api/` and `internal/api/openapi/` | `api/openapi.yaml` is the public API source; `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml` define Go generation; `internal/api/openapi/generated.go` is output. |
 | `internal/agentapi/` | Bounded Unix-socket hardware protocol, peer validation, typed clients/servers, and protocol tests. |
@@ -49,8 +49,8 @@ Never hand-edit files that declare themselves generated:
 
 - `internal/api/openapi/generated.go` comes from `api/openapi.yaml` via
   `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml`.
-- `web/src/api/schema.d.ts` comes from the same OpenAPI source via the root
-  `api:generate` script.
+- `web/src/api/generated/` comes from the same OpenAPI source through
+  `web/openapi-ts.config.ts` and the root `api:generate` script.
 - `internal/storage/sqlite/generated/core/*.go` comes from `sqlc.yaml`,
   `internal/storage/sqlite/migrations/core/`, and
   `internal/storage/sqlite/queries/core/`.

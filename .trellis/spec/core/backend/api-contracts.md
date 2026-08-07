@@ -16,8 +16,8 @@ For a public contract change:
 4. add/adjust handler and client tests;
 5. run `make verify-generated` before broad tests.
 
-Do not hand-edit `internal/api/openapi/generated.go` or
-`web/src/api/schema.d.ts`. `internal/api/openapi/spec_test.go` validates the
+Do not hand-edit `internal/api/openapi/generated.go` or anything under
+`web/src/api/generated/`. `internal/api/openapi/spec_test.go` validates the
 embedded spec, while `Makefile` verifies that regeneration leaves every
 declared generated path unchanged.
 
@@ -52,6 +52,97 @@ Tests in `internal/api/httpapi/server_test.go` use `httptest` to protect auth,
 CSRF, trusted authorities, panic recovery, timeouts, stable errors, and
 sensitive response shapes. Add boundary tests there rather than relying only
 on application tests.
+
+## Scenario: Cursor History and Realtime Invalidation
+
+### 1. Scope / Trigger
+
+Use this contract for durable lists that can grow while a browser is reading
+them and for background changes that must become visible without polling.
+Messages and Calls are the current cursor-paginated resources; `/api/v1/events`
+is the shared invalidation stream.
+
+### 2. Signatures
+
+- `GET /api/v1/messages?limit={1..50}&cursor={opaque}`; optional conversation
+  filter requires both `lineId` and `remoteAddress`.
+- `GET /api/v1/calls?limit={1..50}&cursor={opaque}`.
+- Responses contain `messages` or `calls` in
+  `(created_at_unix_ms DESC, stable_id DESC)` order and optional `nextCursor`.
+- `GET /api/v1/events` returns authenticated `text/event-stream` named events
+  `update` or `resync` with `RealtimeEvent` JSON data.
+- `RealtimeEvent` is `{topics: RealtimeTopic[], attention?:
+  'sms.received'|'call.incoming'}`.
+
+### 3. Contracts
+
+- Omitted `limit` means 20. Explicit `limit=0`, an explicitly empty cursor,
+  malformed base64url, unsupported cursor version, or a cursor longer than 256
+  bytes is invalid rather than omitted.
+- Cursors are opaque versioned base64url values built only from UTC Unix
+  milliseconds and a stable business ID. Clients return them byte-for-byte and
+  never inspect them.
+- Stores fetch `limit+1`; they return at most `limit` records and emit a cursor
+  from the last returned row only when another row exists.
+- Conversation fields are paired and compared exactly; the server does not
+  trim or normalize a cursor/filter into another request.
+- SSE is advisory and privacy-bounded. It carries topic/attention metadata, not
+  resource records, message bodies, addresses, identities, or secrets.
+- Every subscriber first receives `resync` for all topics. A slow subscriber's
+  buffered update is replaced by one all-topic `resync`, so publication cannot
+  block business operations.
+- SSE revalidates the administrator session periodically, sends heartbeats, and
+  bounds session checks plus write/flush operations locally. Ordinary JSON
+  endpoints retain buffered endpoint timeouts; the HTTP server must not apply a
+  global `WriteTimeout` that cuts off a healthy stream.
+
+### 4. Validation & Error Matrix
+
+| Condition | HTTP/result |
+| --- | --- |
+| `limit` absent | 20 |
+| `limit < 1` or `limit > 50`, including explicit zero | `400 PAGE_LIMIT_INVALID` |
+| cursor present but empty/malformed/version/ID invalid | `400 PAGE_CURSOR_INVALID` |
+| only one message conversation field present/empty | `400 MESSAGE_FILTER_INVALID` |
+| no live administrator session | `401 AUTH_SESSION_UNAUTHORIZED` |
+| instance not ready | 409 typed `ApiError` |
+| trusted-LAN authority invalid | 421 typed `ApiError` |
+| SSE auth unavailable | 503 typed `ApiError` before streaming |
+| stalled/disconnected SSE client | close subscription; never block publisher |
+
+### 5. Good / Base / Bad Cases
+
+- Good: read 20 messages, use the returned cursor unchanged, and receive the
+  next strictly older records with no duplicate at an equal timestamp.
+- Base: a background VoWiFi change publishes topics only; clients refetch the
+  current HTTP snapshot silently.
+- Bad: offset pagination while inserts arrive can skip/duplicate rows; sending
+  a full SMS in SSE creates a second, privacy-sensitive source of truth.
+
+### 6. Tests Required
+
+- Domain cursor round-trip plus malformed, version, length, time, and ID cases.
+- Store tests for equal timestamps, page boundaries, conversation isolation,
+  no duplicates/skips, cancellation, and index migration Down/reopen.
+- HTTP tests for omitted versus explicit empty/zero parameters, exact filters,
+  stable JSON errors, auth/trusted-LAN, and next-cursor behavior.
+- Hub/SSE tests for initial resync, normalized topics, privacy, backpressure,
+  heartbeat, session expiry, write deadlines, and cancellation.
+- Application/background tests proving durable changes publish the correct
+  topic and only inbound SMS/incoming calls carry attention.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: cursor omission and explicit invalid input collapse to the same value.
+limit := params.Limit.Or(20)
+
+// Correct: bind/query presence first, then normalize and map exact errors.
+limit, err := pagination.NormalizeLimit(boundLimit)
+if errors.Is(err, pagination.ErrLimitInvalid) {
+    writeAPIError(w, http.StatusBadRequest, "PAGE_LIMIT_INVALID", false)
+}
+```
 
 ## Bounded Internal Unix Protocols
 

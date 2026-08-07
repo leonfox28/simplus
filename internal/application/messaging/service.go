@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
 )
@@ -56,7 +57,7 @@ type Repository interface {
 	MarkOutboundSMSUnconfirmed(context.Context, string, string, string, time.Time) (sms.Message, error)
 	MarkOutboundSMSFailed(context.Context, string, string, string, time.Time) (sms.Message, error)
 	MarkQueuedOutboundSMSUnconfirmed(context.Context, string, time.Time) (int64, error)
-	ListSMS(context.Context, int) ([]sms.Message, error)
+	ListSMSPage(context.Context, pagination.Request, string, string) (pagination.Page[sms.Message], error)
 	CountSMS(context.Context) (int64, error)
 	DeleteSMS(context.Context, string) error
 }
@@ -163,6 +164,18 @@ type HistoryStats struct {
 	TotalCount   int64
 	Capacity     int64
 	NearCapacity bool
+}
+
+type PageRequest struct {
+	Limit         int
+	Cursor        string
+	LineID        string
+	RemoteAddress string
+}
+
+type PageResult struct {
+	Messages   []sms.Message
+	NextCursor string
 }
 
 type serialGate struct {
@@ -352,22 +365,38 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 }
 
 func (service *Service) List(ctx context.Context, limit int) ([]sms.Message, error) {
+	page, err := service.ListPage(ctx, PageRequest{Limit: limit})
+	return page.Messages, err
+}
+
+func (service *Service) ListPage(ctx context.Context, request PageRequest) (PageResult, error) {
 	if service == nil || service.repository == nil {
-		return nil, ErrPersistence
+		return PageResult{}, ErrPersistence
 	}
-	if limit < 1 || limit > 100 {
-		return nil, ErrRequestInvalid
+	limit, err := pagination.NormalizeLimit(request.Limit)
+	if err != nil {
+		return PageResult{}, err
 	}
-	if service.inbox != nil || service.reports != nil {
-		if _, err := service.SyncInbound(ctx); err != nil {
-			return nil, err
+	if (request.LineID == "") != (request.RemoteAddress == "") ||
+		(request.LineID != "" && (!lineIDPattern.MatchString(request.LineID) || !remoteAddressPattern.MatchString(request.RemoteAddress))) {
+		return PageResult{}, ErrRequestInvalid
+	}
+	after, err := pagination.Decode(request.Cursor)
+	if err != nil {
+		return PageResult{}, err
+	}
+	page, err := service.repository.ListSMSPage(ctx, pagination.Request{Limit: limit, After: after}, request.LineID, request.RemoteAddress)
+	if err != nil {
+		return PageResult{}, fmt.Errorf("%w: list SMS: %v", ErrPersistence, err)
+	}
+	result := PageResult{Messages: page.Items}
+	if page.Next != nil {
+		result.NextCursor, err = pagination.Encode(*page.Next)
+		if err != nil {
+			return PageResult{}, fmt.Errorf("%w: encode SMS page cursor: %v", ErrPersistence, err)
 		}
 	}
-	messages, err := service.repository.ListSMS(ctx, limit)
-	if err != nil {
-		return nil, fmt.Errorf("%w: list SMS: %v", ErrPersistence, err)
-	}
-	return messages, nil
+	return result, nil
 }
 
 func (service *Service) Stats(ctx context.Context) (HistoryStats, error) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SMSMessage } from '../api/client'
+import type { SmsMessage as SMSMessage } from '../api/generated/types.gen'
 import { buildSMSConversations } from './conversations'
 
 function message(overrides: Partial<SMSMessage>): SMSMessage {

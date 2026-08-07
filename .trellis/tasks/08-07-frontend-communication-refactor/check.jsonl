@@ -1,0 +1,15 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "复核 event->query、OpenAPI->generated、cursor->store->UI 全链路"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否出现重复 transport、query key、错误映射和页面壳"}
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "核对完成后的 Web 栈、目录、状态与验证规范一致"}
+{"file": ".trellis/spec/web/frontend/state-management.md", "reason": "核对后端权威、active-only invalidation、mutation 同步和敏感状态生命周期"}
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "核对页面、边界、响应式与 Playwright 测试质量"}
+{"file": ".trellis/spec/web/frontend/type-safety.md", "reason": "核对 generated/Zod/handwritten cross-field validation 分工"}
+{"file": ".trellis/spec/core/backend/api-contracts.md", "reason": "复核 SSE auth/timeout/headers、pagination errors 与 CSRF"}
+{"file": ".trellis/spec/core/backend/storage-and-migrations.md", "reason": "复核 keyset 顺序、索引、Up/Down 和业务数据不丢失"}
+{"file": ".trellis/spec/core/backend/quality-and-testing.md", "reason": "复核慢订阅者、并发插入、隐私和失败路径测试"}
+{"file": ".trellis/spec/core/infra/build-and-generated-files.md", "reason": "复核 generated registry、Vite output、CI/audit 与 lockfile"}
+{"file": ".trellis/spec/core/docs/documentation-ownership.md", "reason": "复核 ADR/architecture/active plan/spec 更新归属"}
+{"file": ".trellis/spec/core/docs/privacy-and-publication.md", "reason": "复核没有身份、路径、正文、真实日志或 HIL 材料进入输出"}
+{"file": "docs/product.md", "reason": "复核未扩大公网、多租户、远控或真实硬件副作用范围"}
+{"file": "docs/architecture.md", "reason": "复核 typed boundary、state ownership 与静态 Web/API 交付仍成立"}

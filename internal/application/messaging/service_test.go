@@ -566,6 +566,32 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 }
 
+func TestHistoryReadDoesNotCompeteWithBackgroundInboundSync(t *testing.T) {
+	ctx := context.Background()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	inbound := agentapi.SMSStoredMessage{
+		MessageID: "inbound-source-background", DeviceID: "simulator-device-1", Sender: "10086",
+		Body: "background owns synchronization", ReceivedAt: time.Date(2026, 8, 7, 15, 0, 0, 0, time.UTC),
+	}
+	gateway, _ := newAgentGatewayForTest(t, inbound)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), gateway, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListPage(ctx, PageRequest{Limit: 20})
+	if err != nil || len(page.Messages) != 0 {
+		t.Fatalf("history before background sync=%#v error=%v", page, err)
+	}
+	result, err := service.SyncInbound(ctx)
+	if err != nil || result.Persisted != 1 {
+		t.Fatalf("background sync result=%#v error=%v", result, err)
+	}
+}
+
 func TestInboundSyncDoesNotAcknowledgePersistenceFailure(t *testing.T) {
 	ctx := context.Background()
 	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))

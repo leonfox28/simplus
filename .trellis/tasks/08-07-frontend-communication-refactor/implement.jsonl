@@ -1,0 +1,20 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "约束 OpenAPI、SSE、Query、SQLite 与 UI 的跨层数据流和单一解码边界"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "防止各页面重复定义 query key、错误映射、事件解码与响应式壳"}
+{"file": ".trellis/spec/web/frontend/index.md", "reason": "Web 包总规范与迁移后需要同步刷新的索引"}
+{"file": ".trellis/spec/web/frontend/directory-structure.md", "reason": "指导 Vite/Router/app/api/features/pages 的真实目录归属"}
+{"file": ".trellis/spec/web/frontend/component-guidelines.md", "reason": "保留响应式、可访问性、敏感字段和 capability-driven UI 约束"}
+{"file": ".trellis/spec/web/frontend/hook-guidelines.md", "reason": "将手写 load/poll 迁移到 Query/SSE 时保护取消与隐藏页行为"}
+{"file": ".trellis/spec/web/frontend/state-management.md", "reason": "保持后端权威、本地交互状态和敏感数据不持久化"}
+{"file": ".trellis/spec/web/frontend/quality-guidelines.md", "reason": "指导 Vitest、Testing Library、浏览器回归与现有安全行为覆盖"}
+{"file": ".trellis/spec/web/frontend/type-safety.md", "reason": "保持 OpenAPI-first、runtime validation 与跨字段 topology guard"}
+{"file": ".trellis/spec/core/backend/api-contracts.md", "reason": "新增分页和 SSE 时保持 auth、CSRF、timeout、stable error 与 OpenAPI-first"}
+{"file": ".trellis/spec/core/backend/storage-and-migrations.md", "reason": "指导 messages/calls keyset index migration、Down 与 reopen 测试"}
+{"file": ".trellis/spec/core/backend/quality-and-testing.md", "reason": "指导 httptest、SQLite、并发、隐私和 targeted-to-broad 验证"}
+{"file": ".trellis/spec/core/infra/build-and-generated-files.md", "reason": "更新生成路径、Vite 构建、Make/CI 与可复现依赖"}
+{"file": ".trellis/spec/core/docs/documentation-ownership.md", "reason": "确保 superseding ADR、architecture、active plan 与开发文档各归其主"}
+{"file": ".trellis/spec/core/docs/privacy-and-publication.md", "reason": "防止 SSE、测试 fixture、文档或浏览器材料泄露私有通信和硬件信息"}
+{"file": "docs/product.md", "reason": "确认可信 LAN、单管理员、业务术语、显式用户意图和非目标"}
+{"file": "docs/architecture.md", "reason": "保持 Web/API 到 typed hardware/network boundary 的依赖方向与机械不变量"}
+{"file": "docs/decisions/0009-ant-design-pro-web.md", "reason": "新 ADR 必须准确 supersede 旧 Umi/Pro 决定而不改写历史"}
+{"file": "docs/plans/active/mvp.md", "reason": "把原子迁移纳入唯一 active cross-layer plan 并更新审计技术债"}

@@ -1,4 +1,4 @@
-import type { SMSMessage } from '../api/client'
+import type { SmsMessage as SMSMessage } from '../api/generated/types.gen'
 
 export interface SMSConversation {
   key: string

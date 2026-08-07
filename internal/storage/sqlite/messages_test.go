@@ -7,8 +7,72 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 )
+
+func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Date(2026, 8, 7, 12, 0, 0, 123_000_000, time.UTC)
+	lineID := "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	remote := "+8613800138000"
+	items := []struct {
+		id        string
+		operation string
+		line      string
+		remote    string
+	}{
+		{"msg_page_00000000000000", "operation-page-000000000", "line_other_00000000000000", "+8613900139000"},
+		{"msg_page_00000000000001", "operation-page-000000001", lineID, remote},
+		{"msg_page_00000000000002", "operation-page-000000002", lineID, remote},
+		{"msg_page_00000000000003", "operation-page-000000003", lineID, remote},
+	}
+	for _, item := range items {
+		if _, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+			ID: item.id, OperationID: item.operation, Direction: sms.DirectionOutbound,
+			LineID: item.line, RemoteAddress: item.remote, Body: item.id,
+			Status: sms.StatusQueued, CreatedAt: createdAt, UpdatedAt: createdAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2}, "", "")
+	if err != nil || len(first.Items) != 2 || first.Items[0].ID != items[3].id || first.Items[1].ID != items[2].id || first.Next == nil {
+		t.Fatalf("first page=%#v error=%v", first, err)
+	}
+	conversation, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2}, lineID, remote)
+	if err != nil || len(conversation.Items) != 2 || conversation.Next == nil || conversation.Items[0].ID != items[3].id {
+		t.Fatalf("conversation page=%#v error=%v", conversation, err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	if _, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+		ID: "msg_page_00000000000004", OperationID: "operation-page-000000004", Direction: sms.DirectionOutbound,
+		LineID: lineID, RemoteAddress: remote, Body: "concurrent", Status: sms.StatusQueued,
+		CreatedAt: createdAt.Add(time.Minute), UpdatedAt: createdAt.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: first.Next}, "", "")
+	if err != nil || len(second.Items) != 2 || second.Items[0].ID != items[1].id || second.Items[1].ID != items[0].id || second.Next != nil {
+		t.Fatalf("second page=%#v error=%v", second, err)
+	}
+	conversationTail, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: conversation.Next}, lineID, remote)
+	if err != nil || len(conversationTail.Items) != 1 || conversationTail.Items[0].ID != items[1].id || conversationTail.Next != nil {
+		t.Fatalf("conversation tail=%#v error=%v", conversationTail, err)
+	}
+}
 
 func TestOutboundSMSPersistsReplaysAndCompletes(t *testing.T) {
 	ctx := context.Background()

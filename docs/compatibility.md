@@ -64,7 +64,8 @@ SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信�
 
 ## 前端与安装
 
-- 管理界面以 React、Ant Design Pro、Pro Components 和 Umi Max 为唯一前端栈；
+- 管理界面以 React、Vite、React Router、直接 Ant Design 和 TanStack Query 为唯一前端栈；
+- 页面通过鉴权 HTTP 读取权威快照和提交 mutation；同源 SSE 只发送有界资源失效与新短信/来电提示，断线后通过 HTTP 收敛；
 - 移动端使用响应式布局和抽屉导航，桌面端保持常驻侧边栏；
 - Debian `linux/amd64` bundle、全新初始化、升级、默认保留数据卸载和显式 purge 已有自动化或 smoke 证据；
 - Debian 13/amd64 的 `simplus-strongswan-plugins` 已从锁定 source/runtime ABI 输入完成普通用户构建，并自动验证 Debian 包身份、依赖范围、导出构造符、动态依赖、固定 runpath、权限、ABI 元数据、SHA-256 manifest 与对应源码完整性；这是包级 Fixture 证据，不是 ePDG/IMS 运行证据；

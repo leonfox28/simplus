@@ -43,7 +43,7 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 if ! command -v setsid >/dev/null 2>&1; then
-  printf 'error: setsid is required to isolate the Umi process group\n' >&2
+  printf 'error: setsid is required to isolate the Vite process group\n' >&2
   exit 1
 fi
 if ! node - "$WEB_HOST" "$WEB_PORT" <<'NODE'
@@ -93,7 +93,7 @@ cleanup() {
   fi
   cleanup_done=1
   if [[ -n $web_pid ]] && kill -0 "$web_pid" 2>/dev/null; then
-    # pnpm, cross-env and Umi form a child tree. Keep it in a dedicated
+    # pnpm and Vite form a child tree. Keep it in a dedicated
     # session so interrupted smoke tests cannot orphan memory-heavy workers.
     kill -TERM -- "-$web_pid" 2>/dev/null || true
   fi
@@ -148,14 +148,14 @@ while :; do
   if ! kill -0 "$api_pid" 2>/dev/null; then
     if wait "$api_pid"; then status=0; else status=$?; fi
     api_pid=''
-    printf 'error: %s API exited; stopping Umi Max (status %d)\n' "$runtime_label" "$status" >&2
+    printf 'error: %s API exited; stopping Vite (status %d)\n' "$runtime_label" "$status" >&2
     if (( status == 0 )); then status=1; fi
     exit "$status"
   fi
   if ! kill -0 "$web_pid" 2>/dev/null; then
     if wait "$web_pid"; then status=0; else status=$?; fi
     web_pid=''
-    printf 'error: Umi Max exited; stopping %s API (status %d)\n' "$runtime_label" "$status" >&2
+    printf 'error: Vite exited; stopping %s API (status %d)\n' "$runtime_label" "$status" >&2
     if (( status == 0 )); then status=1; fi
     exit "$status"
   fi

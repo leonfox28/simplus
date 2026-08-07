@@ -1,115 +1,92 @@
 # Frontend Directory Structure
 
-> The current layout of the `@simplus/web` Umi Max single-page application.
+> The current layout of the `@simplus/web` Vite single-page application.
 
 ## Package Boundary
 
-`web/` is the only pnpm workspace package. It owns the browser application; the
-OpenAPI source remains at `api/openapi.yaml`, and the Go service owns persistence
-and business state. `docs/decisions/0009-ant-design-pro-web.md` fixes the current
-frontend stack as React 19, Ant Design 6, Ant Design Pro Components, and Umi Max.
+`web/` is the browser package. The Go service owns persistence and business
+state; `api/openapi.yaml` owns the public contract.
 
 ```text
 web/
-├── config/
-│   ├── config.ts              # Umi plugins, theme, proxy, and layout defaults
-│   └── routes.ts              # explicit route table
+├── e2e/                         # synthetic Playwright desktop/mobile flows
+├── openapi-ts.config.ts         # Hey API generator definition
+├── playwright.config.ts
+├── vite.config.ts               # Vite, @ alias, dev /api proxy
 ├── src/
 │   ├── api/
-│   │   ├── client.ts          # typed HTTP boundary and runtime validation
-│   │   ├── client.test.ts
-│   │   ├── hardwareSchema.ts  # topology guards and cross-reference checks
-│   │   └── schema.d.ts        # generated from api/openapi.yaml
-│   ├── calls/                 # non-visual call/media domain logic and tests
-│   ├── messages/              # non-visual message transforms and tests
-│   ├── mihomo/                # non-visual Mihomo URL logic and tests
-│   ├── locales/               # Umi menu locale dictionaries
-│   ├── pages/                 # one explicitly routed page per PascalCase file
-│   ├── app.tsx                # Umi runtime hooks, auth redirects, and ProLayout
-│   ├── app.test.tsx
-│   ├── global.css             # application-wide and responsive overrides
-│   └── react-env.d.ts
+│   │   ├── generated/           # generated SDK/types/Zod/Query helpers
+│   │   ├── runtime.ts           # same-origin fetch, CSRF, time budgets
+│   │   ├── setupClient.ts       # error normalization/session expiry
+│   │   ├── queryClient.ts       # shared Query defaults
+│   │   ├── events.ts            # realtime validation/topic mapping
+│   │   └── hardwareSchema.ts    # topology cross-reference checks
+│   ├── app/
+│   │   ├── AppProviders.tsx     # Ant Design, Query, BrowserRouter
+│   │   ├── BootstrapGate.tsx    # setup/session bootstrap and guards
+│   │   ├── AppRouter.tsx        # explicit lazy route table
+│   │   ├── AppShell.tsx         # responsive navigation and Outlet
+│   │   └── RealtimeBridge.tsx   # authenticated SSE lifecycle
+│   ├── components/Page.tsx      # shared page/state/responsive primitives
+│   ├── pages/                   # routed screens
+│   ├── calls|messages|mihomo/   # reusable non-visual feature logic
+│   ├── test/                    # shared deterministic fixtures/helpers
+│   ├── global.css
+│   └── main.tsx
 ├── vitest.config.ts
-├── vitest.setup.ts
-├── package.json
-└── tsconfig.json
+└── package.json
 ```
 
-Representative paths: `web/config/routes.ts`, `web/src/pages/Lines.tsx`,
-`web/src/api/client.ts`, `web/src/messages/status.ts`, and
-`web/src/mihomo/dashboard.ts`.
+## Placement Rules
 
-## Where Code Goes
+- Add routes explicitly to `src/app/AppRouter.tsx`; add authenticated menu
+  entries to `src/app/navigation.tsx` when the route belongs in navigation.
+- Keep app-wide providers, auth/setup guards, shell layout, and realtime
+  connection ownership under `src/app/`.
+- Put routed screens in `src/pages/`. Keep a one-page helper beside its page;
+  extract shared presentation primitives only after there is a real second
+  consumer.
+- Put reusable non-visual domain transforms under their feature directory with
+  a co-located unit test.
+- Keep transport, generated client setup, runtime validation, errors, query
+  configuration, and realtime topic mapping in `src/api/`. Pages never call
+  `fetch` or construct `EventSource`.
+- Keep reusable page composition in `src/components/`; it must remain domain
+  neutral and contain no API calls.
+- Use the `@/* -> src/*` alias across directories and relative imports within a
+  feature.
 
-- Put a routed screen directly in `web/src/pages/` and add it to
-  `web/config/routes.ts`. Pages are not discovered through filesystem routing.
-- Keep a small view helper in its page file. `CapabilityTags`,
-  `SIMPresenceTag`, and `ModemModel` all live in `web/src/pages/Modems.tsx`;
-  Line label and eligibility helpers live in `web/src/pages/Lines.tsx`.
-- Move reusable, non-visual domain logic into a feature folder next to a focused
-  test. Existing pairs are `messages/order.ts` + `order.test.ts`,
-  `messages/status.ts` + `status.test.ts`, and `mihomo/dashboard.ts` +
-  `dashboard.test.ts`.
-- Keep all HTTP transport and boundary validation in `web/src/api/`. Pages call
-  exported client functions; they do not call `fetch` directly.
-- Keep Umi application wiring in `web/src/app.tsx` and `web/config/`, rather
-  than embedding auth, navigation, or layout setup in feature modules.
-- There is currently no shared `components/`, `hooks/`, `store/`, or `assets/`
-  directory. Do not introduce one merely to mirror a generic React layout; add
-  a boundary when more than one real consumer needs it.
+## Route Contract
 
-## Routes and Page Modules
+`AppRouter` uses `Routes`/`Route` from `react-router`. `/login` and `/setup`
+render outside `AppShell`; authenticated pages are children of the shell and
+render through `Outlet`. Route modules are lazy-loaded, and unknown routes
+replace-navigate to `/dashboard`.
 
-The route table is explicit and ordered. Login and setup opt out of ProLayout;
-authenticated management pages use it:
+Do not add a framework router, filesystem routing, or route-loader state layer.
+Setup/session decisions stay in `BootstrapGate`, which can clear the query
+cache and redirect after a 401.
 
-```ts
-// web/config/routes.ts
-{ path: '/login', component: './Login', layout: false },
-{ path: '/setup', component: './Setup', layout: false },
-{ path: '/lines', name: '线路配置', icon: 'BranchesOutlined', component: './Lines' },
-```
+## Generated Ownership
 
-Routed page files use a default function export, as in
-`web/src/pages/Lines.tsx`, `web/src/pages/Modems.tsx`, and
-`web/src/pages/Mihomo.tsx`. Umi runtime entry points in `web/src/app.tsx` are
-named exports (`rootContainer`, `getInitialState`, and `layout`) because Umi
-loads those names by contract.
+`corepack pnpm --dir web generate:api` reads `api/openapi.yaml` through
+`web/openapi-ts.config.ts` and replaces `web/src/api/generated/`. This output
+contains:
 
-## Naming and Imports
+- Fetch client and typed SDK;
+- TypeScript request/response models;
+- Zod request/response schemas;
+- TanStack Query keys, query/infinite-query options, and mutation options.
 
-- Routed component filenames and component identifiers are PascalCase:
-  `Dashboard.tsx`, `Login.tsx`, and `Setup.tsx`.
-- Feature utilities use lower camel case: `simulatorMedia.ts`, `order.ts`, and
-  `dashboard.ts`.
-- Tests are co-located and use `.test.ts` or `.test.tsx`.
-- Use the configured `@/* -> web/src/*` alias for imports across source
-  directories, especially from pages (`@/api/client`, `@/messages/status`).
-- Use relative imports within a feature and from a test to its subject
-  (`./order`, `./Modems`). Older `messages/conversations.ts` reaches the API by
-  a relative path, but the other current cross-feature imports use `@/`.
-- Import API values and their associated types together with `type` specifiers,
-  as shown throughout `Lines.tsx`, `Modems.tsx`, and `Mihomo.tsx`.
-
-## Generated and Configuration Files
-
-`web/src/api/schema.d.ts` is generated by:
-
-```bash
-corepack pnpm --dir web generate:api
-```
-
-Do not hand-edit that declaration. `web/package.json` makes component imports
-explicit (`generate:components` does not generate a barrel), and
-`web/config/config.ts` points Umi at the explicit route table. Locale keys for
-menu names stay in `web/src/locales/en-US.ts` and `zh-CN.ts`.
+Never hand-edit anything under `generated/`. Change OpenAPI or generator
+configuration, regenerate, and run `make verify-generated`. The whole generated
+directory is registered in `Makefile` so added or removed files are checked.
 
 ## Avoid
 
-- Do not restore the removed Vue, Pinia, Vue Router, Vite, or Tailwind tree;
-  `docs/decisions/0009-ant-design-pro-web.md` records the single-stack decision.
-- Do not place transport parsing or OpenAPI response checks in page modules.
-- Do not create a frontend model or store for backend-owned Modem, Line,
-  Message, Call, or Mihomo state; the present structure keeps that authority at
-  the API boundary.
-- Do not put new application code in generated `.umi/` or `schema.d.ts` output.
+- `web/config/`, `.umi/`, `src/app.tsx`, Umi runtime exports, or ProLayout.
+- `@umijs/*`, `@ant-design/pro-*`, `react-router-dom`, or handwritten copies of
+  generated API models.
+- Direct `fetch`, manual endpoint paths, or `new EventSource` in pages.
+- Browser models for backend-owned Modem, Line, Message, Call, or Mihomo state.
+- Placing application code in generated output or build artifacts.

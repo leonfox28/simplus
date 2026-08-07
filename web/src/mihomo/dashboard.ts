@@ -1,4 +1,4 @@
-import type { MihomoDashboardStatus } from '@/api/client'
+import type { MihomoDashboardStatus } from '@/api/generated/types.gen'
 
 export function zashboardLaunchURL(
   status: MihomoDashboardStatus | undefined,

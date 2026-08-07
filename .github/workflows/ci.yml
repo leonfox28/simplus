@@ -32,6 +32,10 @@ jobs:
         run: make verify-modules && make check-docs && make check-container-files && make check-format && make verify-generated
       - name: Test and vet
         run: make test && make lint
+      - name: Install Chromium for browser regression tests
+        run: pnpm --dir web exec playwright install --with-deps chromium
+      - name: Run desktop and mobile browser regressions
+        run: make web-e2e
       - name: Audit reachable vulnerabilities
         run: make security
       - name: Build Web and host binaries

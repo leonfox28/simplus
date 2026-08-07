@@ -56,7 +56,7 @@ The `generate` target has three owners:
 | --- | --- | --- |
 | `api/openapi.yaml` | `internal/api/openapi/generate.go` + `api/oapi-codegen.yaml` | `internal/api/openapi/generated.go` |
 | `internal/storage/sqlite/migrations/core/**` + `internal/storage/sqlite/queries/core/**` | `sqlc.yaml` | `internal/storage/sqlite/generated/core/*.go` |
-| `api/openapi.yaml` | root `api:generate` -> `web` `generate:api` | `web/src/api/schema.d.ts` |
+| `api/openapi.yaml` | `web/openapi-ts.config.ts` via root `api:generate` -> Web `generate:api` | `web/src/api/generated/` Fetch SDK, TypeScript, Zod, and TanStack Query output |
 
 `Makefile` `GENERATED_PATHS` is the drift-check registry. `verify-generated`
 copies all declared outputs, runs generation, byte-compares the results, and
@@ -102,6 +102,9 @@ do not require those sources or packages.
 ## CI and Release Alignment
 
 `.github/workflows/ci.yml` calls the same Make checks used locally.
+It also installs the pinned Playwright Chromium and runs `make web-e2e`; those
+fixtures are synthetic and must remain independent of private endpoints,
+hardware, RF, SMS, calls, and HIL.
 `.github/workflows/strongswan-plugins.yml` owns package evidence, and
 `.github/workflows/containers.yml` owns Compose contract, image, and tagged
 corresponding-source publication. When changing a path filter, release asset,

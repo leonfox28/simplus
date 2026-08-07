@@ -25,7 +25,7 @@
 | 8：可安装版本 | Debian bundle、systemd 服务、安装/卸载和 fresh-instance smoke |
 | 9–11：管理完整性 | 管理员维护、模组/线路页面、Mihomo 管理和单向通知渠道 |
 | 12–15：Simplus-owned Mihomo | 有界订阅转换、不可变工件、国家组、共享 DoH、TPROXY 与最小权限 supervisor |
-| 16：管理后台迁移 | React、Ant Design Pro、Pro Components 和 Umi Max 单一前端栈 |
+| 16：首次管理后台迁移 | 从旧 Vue 双栈迁移到 React、Ant Design Pro Components 和 Umi Max |
 | 17：External UI | 固定版本 Zashboard、Mihomo 托管和私有 controller secret |
 | 18：真实 Host VoWiFi 纵切 | ML307A 类型化 SIM AKA、ePDG、Gm IPsec 和最小 IMS 注册 |
 | 19：Web 管理的持续运行态 | per-Line 生命周期、keepalive、提前刷新、有界重连、恢复和脱敏 Web 状态 |
@@ -35,6 +35,35 @@
 | 24：线路与通信路径解耦 | Line 只表达稳定身份；RF、VoWiFi、出口和 transport 独立配置，新 Line 出口默认未配置 |
 | 25：strongSwan 插件发布边界 | 同仓库独立 GPL 组件、锁定 Debian 输入、独立 `.deb`、对应源码和隔离 CI |
 | 26：容器化生产部署 | 三镜像权限边界、Compose 生命周期、精确 USB/sysfs 映射、bridge 内 netd 和本地开发不容器化 |
+| 27：显式前端运行时与后端权威通信 | Vite/React Router/直接 Ant Design/TanStack Query、生成客户端、游标分页与有界 SSE 失效流 |
+
+## Milestone 27：显式前端运行时与后端权威通信（已完成）
+
+- [x] 接受 [`0022`](../../decisions/0022-vite-react-query-web-runtime.md)，保留 React 19、
+  Ant Design、单一前端栈、cookie/CSRF 和同源静态承载，同时 supersede ADR 0009 的
+  Umi Max/Pro Components 决定；
+- [x] 将构建与应用壳原子迁移到 Vite、React Router Declarative Mode、直接 `antd`、
+  TanStack Query 和响应式桌面 Sider/手机 Drawer；完成所有页面迁移后删除 Umi、
+  Pro Components、兼容桥和重复 UI/router/server-state 依赖；
+- [x] 让 `@hey-api/openapi-ts` 从 OpenAPI 生成 Fetch SDK、TypeScript 类型、Zod
+  schema 和 Query keys/options，由唯一手写 runtime 负责同源 cookie、CSRF、
+  取消/超时、稳定错误与少量领域跨字段 guard；页面不直接 fetch 或复制公共 payload；
+- [x] 为 Messages/Calls 实现 `(createdAt, stable ID)` opaque keyset pagination，
+  Messages 会话 filter 成对使用 Line 与 remote address，并补齐匹配 SQLite 索引、
+  migration Down 与边界/并发/reopen 测试；
+- [x] 增加同源鉴权、有界且不阻塞发布者的 SSE 失效/attention 流；HTTP 继续承载
+  权威 snapshot 和 mutation，断线或丢失 hint 通过 resync + active query refetch
+  收敛，只有新短信和来电产生明显页面内提示；
+- [x] 迁移全部页面并覆盖桌面/手机的 loading、empty、error、partial、disabled、
+  busy、无全局横向溢出和无意外 autofocus；未装配能力保持可见且显示原因；
+- [x] 完成 Vitest/typecheck/build、后端与迁移测试、generated drift、Playwright
+  desktop/mobile、完整 dependency/audit before-after 和文档/规范一致性检查；在这些
+  验证完成前不把目标架构描述为已获得运行证据；
+- [x] 以迁移前相同口径记录依赖与产物：完整 workspace tree 从约 1,578 收敛到 268，
+  production tree 从约 1,486 收敛到 73；`web/dist` 仍为 29 个文件，字节数从
+  3,004,106 降到 1,387,882（约减少 53.8%）；production/full audit 均为零 advisory；
+- [x] 以一个匹配的 `simplusd` API + `web/dist` 版本交付，不维护 Umi/Pro fallback、
+  双 API 或长期双通信层；本里程碑不执行真实短信、电话、RF、eUICC 或其他 HIL。
 
 ## Milestone 22：已添加模组与能力适配层
 
@@ -120,7 +149,7 @@
 - [x] 从脱敏工作树创建不包含现有私有历史的全新 Git 仓库；
 - [x] 对全新工作树与完整新历史运行 secret scan，并人工复核首个发布树；
 - [x] 经仓库所有者最终确认后创建公开远程并推送；
-- [ ] 解决 Umi 构建工具链尚未消除的传递依赖审计告警，并继续复核后续 Actions、issues 和 release assets。
+- [x] 通过 Milestone 27 删除 Umi/Pro 传递依赖链并复核 production/full audit；继续复核后续 Actions、issues 和 release assets。
 
 ## Milestone 21：Host VoWiFi 短信
 
@@ -134,7 +163,7 @@
 - [x] 将发送结果未知建模为持久 `unconfirmed` 状态并在 Web 中单独显示，保持 operation 幂等且禁止自动重发；
 - [x] 用 SIP/RP fixture 证明提交请求不等待 RP 最终报告：同一 multipart 操作逐段各提交一次并先保持 `unconfirmed`，后续匹配的 RP-ACK 经持久化同步后才成为 `sent`；
 - [x] 修正标准 RP-ERROR cause-length 解析、普通 SMS-DELIVER-REPORT TPDU、REGISTER `P-Associated-URI` 身份选择、RP reference 生命周期和 RFC Call-ID 校验；
-- [x] 短信页面在可见期间有界自动刷新，避免后台已接收消息仍需手动刷新；
+- [x] 短信页面通过有界 SSE 失效提示重新读取 HTTP 权威快照，避免后台已接收消息仍需手动刷新；
 - [x] 完成一条受控单段 GSM7 服务请求的出站 RP 最终结果 HIL：SIP `accepted` 后取得关联 RP-ACK，且对应 multipart 业务回复完成持久化与重组；
 - [x] 完成从公开 Web/API 发起的单段服务请求 HIL，并确认业务库由带 provider ID 的 `unconfirmed` 异步提升为 `sent`；
 - [x] 完成普通号码的单段自号码回环 HIL：出站取得关联 RP-ACK，随后同一业务消息重新入站、持久化并确认；

@@ -92,11 +92,11 @@ func TestRestartReconcilesUnfinishedCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, err := restarted.List(context.Background())
+	page, err := restarted.List(context.Background(), 20, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 1 || values[0].ID != inbound.ID || values[0].State != call.StateFailed || values[0].EndReason != ErrorInterruptedByRestart {
-		t.Fatalf("reconciled = %#v", values)
+	if len(page.Calls) != 1 || page.Calls[0].ID != inbound.ID || page.Calls[0].State != call.StateFailed || page.Calls[0].EndReason != ErrorInterruptedByRestart {
+		t.Fatalf("reconciled = %#v", page.Calls)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
 	modemapp "github.com/leonfox28/simplus/internal/application/modem"
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
+	"github.com/leonfox28/simplus/internal/application/realtime"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
 	"github.com/leonfox28/simplus/internal/domain/call"
@@ -40,6 +41,7 @@ import (
 	linedomain "github.com/leonfox28/simplus/internal/domain/line"
 	mihomodomain "github.com/leonfox28/simplus/internal/domain/mihomo"
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	vowifidomain "github.com/leonfox28/simplus/internal/domain/vowifi"
 )
@@ -49,6 +51,8 @@ const (
 	adminSessionCookieName = "simplus_admin_session"
 	csrfCookieName         = "simplus_csrf"
 	csrfHeaderName         = "X-Simplus-CSRF"
+	realtimeAuthTimeout    = 3 * time.Second
+	realtimeWriteTimeout   = 5 * time.Second
 )
 
 type Authenticator interface {
@@ -101,7 +105,7 @@ type NotificationManager interface {
 
 type Messenger interface {
 	Send(context.Context, messageapp.SendRequest) (messageapp.SendResult, error)
-	List(context.Context, int) ([]sms.Message, error)
+	ListPage(context.Context, messageapp.PageRequest) (messageapp.PageResult, error)
 	Stats(context.Context) (messageapp.HistoryStats, error)
 	Delete(context.Context, string) error
 }
@@ -113,7 +117,7 @@ type ContactManager interface {
 	Delete(context.Context, string) error
 }
 type CallManager interface {
-	List(context.Context) ([]call.Record, error)
+	List(context.Context, int, string) (callapp.PageResult, error)
 	Dial(context.Context, string, string, string) (call.Record, bool, error)
 	Incoming(context.Context, string, string, string) (call.Record, bool, error)
 	Answer(context.Context, string) (call.Record, error)
@@ -170,6 +174,8 @@ type Server struct {
 	mihomoRuntime       MihomoRuntimeManager
 	mihomoDashboard     MihomoDashboardManager
 	notifications       NotificationManager
+	realtime            *realtime.Hub
+	realtimeHeartbeat   time.Duration
 	logger              *slog.Logger
 }
 
@@ -240,6 +246,13 @@ func WithNotifications(server *Server, manager NotificationManager) *Server {
 	return server
 }
 
+func WithRealtime(server *Server, hub *realtime.Hub) *Server {
+	if server != nil {
+		server.realtime = hub
+	}
+	return server
+}
+
 func WithCalls(server *Server, calls CallManager) *Server {
 	if server != nil {
 		server.calls = calls
@@ -267,7 +280,7 @@ func New(
 	}
 	server := &Server{
 		health: healthService, setup: setupService, inventory: inventoryService,
-		auth: authentication, messages: messages, logger: logger,
+		auth: authentication, messages: messages, logger: logger, realtimeHeartbeat: 15 * time.Second,
 	}
 	if len(contactManagers) != 0 {
 		server.contacts = contactManagers[0]
@@ -288,11 +301,45 @@ func Router(server *Server) http.Handler {
 	router.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, openapi.ApiError{Code: "API_METHOD_NOT_ALLOWED", Retryable: false})
 	})
-	return openapi.HandlerFromMux(server, router)
+	return openapi.HandlerWithOptions(server, openapi.ChiServerOptions{
+		BaseRouter:       router,
+		ErrorHandlerFunc: writeOpenAPIParameterError,
+	})
+}
+
+func writeOpenAPIParameterError(w http.ResponseWriter, r *http.Request, err error) {
+	code := "API_REQUEST_INVALID"
+	var invalid *openapi.InvalidParamFormatError
+	var required *openapi.RequiredParamError
+	if errors.As(err, &invalid) {
+		code = paginationParameterErrorCode(r, invalid.ParamName)
+	} else if errors.As(err, &required) {
+		code = paginationParameterErrorCode(r, required.ParamName)
+	}
+	writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: code, Retryable: false})
+}
+
+func paginationParameterErrorCode(r *http.Request, parameter string) string {
+	if r != nil && r.Method == http.MethodGet &&
+		(r.URL.Path == "/api/v1/messages" || r.URL.Path == "/api/v1/calls") {
+		switch parameter {
+		case "limit":
+			return "PAGE_LIMIT_INVALID"
+		case "cursor":
+			return "PAGE_CURSOR_INVALID"
+		case "lineId", "remoteAddress":
+			return "MESSAGE_FILTER_INVALID"
+		}
+	}
+	return "API_REQUEST_INVALID"
 }
 
 func apiTimeout(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		timeout := 15 * time.Second
 		if r.URL.Path == "/api/v1/mihomo/core/install" {
 			timeout = 2 * time.Minute
@@ -312,6 +359,127 @@ func apiTimeout(next http.Handler) http.Handler {
 		}
 		timeoutJSON(timeout)(next).ServeHTTP(w, r)
 	})
+}
+
+func (server *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
+	authCtx, cancelAuth := context.WithTimeout(r.Context(), realtimeAuthTimeout)
+	authorized := server.requireBusinessAPI(w, r.WithContext(authCtx))
+	cancelAuth()
+	if !authorized {
+		return
+	}
+	if server.realtime == nil {
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "EVENT_STREAM_UNAVAILABLE", Retryable: true})
+		return
+	}
+	if _, ok := w.(http.Flusher); !ok {
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "EVENT_STREAM_UNAVAILABLE", Retryable: true})
+		return
+	}
+	sessionToken, _, ok := administratorTokens(r, false)
+	if !ok {
+		clearAdministratorCookies(w, r)
+		writeJSON(w, http.StatusUnauthorized, openapi.ApiError{Code: "AUTH_SESSION_UNAUTHORIZED", Retryable: false})
+		return
+	}
+	subscription := server.realtime.Subscribe()
+	defer subscription.Close()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if err := writeAndFlushRealtime(w, func() error {
+		_, err := io.WriteString(w, "retry: 3000\n\n")
+		return err
+	}); err != nil {
+		return
+	}
+	heartbeat := server.realtimeHeartbeat
+	if heartbeat <= 0 {
+		heartbeat = 15 * time.Second
+	}
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-subscription.C:
+			if !open || writeAndFlushRealtime(w, func() error { return writeRealtimeEvent(w, event) }) != nil {
+				return
+			}
+		case <-ticker.C:
+			if !server.realtimeSessionValid(r.Context(), sessionToken) {
+				return
+			}
+			if err := writeAndFlushRealtime(w, func() error {
+				_, err := io.WriteString(w, ": heartbeat\n\n")
+				return err
+			}); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (server *Server) realtimeSessionValid(ctx context.Context, token string) bool {
+	if server == nil || server.setup == nil || server.auth == nil {
+		return false
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, realtimeAuthTimeout)
+	defer cancel()
+	status, err := server.setup.Status(checkCtx)
+	if err != nil || !status.BusinessAPIAvailable {
+		return false
+	}
+	_, err = server.auth.Authenticate(checkCtx, token, "", false)
+	return err == nil
+}
+
+func writeAndFlushRealtime(w http.ResponseWriter, write func() error) error {
+	controller := http.NewResponseController(w)
+	deadlineSet := false
+	if err := controller.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout)); err != nil {
+		if !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+	} else {
+		deadlineSet = true
+	}
+	if err := write(); err != nil {
+		return err
+	}
+	if err := controller.Flush(); err != nil {
+		return err
+	}
+	if deadlineSet {
+		return controller.SetWriteDeadline(time.Time{})
+	}
+	return nil
+}
+
+func writeRealtimeEvent(w io.Writer, event realtime.Event) error {
+	topics := make([]openapi.RealtimeTopic, 0, len(event.Topics))
+	for _, topic := range event.Topics {
+		topics = append(topics, openapi.RealtimeTopic(topic))
+	}
+	payload := openapi.RealtimeEvent{Topics: topics}
+	if event.Attention != "" {
+		attention := openapi.RealtimeAttention(event.Attention)
+		payload.Attention = &attention
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Kind, data)
+	return err
+}
+
+func (server *Server) publish(topics []realtime.Topic, attention realtime.Attention) {
+	if server != nil && server.realtime != nil {
+		server.realtime.Publish(topics, attention)
+	}
 }
 
 type bufferedResponse struct {
@@ -1131,6 +1299,7 @@ func (server *Server) InstallLatestMihomoCore(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadGateway, openapi.ApiError{Code: "MIHOMO_CORE_INSTALL_FAILED", Retryable: true})
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	writeJSON(w, http.StatusOK, mihomoCoreStatusResponse(status))
 }
 
@@ -1185,6 +1354,7 @@ func (server *Server) CreateMihomoSubscription(w http.ResponseWriter, r *http.Re
 		server.writeMihomoSubscriptionError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	writeJSON(w, http.StatusCreated, mihomoSubscriptionResponse(item))
 }
 
@@ -1213,6 +1383,7 @@ func (server *Server) UpdateMihomoSubscription(w http.ResponseWriter, r *http.Re
 			return
 		}
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	writeJSON(w, http.StatusOK, mihomoSubscriptionResponse(item))
 }
 
@@ -1228,6 +1399,7 @@ func (server *Server) DeleteMihomoSubscription(w http.ResponseWriter, r *http.Re
 		server.writeMihomoSubscriptionError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1244,6 +1416,7 @@ func (server *Server) RefreshMihomoSubscription(w http.ResponseWriter, r *http.R
 		server.writeMihomoSubscriptionError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	writeJSON(w, http.StatusOK, openapi.MihomoSubscriptionRefresh{Subscription: mihomoSubscriptionResponse(item), Nodes: mihomoNodeResponses(nodes)})
 }
 
@@ -1343,6 +1516,7 @@ func (server *Server) PutLineEgressBinding(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicLines, realtime.TopicMihomo, realtime.TopicVoWiFi}, "")
 	writeJSON(w, http.StatusOK, lineEgressResponse(item))
 }
 
@@ -1388,6 +1562,7 @@ func (server *Server) ActivateVoWiFiLine(w http.ResponseWriter, r *http.Request,
 		server.writeVoWiFiError(w, r, err, lineID, true)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicVoWiFi}, "")
 	writeJSON(w, http.StatusAccepted, voWiFiStateResponse(state))
 }
 
@@ -1404,6 +1579,7 @@ func (server *Server) DeactivateVoWiFiLine(w http.ResponseWriter, r *http.Reques
 		server.writeVoWiFiError(w, r, err, lineID, false)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicVoWiFi}, "")
 	writeJSON(w, http.StatusOK, voWiFiStateResponse(state))
 }
 
@@ -1480,6 +1656,7 @@ func (server *Server) PublishMihomoConfig(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MIHOMO_CONFIG_PUBLISH_FAILED", Retryable: true})
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo}, "")
 	writeJSON(w, http.StatusOK, mihomoConfigResponse(status))
 }
 
@@ -1505,6 +1682,7 @@ func (server *Server) SelectMihomoSubscription(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_SELECT_FAILED", Retryable: true})
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMihomo, realtime.TopicVoWiFi}, "")
 	writeJSON(w, http.StatusOK, mihomoConfigResponse(status))
 }
 
@@ -1558,6 +1736,9 @@ func (server *Server) handleMihomoRuntime(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MIHOMO_RUNTIME_OPERATION_FAILED", Retryable: true})
 		return
 	}
+	if mutation {
+		server.publish([]realtime.Topic{realtime.TopicMihomo, realtime.TopicVoWiFi}, "")
+	}
 	writeJSON(w, http.StatusOK, mihomoRuntimeResponse(status))
 }
 func mihomoRuntimeResponse(status mihomoapp.RuntimeStatus) openapi.MihomoRuntimeStatus {
@@ -1605,6 +1786,7 @@ func (server *Server) CreateNotificationChannel(w http.ResponseWriter, r *http.R
 		server.writeNotificationError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	writeJSON(w, http.StatusCreated, notificationChannelResponse(item))
 }
 func (server *Server) UpdateNotificationChannel(w http.ResponseWriter, r *http.Request, channelID string) {
@@ -1625,6 +1807,7 @@ func (server *Server) UpdateNotificationChannel(w http.ResponseWriter, r *http.R
 		server.writeNotificationError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	writeJSON(w, http.StatusOK, notificationChannelResponse(item))
 }
 func (server *Server) DeleteNotificationChannel(w http.ResponseWriter, r *http.Request, channelID string) {
@@ -1639,6 +1822,7 @@ func (server *Server) DeleteNotificationChannel(w http.ResponseWriter, r *http.R
 		server.writeNotificationError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 func (server *Server) TestNotificationChannel(w http.ResponseWriter, r *http.Request, channelID string) {
@@ -1654,6 +1838,7 @@ func (server *Server) TestNotificationChannel(w http.ResponseWriter, r *http.Req
 		server.writeNotificationError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	writeJSON(w, http.StatusOK, notificationChannelResponse(item))
 }
 func (server *Server) writeNotificationError(w http.ResponseWriter, r *http.Request, err error) {
@@ -1686,7 +1871,7 @@ func notificationChannelResponse(item notificationapp.ChannelView) openapi.Notif
 	return openapi.NotificationChannel{Id: item.ID, Provider: openapi.NotificationChannelProvider(item.Provider), DisplayName: item.DisplayName, WebhookHint: openapi.NotificationChannelWebhookHint(item.WebhookHint), SigningSecretConfigured: item.SigningSecretConfigured, Enabled: item.Enabled, EventKinds: events, LastDeliveryAt: lastAt, LastDeliveryStatus: openapi.NotificationChannelLastDeliveryStatus(item.LastDeliveryStatus), LastErrorCode: item.LastErrorCode}
 }
 
-func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request) {
+func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request, params openapi.ListMessagesParams) {
 	if !server.requireBusinessAPI(w, r) {
 		return
 	}
@@ -1694,14 +1879,62 @@ func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MESSAGING_UNAVAILABLE", Retryable: true})
 		return
 	}
-	messages, err := server.messages.List(r.Context(), 50)
+	request := messageapp.PageRequest{}
+	if params.Limit != nil {
+		if *params.Limit == 0 {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+			return
+		}
+		request.Limit = *params.Limit
+	}
+	if params.Cursor != nil {
+		if *params.Cursor == "" {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+			return
+		}
+		request.Cursor = *params.Cursor
+	} else if _, present := r.URL.Query()["cursor"]; present {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+		return
+	}
+	linePresent := false
+	if params.LineId != nil {
+		request.LineID = *params.LineId
+		linePresent = true
+	} else if _, present := r.URL.Query()["lineId"]; present {
+		linePresent = true
+	}
+	remotePresent := false
+	if params.RemoteAddress != nil {
+		request.RemoteAddress = *params.RemoteAddress
+		remotePresent = true
+	} else if _, present := r.URL.Query()["remoteAddress"]; present {
+		remotePresent = true
+	}
+	if linePresent != remotePresent || (linePresent && (request.LineID == "" || request.RemoteAddress == "")) {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MESSAGE_FILTER_INVALID", Retryable: false})
+		return
+	}
+	page, err := server.messages.ListPage(r.Context(), request)
 	if err != nil {
+		if errors.Is(err, pagination.ErrCursorInvalid) {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+			return
+		}
+		if errors.Is(err, pagination.ErrLimitInvalid) {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+			return
+		}
+		if errors.Is(err, messageapp.ErrRequestInvalid) {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MESSAGE_FILTER_INVALID", Retryable: false})
+			return
+		}
 		server.logger.ErrorContext(r.Context(), "message history read failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_HISTORY_UNAVAILABLE", Retryable: true})
 		return
 	}
-	response := make([]openapi.SMSMessage, 0, len(messages))
-	for _, message := range messages {
+	response := make([]openapi.SMSMessage, 0, len(page.Messages))
+	for _, message := range page.Messages {
 		response = append(response, smsMessageResponse(message))
 	}
 	stats, err := server.messages.Stats(r.Context())
@@ -1710,9 +1943,13 @@ func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_HISTORY_UNAVAILABLE", Retryable: true})
 		return
 	}
-	writeJSON(w, http.StatusOK, openapi.SMSMessageListResponse{
+	result := openapi.SMSMessageListResponse{
 		Messages: response, TotalCount: stats.TotalCount, Capacity: stats.Capacity, NearCapacity: stats.NearCapacity,
-	})
+	}
+	if page.NextCursor != "" {
+		result.NextCursor = &page.NextCursor
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (server *Server) DeleteMessage(w http.ResponseWriter, r *http.Request, messageID string) {
@@ -1735,6 +1972,7 @@ func (server *Server) DeleteMessage(w http.ResponseWriter, r *http.Request, mess
 		}
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicMessages}, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1768,10 +2006,11 @@ func (server *Server) SendMessage(w http.ResponseWriter, r *http.Request) {
 	if !result.Replayed && result.Message.Status == sms.StatusFailed {
 		server.notifyAsync("sms.failed", fmt.Sprintf("[Simplus] 短信发送失败 · 线路 %s · %s", result.Message.LineID, result.Message.ErrorCode))
 	}
+	server.publish([]realtime.Topic{realtime.TopicMessages}, "")
 	writeJSON(w, status, smsMessageResponse(result.Message))
 }
 
-func (server *Server) ListCalls(w http.ResponseWriter, r *http.Request) {
+func (server *Server) ListCalls(w http.ResponseWriter, r *http.Request, params openapi.ListCallsParams) {
 	if !server.requireBusinessAPI(w, r) {
 		return
 	}
@@ -1779,16 +2018,47 @@ func (server *Server) ListCalls(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "CALLS_UNAVAILABLE", Retryable: false})
 		return
 	}
-	values, err := server.calls.List(r.Context())
+	limit := 0
+	cursor := ""
+	if params.Limit != nil {
+		if *params.Limit == 0 {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+			return
+		}
+		limit = *params.Limit
+	}
+	if params.Cursor != nil {
+		if *params.Cursor == "" {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+			return
+		}
+		cursor = *params.Cursor
+	} else if _, present := r.URL.Query()["cursor"]; present {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+		return
+	}
+	page, err := server.calls.List(r.Context(), limit, cursor)
 	if err != nil {
+		if errors.Is(err, pagination.ErrCursorInvalid) {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+			return
+		}
+		if errors.Is(err, pagination.ErrLimitInvalid) {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+			return
+		}
 		server.writeCallError(w, r, err)
 		return
 	}
-	response := make([]openapi.Call, 0, len(values))
-	for _, value := range values {
+	response := make([]openapi.Call, 0, len(page.Calls))
+	for _, value := range page.Calls {
 		response = append(response, callResponse(value))
 	}
-	writeJSON(w, http.StatusOK, openapi.CallListResponse{Calls: response})
+	result := openapi.CallListResponse{Calls: response}
+	if page.NextCursor != "" {
+		result.NextCursor = &page.NextCursor
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (server *Server) GetEUICCState(w http.ResponseWriter, r *http.Request) {
@@ -1829,6 +2099,7 @@ func (server *Server) ActivateEUICCProfile(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicEUICC}, "")
 	writeJSON(w, http.StatusOK, euiccResponse(state))
 }
 
@@ -1876,6 +2147,11 @@ func (server *Server) startCall(w http.ResponseWriter, r *http.Request, incoming
 	if incoming && !replayed {
 		server.notifyAsync("call.incoming", fmt.Sprintf("[Simplus] 新来电 · 线路 %s", value.LineID))
 	}
+	attention := realtime.Attention("")
+	if incoming && !replayed {
+		attention = realtime.AttentionCallIncoming
+	}
+	server.publish([]realtime.Topic{realtime.TopicCalls}, attention)
 	writeJSON(w, status, callResponse(value))
 }
 
@@ -1917,6 +2193,7 @@ func (server *Server) ControlCall(w http.ResponseWriter, r *http.Request, callID
 	if request.Action == openapi.Reject && value.Direction == call.DirectionInbound {
 		server.notifyAsync("call.missed", fmt.Sprintf("[Simplus] 未接来电 · 线路 %s", value.LineID))
 	}
+	server.publish([]realtime.Topic{realtime.TopicCalls}, "")
 	writeJSON(w, http.StatusOK, callResponse(value))
 }
 
@@ -1930,6 +2207,7 @@ func (server *Server) notifyAsync(event, message string) {
 		if err := server.notifications.Notify(ctx, event, message); err != nil {
 			server.logger.Warn("notification delivery failed", "event", event, "error", err)
 		}
+		server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	}()
 }
 
@@ -1992,6 +2270,7 @@ func (server *Server) CreateContact(w http.ResponseWriter, r *http.Request) {
 		server.writeContactError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicContacts}, "")
 	writeJSON(w, http.StatusCreated, contactResponse(value))
 }
 
@@ -2009,6 +2288,7 @@ func (server *Server) UpdateContact(w http.ResponseWriter, r *http.Request, cont
 		server.writeContactError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicContacts}, "")
 	writeJSON(w, http.StatusOK, contactResponse(value))
 }
 
@@ -2024,6 +2304,7 @@ func (server *Server) DeleteContact(w http.ResponseWriter, r *http.Request, cont
 		server.writeContactError(w, r, err)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicContacts}, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2161,6 +2442,7 @@ func (server *Server) AddManagedLine(w http.ResponseWriter, r *http.Request) {
 		server.writeManagedLineError(w, r, err, true)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicInventory, realtime.TopicLines}, "")
 	w.Header().Set("Location", "/api/v1/lines/"+item.ID)
 	writeJSON(w, http.StatusCreated, managedLineResponse(item))
 }
@@ -2183,6 +2465,7 @@ func (server *Server) UpdateManagedLine(w http.ResponseWriter, r *http.Request, 
 		server.writeManagedLineError(w, r, err, false)
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicLines}, "")
 	writeJSON(w, http.StatusOK, managedLineResponse(item))
 }
 
@@ -2279,6 +2562,7 @@ func (server *Server) AddManagedModem(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicInventory, realtime.TopicModems, realtime.TopicLines}, "")
 	w.Header().Set("Location", "/api/v1/modems/"+item.ID)
 	writeJSON(w, http.StatusCreated, managedModemResponse(item))
 }
@@ -2309,6 +2593,7 @@ func (server *Server) SetManagedModemRFState(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
+	server.publish([]realtime.Topic{realtime.TopicInventory, realtime.TopicModems, realtime.TopicLines}, "")
 	writeJSON(w, http.StatusOK, managedModemResponse(item))
 }
 

@@ -1,139 +1,133 @@
 # State Management
 
-> Where state lives in the current single-administrator management UI.
+> HTTP authority, query cache, local interaction state, and realtime hints.
 
-## Overview
+## State Ownership
 
-Backend APIs remain authoritative for persistent Modem, Line, Message, Call,
-notification, and Mihomo state. The browser keeps typed snapshots and ephemeral
-interaction state in the page that renders them. There is no Redux, Zustand,
-React context store, Pinia, or project Umi model in current source.
+- The Go API and SQLite are authoritative for persistent Modem, Line, Message,
+  Call, notification, eUICC, VoWiFi, and Mihomo state.
+- TanStack Query owns replaceable HTTP snapshots, loading/error metadata, and
+  generated query keys. It is not an offline database.
+- `BootstrapGate` owns setup/session routing; a 401 cancels and clears the query
+  cache before redirecting to `/login`.
+- Page components own form drafts, dialog visibility, selections, reveal state,
+  and per-operation progress/errors.
+- There is no Redux, Zustand, Umi model, or browser-persistent business store.
 
-`web/config/config.ts` enables empty `model` and `reactQuery` plugin
-configuration, but the application does not define a model, call `useModel`,
-or use TanStack Query hooks. Treat those entries as framework configuration,
-not as an established state-management abstraction.
+## Query and Local State Rules
 
-## State Categories
+Use generated Query options for server data and local React state for transient
+interaction:
 
-### Application bootstrap state
+```tsx
+const modems = useQuery(listManagedModemsOptions())
+const [selectedCandidate, setSelectedCandidate] = useState('')
+const [operationError, setOperationError] = useState<unknown>()
+```
 
-`web/src/app.tsx` is the only application-wide state boundary. Umi calls
-`getInitialState()` to load the administrator session and setup status, and the
-`layout` runtime hook reads that result for the avatar and auth redirect:
+Do not copy query results into `useState` merely to render them. Derive joins,
+labels, and flattened page lists with ordinary constants or `useMemo`. Keep a
+row-specific busy key when one action should not block unrelated records.
+
+After a mutation, invalidate the affected generated query key and render the
+server-confirmed result. A returned complete resource may update the exact
+query cache only when the contract makes that replacement unambiguous. Never
+optimistically claim success for SMS, call, RF, VoWiFi, eUICC, or another
+side-effecting operation.
+
+## Scenario: Authoritative HTTP with Advisory SSE
+
+### 1. Scope / Trigger
+
+Use this scenario whenever an API resource can change outside the current
+browser action (incoming SMS/call, background synchronization, Agent changes,
+VoWiFi reconcile, Mihomo or inventory changes).
+
+### 2. Signatures
+
+- `GET /api/v1/events` -> authenticated `text/event-stream`.
+- SSE named events: `update` and `resync`; each `data` is `RealtimeEvent`.
+- `RealtimeEvent = { topics: RealtimeTopic[]; attention?: RealtimeAttention }`.
+- `RealtimeAttention = 'sms.received' | 'call.incoming'`.
+- Resource reads remain ordinary generated HTTP queries such as
+  `GET /api/v1/messages`, `GET /api/v1/calls`, and `GET /api/v1/vowifi/lines`.
+
+### 3. Contracts
+
+- `topics` contains 1–11 unique values from the OpenAPI enum.
+- SSE payloads contain no resource bodies, phone numbers, message content,
+  credentials, hardware identities, or private topology.
+- On a valid event, map topics to generated query tags and invalidate matching
+  active queries with `refetchType: 'active'`.
+- `sms.received` and `call.incoming` may show generic attention. VoWiFi and all
+  other topic-only changes remain silent.
+- On reconnect, tab visibility recovery, or `resync`, the browser obtains truth
+  through HTTP. It never reconstructs missed state from event history.
+- The stream uses the same administrator cookie session and trusted-LAN
+  authority boundary as business APIs.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Unknown/extra field, invalid topic, duplicate topic, malformed JSON | Ignore event; do not mutate cache or show attention |
+| Stream drops while session remains valid | Close source and reconnect with 3–30 second bounded backoff |
+| Session probe returns 401 | Normal session-expiry path clears cache and redirects to login |
+| Tab becomes hidden | Close source; do not reconnect while hidden |
+| Tab becomes visible | Invalidate active queries, then reconnect |
+| Repeated attention event ID | Invalidate as needed but suppress duplicate toast |
+| SSE unavailable | Page remains usable through HTTP/manual refetch; mounted VoWiFi/Mihomo runtime queries also have a 10-second foreground-only fallback |
+
+### 5. Good / Base / Bad Cases
+
+- Good: an inbound SMS publishes `{topics:['messages'],
+  attention:'sms.received'}`; the active message query refetches and a generic
+  notice appears.
+- Base: a VoWiFi state change publishes `{topics:['vowifi','lines']}`; matching
+  visible snapshots refetch silently.
+- Bad: putting an SMS body in SSE and appending it directly to the cache creates
+  a second contract, leaks data, and can diverge after disconnects.
+
+### 6. Tests Required
+
+- Unit: exact event validation, unique topics, topic-to-tag invalidation, active
+  query scope, and resync.
+- Component: one EventSource owner, named event handling, attention de-dup,
+  visibility close/resync, bounded reconnect, and 401 behavior.
+- E2E: synthetic SSE causes the visible list to refetch on desktop/mobile; no
+  hardware or real SMS/call action.
+- Backend: auth/session revalidation, heartbeat/write deadlines, slow-client
+  backpressure, bounded/privacy-safe payloads, and mutation/background
+  publication.
+
+### 7. Wrong vs Correct
 
 ```ts
-// web/src/app.tsx
-export async function getInitialState(): Promise<{ session?: AuthSessionResponse; setupRequired: boolean }> {
-  if (window.location.pathname === '/login') return { setupRequired: false }
-  try {
-    const [session, setup] = await Promise.all([getAuthSession(), getSetupStatus()])
-    if (setup.setupRequired && window.location.pathname !== '/setup') window.location.replace('/setup')
-    return { session, setupRequired: setup.setupRequired }
-  } catch {
-    if (window.location.pathname !== '/login') window.location.replace('/login')
-    return { setupRequired: false }
-  }
-}
+// Wrong: event data becomes authoritative browser state
+source.onmessage = (event) => queryClient.setQueryData(['messages'], JSON.parse(event.data))
+
+// Correct: event is a validated hint; HTTP remains authoritative
+source.addEventListener('update', (event) => {
+  const hint = decodeRealtimeEvent((event as MessageEvent<string>).data)
+  if (hint) void invalidateRealtimeTopics(queryClient, hint.topics)
+})
 ```
 
-The ProLayout menu and auth guard are centralized there: menu clicks push a
-fixed internal path and dispatch `popstate`, while the guard redirects with
-`window.location.replace`. Login, setup completion, password changes, and
-logout also use `window.location.replace` in `Login.tsx`, `Setup.tsx`,
-`Settings.tsx`, and `app.tsx`. Routes themselves live in
-`web/config/routes.ts`; page state is not serialized into the URL today.
+## Sensitive State
 
-### Server snapshots owned by a page
-
-Pages initialize typed arrays or optional objects and populate them through
-`@/api/client`:
-
-```tsx
-// web/src/pages/Lines.tsx
-const [lines, setLines] = useState<ManagedLine[]>([])
-const [bindings, setBindings] = useState<LineEgressBinding[]>([])
-const [voWiFiStates, setVoWiFiStates] = useState<VoWiFiLineState[]>([])
-```
-
-The same pattern is used for managed Modems in `Modems.tsx`, Mihomo core/runtime
-and subscriptions in `Mihomo.tsx`, and messages/contacts/Lines in
-`Messages.tsx`. There is no cross-page client cache: returning to a route loads
-a fresh snapshot.
-
-### Ephemeral interaction state
-
-Modal visibility, selected IDs, drafts, errors, and operation progress stay
-local. Examples include `addOpen`, `candidateID`, and `drawerLineID` in
-`Lines.tsx`; `selectedCandidate`, `modalError`, and per-Modem busy IDs in
-`Modems.tsx`; and the `busy` operation key in `Mihomo.tsx`.
-
-Use an ID/key when progress belongs to one row or operation:
-
-```tsx
-// web/src/pages/Lines.tsx
-setBusy(`vowifi:${lineID}`)
-// web/src/pages/Mihomo.tsx
-loading={busy === `refresh:${record.id}`}
-```
-
-This lets unrelated rows remain readable while preventing duplicate work on
-the active item. Simpler one-operation pages use a boolean loading state.
-
-### Derived presentation state
-
-Derive joins, options, and labels from the authoritative snapshots. `Lines.tsx`
-uses `useMemo` for `rows` and country options; `Mihomo.tsx` derives the current
-runtime label and subscription name; `Modems.tsx` filters capability tags at
-render time. Do not persist these display forms separately.
-
-## Synchronization After Mutations
-
-There is no optimistic-update framework. Current code uses one of two explicit
-patterns:
-
-1. Await the mutation and call the page's `load()` when several resources or
-   server-derived fields may have changed. Line creation, Line naming, egress
-   changes, Mihomo operations, messages, calls, and notification channels do
-   this in their respective page files.
-2. Replace only the returned resource when the endpoint returns the complete
-   new state. `Modems.tsx` maps an RF update into the Modem array, and
-   `Lines.tsx` replaces one returned `VoWiFiLineState` by `lineId`.
-
-`Lines.tsx`, `Modems.tsx`, and `Mihomo.tsx` leave the previous snapshot visible
-when a caught mutation fails and surface an error. These larger management
-pages reset busy/loading flags in `finally` blocks.
-
-## Polling and Runtime State
-
-Runtime state may be fresher than configuration state. `Lines.tsx` therefore
-polls only VoWiFi runtime state, while managed Lines and egress bindings remain
-stable until a user action or explicit reload. `Lines.test.tsx` verifies that
-separation. `Messages.tsx` polls its changing history with an overlap guard.
-Both polling paths pause while the document is hidden and clean up intervals.
-
-## Sensitive and Durable State
-
-- Do not use `localStorage` or `sessionStorage`; current source uses neither.
-- Authentication is a server cookie session. `api/client.ts` reads the CSRF
-  cookie only to attach the double-submit header to mutations.
-- IMEI is deliberately transient state in `Modems.tsx`: hidden initially,
-  fetched from a dedicated endpoint, removed when hidden, and cleared on every
-  reload.
-- Discovered Modem/Line candidates are modal snapshots, not durable business
-  objects. The backend creates stable managed IDs only after an explicit user
-  action. `Modems.test.tsx` and `Lines.test.tsx` assert that scan results are not
-  promoted automatically.
+- Authentication and CSRF are cookie-based; do not copy tokens into
+  `localStorage` or `sessionStorage`.
+- IMEI reveal data stays page-local, is not persisted, and is cleared on hide
+  and reload.
+- Candidate/discovery snapshots are ephemeral evidence. Only an explicit API
+  mutation creates a managed Modem or Line.
+- Do not cache secrets, raw hardware identifiers, device paths, or event
+  payloads for later replay.
 
 ## Avoid
 
-- Do not make the browser the source of truth for managed hardware or runtime
-  state, and do not infer a business identity from a table row or USB path.
-- Do not add a global store simply to share data that each route currently
-  reloads from the API.
-- Do not cache secrets or raw equipment identity in browser storage.
-- Do not mutate API arrays in place. `messages/order.ts` copies before sorting,
-  and `messages/order.test.ts` explicitly checks the input remains unchanged.
-- Do not couple independent state categories: `docs/architecture.md` and the
-  Line tests keep Line identity, RF state, egress, and VoWiFi activation as
-  separate operations.
+- Manual polling for resources covered by Query plus SSE invalidation.
+- A global client store that duplicates server-owned entities.
+- Mutating arrays obtained from Query in place.
+- Cross-coupling Line identity, RF, egress, and VoWiFi state into one browser
+  flag or optimistic operation.

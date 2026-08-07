@@ -49,6 +49,9 @@ node_modules/
 /web/src/.umi-production/
 .eslintcache
 *.tsbuildinfo
+playwright-report/
+blob-report/
+test-results/
 
 # Simplus development runtime state and repository-external toolchains
 .dev/

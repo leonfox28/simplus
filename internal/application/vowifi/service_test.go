@@ -255,6 +255,33 @@ func TestReconcileRestartsChangedEgressAndStopsInvalidRuntime(t *testing.T) {
 	}
 }
 
+func TestRunReportsObservedStateForRealtimeInvalidation(t *testing.T) {
+	service, _, _ := readyFixture()
+	ctx, cancel := context.WithCancel(context.Background())
+	reported := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		service.Run(ctx, time.Hour, func(err error) {
+			reported <- err
+			cancel()
+		})
+		close(done)
+	}()
+	select {
+	case err := <-reported:
+		if err != nil {
+			t.Fatalf("initial reconciliation report = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("initial observed Host VoWiFi state was not reported")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Host VoWiFi run loop did not stop after cancellation")
+	}
+}
+
 func TestListUsesRuntimeFactWithoutInventingOnline(t *testing.T) {
 	service, store, supervisor := readyFixture()
 	store.desires[testLineID] = domain.Desire{LineID: testLineID, DesiredActive: true}

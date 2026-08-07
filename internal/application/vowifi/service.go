@@ -3,6 +3,7 @@ package vowifi
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -219,9 +220,27 @@ func (service *Service) Run(ctx context.Context, interval time.Duration, report 
 	if interval < time.Second {
 		interval = 10 * time.Second
 	}
-	if err := service.Reconcile(ctx); err != nil && report != nil {
-		report(err)
+	var previous []domain.State
+	reconcile := func() {
+		if err := service.Reconcile(ctx); err != nil {
+			if report != nil {
+				report(err)
+			}
+			return
+		}
+		current, err := service.List(ctx)
+		if err != nil {
+			if report != nil {
+				report(err)
+			}
+			return
+		}
+		if report != nil && !reflect.DeepEqual(previous, current) {
+			report(nil)
+		}
+		previous = current
 	}
+	reconcile()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -229,9 +248,7 @@ func (service *Service) Run(ctx context.Context, interval time.Duration, report 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := service.Reconcile(ctx); err != nil && report != nil {
-				report(err)
-			}
+			reconcile()
 		}
 	}
 }

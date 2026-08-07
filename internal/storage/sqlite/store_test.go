@@ -12,9 +12,104 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/domain/call"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/pressly/goose/v3"
 )
+
+func TestKeysetIndexMigrationsDownAndReopenPreserveHistory(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 7, 16, 0, 0, 0, time.UTC)
+	if _, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+		ID: "msg_migration_000000000", OperationID: "operation-migration-msg-01", Direction: sms.DirectionOutbound,
+		LineID: "line_AQEBAQEBAQEBAQEBAQEBAQ", RemoteAddress: "13800138000", Body: "preserved",
+		Status: sms.StatusQueued, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := set.CreateCall(ctx, call.Record{
+		ID: "call_migration_0000000", OperationID: "operation-migration-call1", LineID: "line_AQEBAQEBAQEBAQEBAQEBAQ",
+		RemoteAddress: "13800138000", Direction: call.DirectionOutbound, State: call.StateDialing,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, dataset := range []struct {
+		name, migrationPath string
+		indexes             []string
+		version             int64
+	}{
+		{MessagesDataset, "migrations/messages", []string{"sms_messages_page_idx", "sms_messages_conversation_page_idx"}, 5},
+		{CallsDataset, "migrations/calls", []string{"call_records_page_idx"}, 2},
+	} {
+		database, err := sql.Open("sqlite", filepath.Join(root, dataset.name+".sqlite3"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		migrationMu.Lock()
+		goose.SetLogger(goose.NopLogger())
+		err = goose.SetDialect("sqlite3")
+		if err == nil {
+			err = goose.DownToContext(ctx, database, dataset.migrationPath, dataset.version)
+		}
+		migrationMu.Unlock()
+		if err != nil {
+			_ = database.Close()
+			t.Fatal(err)
+		}
+		var schemaVersion int64
+		if err := database.QueryRowContext(ctx, `SELECT schema_version FROM dataset_metadata WHERE singleton = 1`).Scan(&schemaVersion); err != nil {
+			t.Fatal(err)
+		}
+		if schemaVersion != dataset.version {
+			t.Fatalf("%s down migration version=%d, want %d", dataset.name, schemaVersion, dataset.version)
+		}
+		for _, index := range dataset.indexes {
+			var indexCount int
+			if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&indexCount); err != nil {
+				t.Fatal(err)
+			}
+			if indexCount != 0 {
+				t.Fatalf("%s down migration retained index %s", dataset.name, index)
+			}
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	if messages, err := set.ListSMS(ctx, 10); err != nil || len(messages) != 1 || messages[0].Body != "preserved" {
+		t.Fatalf("messages after reopen=%#v error=%v", messages, err)
+	}
+	if calls, err := set.ListCalls(ctx, 10); err != nil || len(calls) != 1 || calls[0].ID != "call_migration_0000000" {
+		t.Fatalf("calls after reopen=%#v error=%v", calls, err)
+	}
+	for _, check := range []struct {
+		database *sql.DB
+		index    string
+	}{
+		{set.Messages, "sms_messages_page_idx"},
+		{set.Messages, "sms_messages_conversation_page_idx"},
+		{set.Calls, "call_records_page_idx"},
+	} {
+		var count int
+		if err := check.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, check.index).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("reopened index %s count=%d error=%v", check.index, count, err)
+		}
+	}
+}
 
 func TestOpenSetCreatesFiveSecuredWALDatabases(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "db")

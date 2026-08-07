@@ -1,11 +1,14 @@
 import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import LoginPage from './Login'
 
 describe('LoginPage password-manager semantics', () => {
   it('renders a named autocomplete form and native login field attributes', () => {
-    const { container } = render(<App><LoginPage /></App>)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const { container } = render(<App><QueryClientProvider client={queryClient}><MemoryRouter><LoginPage /></MemoryRouter></QueryClientProvider></App>)
     const form = container.querySelector('form')
     expect(form).not.toBeNull()
     expect(form).toHaveAttribute('autocomplete', 'on')

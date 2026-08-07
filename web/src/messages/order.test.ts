@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SMSMessage } from '@/api/client'
+import type { SmsMessage as SMSMessage } from '@/api/generated/types.gen'
 import { sortSMSMessagesForDisplay } from './order'
 
 function message(overrides: Partial<SMSMessage>): SMSMessage {
@@ -21,7 +21,7 @@ function message(overrides: Partial<SMSMessage>): SMSMessage {
 }
 
 describe('SMS display ordering', () => {
-  it('uses local observation order when provider timestamps share the displayed second', () => {
+  it('matches the server keyset order by exact created time and stable id', () => {
     const outbound = message({})
     const inbound = message({
       id: 'msg_inbound012345678901234',
@@ -40,8 +40,8 @@ describe('SMS display ordering', () => {
     })
 
     expect(sortSMSMessagesForDisplay([outbound, older, inbound]).map((item) => item.id)).toEqual([
-      inbound.id,
       outbound.id,
+      inbound.id,
       older.id,
     ])
   })
@@ -51,5 +51,22 @@ describe('SMS display ordering', () => {
     const sorted = sortSMSMessagesForDisplay(original)
     expect(sorted).not.toBe(original)
     expect(original[0]?.id).toBe('msg_0123456789abcdef012345')
+  })
+
+  it('uses SQLite BINARY order for mixed-case and punctuation IDs at the same timestamp', () => {
+    const createdAt = '2026-08-05T20:16:26.295Z'
+    const ids = [
+      'msg_A0000000000000000000',
+      'msg__0000000000000000000',
+      'msg_a0000000000000000000',
+      'msg_-0000000000000000000',
+    ]
+
+    expect(sortSMSMessagesForDisplay(ids.map((id) => message({ id, createdAt }))).map((item) => item.id)).toEqual([
+      'msg_a0000000000000000000',
+      'msg__0000000000000000000',
+      'msg_A0000000000000000000',
+      'msg_-0000000000000000000',
+    ])
   })
 })

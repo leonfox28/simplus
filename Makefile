@@ -22,7 +22,7 @@ COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 COMMANDS := simplusd simplus-agent simplus-netd simplusctl
 VOWIFI_HIL_COMMANDS := simplus-vowifi-hil-prepare simplus-vowifi-hil-vici simplus-vowifi-hil-pcscf simplus-vowifi-hil-ims simplus-vowifi-hil-redact simplus-vowifi-hil-stun
 GO_PACKAGES := ./cmd/... ./internal/...
-GENERATED_PATHS := internal/api/openapi/generated.go internal/storage/sqlite/generated/core/db.go internal/storage/sqlite/generated/core/models.go internal/storage/sqlite/generated/core/state.sql.go web/src/api/schema.d.ts
+GENERATED_PATHS := internal/api/openapi/generated.go internal/storage/sqlite/generated/core/db.go internal/storage/sqlite/generated/core/models.go internal/storage/sqlite/generated/core/state.sql.go web/src/api/generated
 SQLC_VERSION := v1.31.1
 GOVULNCHECK_VERSION := v1.6.0
 ACTIONLINT_VERSION := v1.7.12
@@ -42,7 +42,7 @@ endif
 
 export GOTOOLCHAIN GOFLAGS VERSION COMMIT PNPM_HOME
 
-.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs check-container-files format check-format lint test test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package container-build container-config dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
+.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs check-container-files format check-format lint test web-e2e test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package container-build container-config dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
 
 doctor:
 	@set -eu; \
@@ -75,14 +75,14 @@ verify-generated:
 	trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
 	python3 scripts/dev/worktree-manifest.py >"$$tmp/manifest-before"; \
 	for path in $(GENERATED_PATHS); do \
-		git ls-files --error-unmatch -- "$$path" >/dev/null 2>&1 || { echo "generated path is not tracked: $$path" >&2; exit 1; }; \
-		test -f "$$path" || { echo "generated path is missing: $$path" >&2; exit 1; }; \
+		test -n "$$(git ls-files -- "$$path")" || { echo "generated path is not tracked: $$path" >&2; exit 1; }; \
+		test -e "$$path" || { echo "generated path is missing: $$path" >&2; exit 1; }; \
 		mkdir -p "$$tmp/$$(dirname "$$path")"; \
-		cp "$$path" "$$tmp/$$path"; \
+		cp -a "$$path" "$$tmp/$$path"; \
 	done; \
 	$(MAKE) --no-print-directory generate; \
 	for path in $(GENERATED_PATHS); do \
-		cmp -s "$$tmp/$$path" "$$path" || { echo "generated file is stale: $$path" >&2; exit 1; }; \
+		diff -qr "$$tmp/$$path" "$$path" >/dev/null || { echo "generated path is stale: $$path" >&2; exit 1; }; \
 	done; \
 	python3 scripts/dev/worktree-manifest.py >"$$tmp/manifest-after"; \
 	if ! cmp -s "$$tmp/manifest-before" "$$tmp/manifest-after"; then \
@@ -119,6 +119,9 @@ test:
 	$(PNPM) --dir web typecheck
 	$(MAKE) --no-print-directory test-worktree-manifest
 	$(MAKE) --no-print-directory test-dev-sim
+
+web-e2e:
+	$(PNPM) --dir web e2e
 
 test-worktree-manifest:
 	@scripts/dev/worktree-manifest-test.sh

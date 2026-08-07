@@ -1,11 +1,28 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/application/messaging"
+	"github.com/leonfox28/simplus/internal/application/realtime"
 )
+
+type oneAgentChange struct{ cancel context.CancelFunc }
+
+func (source oneAgentChange) Snapshot(context.Context, bool) (agentapi.Snapshot, error) {
+	return agentapi.Snapshot{ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: "01234567-89ab-cdef-0123-456789abcdef", Generation: 1}, nil
+}
+func (source oneAgentChange) Changes(context.Context, string, uint64, int) (agentapi.ChangeResponse, error) {
+	source.cancel()
+	return agentapi.ChangeResponse{Changed: true, Snapshot: agentapi.Snapshot{
+		ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: "01234567-89ab-cdef-0123-456789abcdef", Generation: 2,
+	}}, nil
+}
 
 func TestManagementListenDerivesMihomoControllerAndSocketFamily(t *testing.T) {
 	tests := []struct {
@@ -44,6 +61,40 @@ func TestInboundSMSRetryDelayBacksOffAndCaps(t *testing.T) {
 	}
 	if got := nextSMSSyncRetryDelay(0, 10*time.Second); got != 40*time.Second {
 		t.Fatalf("long interval retry = %s", got)
+	}
+}
+
+func TestAgentChangeWatchPublishesBoundedInventoryTopics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	hub := realtime.NewHub()
+	subscription := hub.Subscribe()
+	defer subscription.Close()
+	<-subscription.C
+	runAgentChanges(ctx, oneAgentChange{cancel: cancel}, hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	event := <-subscription.C
+	if event.Kind != realtime.KindUpdate || len(event.Topics) != 3 || event.Attention != "" {
+		t.Fatalf("agent event = %#v", event)
+	}
+	if nextAgentRetryDelay(time.Second) != 2*time.Second || nextAgentRetryDelay(20*time.Second) != 30*time.Second {
+		t.Fatal("agent retry delay did not back off and cap")
+	}
+}
+
+func TestPartialSMSSyncProgressStillPublishesDurableState(t *testing.T) {
+	hub := realtime.NewHub()
+	subscription := hub.Subscribe()
+	defer subscription.Close()
+	<-subscription.C
+	if !publishSMSSyncResult(hub, messaging.InboundSyncResult{Persisted: 1}) {
+		t.Fatal("persisted partial sync was not treated as a durable change")
+	}
+	event := <-subscription.C
+	if event.Kind != realtime.KindUpdate || len(event.Topics) != 1 || event.Topics[0] != realtime.TopicMessages ||
+		event.Attention != realtime.AttentionSMSReceived {
+		t.Fatalf("partial sync event = %#v", event)
+	}
+	if publishSMSSyncResult(hub, messaging.InboundSyncResult{Acknowledged: 1}) {
+		t.Fatal("acknowledgement-only sync published a business-state change")
 	}
 }
 

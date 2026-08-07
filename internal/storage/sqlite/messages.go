@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 )
 
@@ -233,35 +234,78 @@ WHERE direction = 'outbound' AND status = 'queued'
 }
 
 func (set *Set) ListSMS(ctx context.Context, limit int) ([]sms.Message, error) {
+	page, err := set.ListSMSPage(ctx, pagination.Request{Limit: limit}, "", "")
+	return page.Items, err
+}
+
+func (set *Set) ListSMSPage(ctx context.Context, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], error) {
 	if set == nil || set.Messages == nil {
-		return nil, fmt.Errorf("messages database is not open")
+		return pagination.Page[sms.Message]{}, fmt.Errorf("messages database is not open")
 	}
-	if limit < 1 || limit > 100 {
-		return nil, fmt.Errorf("SMS list limit must be from 1 through 100")
+	if request.Limit < 1 || request.Limit > pagination.MaximumLimit || (lineID == "") != (remoteAddress == "") {
+		return pagination.Page[sms.Message]{}, fmt.Errorf("invalid SMS page request")
 	}
-	rows, err := set.Messages.QueryContext(ctx, `
+	var rows *sql.Rows
+	var err error
+	if lineID != "" && request.After != nil {
+		rows, err = set.Messages.QueryContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE line_id = ? AND remote_address = ?
+  AND (created_at_unix_ms, message_id) < (?, ?)
+ORDER BY created_at_unix_ms DESC, message_id DESC
+LIMIT ?
+`, lineID, remoteAddress, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+	} else if lineID != "" {
+		rows, err = set.Messages.QueryContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE line_id = ? AND remote_address = ?
+ORDER BY created_at_unix_ms DESC, message_id DESC
+LIMIT ?
+`, lineID, remoteAddress, request.Limit+1)
+	} else if request.After != nil {
+		rows, err = set.Messages.QueryContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE (created_at_unix_ms, message_id) < (?, ?)
+ORDER BY created_at_unix_ms DESC, message_id DESC
+LIMIT ?
+`, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+	} else {
+		rows, err = set.Messages.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
 ORDER BY created_at_unix_ms DESC, message_id DESC
 LIMIT ?
-`, limit)
+`, request.Limit+1)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("list SMS: %w", err)
+		return pagination.Page[sms.Message]{}, fmt.Errorf("list SMS: %w", err)
 	}
 	defer rows.Close()
 	messages := make([]sms.Message, 0)
 	for rows.Next() {
 		message, err := scanSMS(rows)
 		if err != nil {
-			return nil, err
+			return pagination.Page[sms.Message]{}, err
 		}
 		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate SMS: %w", err)
+		return pagination.Page[sms.Message]{}, fmt.Errorf("iterate SMS: %w", err)
 	}
-	return messages, nil
+	page := pagination.Page[sms.Message]{Items: messages}
+	if len(messages) > request.Limit {
+		page.Items = messages[:request.Limit]
+		last := page.Items[len(page.Items)-1]
+		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return page, nil
 }
 
 func (set *Set) CountSMS(ctx context.Context) (int64, error) {
