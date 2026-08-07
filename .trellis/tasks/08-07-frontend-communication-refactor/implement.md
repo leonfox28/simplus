@@ -294,9 +294,10 @@ git status --short
 ### Runtime follow-up — 无头开发机 Setup/Login 循环
 
 - [x] 根因归类为跨层契约与集成测试缺口：setup-session 的正常 401 被全局 interceptor 当成管理员 session 过期；两个 route guard 因而互相重定向。
-- [x] 按请求 path 区分 setup、rejected login 与 protected administrator 401，保持原有 setup-required 门禁不变。
+- [x] 第二根因归类为迁移传播遗漏：旧登录页允许安装器预置管理员在 `uninitialized` 状态登录，并由后端签发 setup session；新门禁遗漏了这条首次登录路径。
+- [x] 按请求 path 区分 setup、rejected login 与 protected administrator 401，并恢复首次登录与 direct setup 两条 setup-required 公共路径。
 - [x] Vite `/api` proxy 保留浏览器 LAN Host，避免 setup completion 把远端浏览器重定向到 loopback API target。
-- [x] 添加 runtime、真实 SetupPage route、Vite config 和实际 proxy Host 回归；无头浏览器从 1.5 秒 154 次循环导航收敛为有界启动导航并稳定停在 `/setup`。
+- [x] 添加 runtime、Login/真实 SetupPage route、Vite config 和实际 proxy Host 回归；无头浏览器从 1.5 秒 154 次循环导航收敛为有界启动导航，普通入口稳定停在 `/login`，direct setup 稳定停在 `/setup`。
 - [x] 将授权域、route-loop 与 dev proxy authority 约束写入 Web/infra code-spec 和 cross-layer checklist。
 
 ## 3. 完成定义

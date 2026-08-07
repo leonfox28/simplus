@@ -37,7 +37,9 @@ export function BootstrapGate({ children }: { children: ReactNode }) {
     />
   }
   if (setupRequired) {
-    return location.pathname === '/setup' ? <>{children}</> : <Navigate to="/setup" replace />
+    return location.pathname === '/setup' || location.pathname === '/login'
+      ? <>{children}</>
+      : <Navigate to="/login" replace />
   }
   if (location.pathname === '/setup') return <Navigate to="/login" replace />
   if (session.isPending) return <FullPageLoading />

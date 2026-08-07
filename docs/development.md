@@ -75,15 +75,21 @@ make dev-sim-lan
 继续使用 loopback，并由开发服务器代理同源 `/api`，包括有界 SSE 失效流。该普通
 HTTP 入口只用于可信开发网络。
 
-全新开发数据库需要初始化时，在运行服务的主机终端执行：
+全新开发数据库需要先由 root control plane 创建唯一管理员。在运行服务的主机终端
+执行；`<data-root>` 必须与启动 Simulator 时使用的绝对数据目录一致：
 
 ```bash
-sudo "$PWD/.dev/bin/simplusctl-dev" bootstrap-url \
-  --socket "$HOME/.simplus-dev/data/run/simplusd-control.sock" \
-  --base-url http://<host-lan-ip>:5173
+SIMPLUS_DEV_DATA_ROOT=/absolute/path/to/simplus-dev-data
+sudo "$PWD/.dev/bin/simplusctl-dev" provision-admin \
+  --socket "$SIMPLUS_DEV_DATA_ROOT/run/simplusd-control.sock" \
+  --username simplus_admin \
+  --locale zh-CN
 ```
 
-URL 中的授权 code 为单次使用，兑换后由页面立即从地址栏移除。不要把 URL、管理员密码、Cookie 或开发数据库写进问题、文档或测试 fixture。
+命令只在首次创建时显示一次随机密码。浏览器随后打开
+`http://<host-lan-ip>:5173/login`；管理员首次登录会取得受限 setup session 并进入
+`/setup`，完成录音目录后再进入后台，不需要把 root Bootstrap URL 复制到浏览器。
+不要把管理员密码、Cookie 或开发数据库写进问题、文档或测试 fixture。
 
 ## 3. 真实硬件 HIL-0
 

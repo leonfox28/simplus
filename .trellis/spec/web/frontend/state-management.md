@@ -67,9 +67,10 @@ stays on login, or recovers from an expired administrator session.
 - A protected endpoint 401 still notifies session expiry. `BootstrapGate` then
   cancels requests, clears private Query snapshots, and replace-navigates to
   `/login`.
-- When `setupRequired` is true, the original route gate remains authoritative:
-  an ordinary visit settles on `/setup`; the fix must not make `/login` a
-  second route through an uninitialized instance.
+- When `setupRequired` is true, both `/login` and direct `/setup` are public.
+  An ordinary root/protected visit settles on `/login`; successful login uses
+  the already-fetched setup status and replace-navigates to `/setup`. Direct
+  `/setup#bootstrap=...` and setup-session reloads remain reachable.
 - In LAN development, Vite is the browser-facing same-origin server while the
   API remains loopback-only. The proxy preserves the browser Host so the
   backend's trusted-LAN validation and setup-completion `managementUrl` refer
@@ -83,6 +84,7 @@ stays on login, or recovers from an expired administrator session.
 | --- | --- | --- |
 | `/api/v1/setup/session` | 401 | Stay on `/setup`; render the setup-authorization error; do not clear Query state or navigate to login |
 | `/api/v1/auth/login` | 401 | Stay on `/login`; show rejected credentials; do not emit session expiry |
+| Successful login while setup is required | 200 | Cache the administrator session and replace-navigate to `/setup`; the backend has issued the restricted setup cookie |
 | `/api/v1/auth/session` | 401 | Clear private Query snapshots and replace-navigate to `/login` |
 | Protected business operation | 401 | Use the same administrator session-expiry recovery |
 | Protected business operation | 403 | Keep the current route and surface the operation error |
@@ -93,9 +95,11 @@ stays on login, or recovers from an expired administrator session.
 
 - Good: an expired administrator cookie on `/dashboard` produces one protected
   401, clears private cache, and ends on `/login`.
-- Base: an anonymous browser opens an uninitialized instance, receives one
-  setup-session 401, settles on `/setup`, and displays that a root-generated
-  setup authorization is required.
+- Base: an anonymous browser opens an uninitialized instance, settles on
+  `/login`, authenticates with the root-provisioned administrator, and then
+  reaches `/setup` with the restricted setup cookie issued by the login API.
+- Base: a root-generated bootstrap URL or an authorized setup reload opens
+  `/setup` directly without requiring an administrator-session probe.
 - Bad: broadcasting session expiry for every 401 sends `/setup` to `/login`,
   while the setup-required gate sends `/login` back to `/setup`, creating an
   unbounded redirect loop.
@@ -106,10 +110,12 @@ stays on login, or recovers from an expired administrator session.
 
 - Runtime unit tests: setup-session 401 and rejected-login 401 do not notify
   administrator expiry; auth-session 401 still does; 403 never does.
-- Component integration: render the real Setup page behind `BootstrapGate` and
-  assert an anonymous uninitialized visit settles on `/setup`, makes exactly
-  one setup-status and one setup-session request, and makes no auth-session
-  request.
+- Component integration: an ordinary uninitialized root/protected visit settles
+  on `/login`; `/login` and direct `/setup` stay reachable without an
+  auth-session probe; an unauthorized direct Setup page makes one setup-session
+  request and does not loop.
+- Login page: use cached setup status after a successful login and assert the
+  destination is `/setup` when incomplete and `/dashboard` when ready.
 - Vite config: assert `/api` has `changeOrigin: false`.
 - Proxy smoke when changing dev wiring: run a real Vite-to-upstream request and
   assert the upstream receives the original private Host.

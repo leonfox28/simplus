@@ -4,7 +4,8 @@ import { Alert, App, Button, Card, Form, Input, Typography } from 'antd'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { displayApiError } from '@/api/errors'
-import { getAuthSessionQueryKey, loginMutation } from '@/api/generated/@tanstack/react-query.gen'
+import { getAuthSessionQueryKey, getSetupStatusQueryKey, loginMutation } from '@/api/generated/@tanstack/react-query.gen'
+import type { SetupStatusResponse } from '@/api/generated/types.gen'
 
 type LoginValues = { username: string; password: string }
 
@@ -17,8 +18,9 @@ export default function LoginPage() {
     ...loginMutation(),
     onSuccess: (session) => {
       queryClient.setQueryData(getAuthSessionQueryKey(), session)
+      const setup = queryClient.getQueryData<SetupStatusResponse>(getSetupStatusQueryKey())
       void message.success('登录成功')
-      navigate('/dashboard', { replace: true })
+      navigate(setup?.setupRequired ? '/setup' : '/dashboard', { replace: true })
     },
     onError: setError,
   })

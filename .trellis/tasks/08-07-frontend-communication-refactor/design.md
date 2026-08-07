@@ -106,7 +106,7 @@ web/
 
 `BootstrapGate` 明确编排两类状态：
 
-1. 读取 setup status；需要初始化时只允许 `/setup`。
+1. 读取 setup status；需要初始化时允许 `/login` 与 direct `/setup`，普通根路径/受保护路径先 replace 到 `/login`。管理员登录成功后由后端签发受限 setup session，页面按缓存中的 setup status replace 到 `/setup`。
 2. 已初始化时，受保护路由读取管理员 session；无会话时 replace 到 `/login`。
 
 全局 transport 只对受保护管理员请求的 401 发布内存内 `session-expired` 信号。`/api/v1/setup/*` 使用独立 setup cookie，其 401 保留为 setup 授权错误；`/api/v1/auth/login` 的 401 保留为凭据错误。Provider 收到真正的管理员 session 过期后取消并清空私有 query cache，再 replace 到登录页。403 CSRF 错误保留为操作错误，不误判为会话过期。
