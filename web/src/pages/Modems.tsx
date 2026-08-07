@@ -5,10 +5,7 @@ import type { TableColumnsType } from 'antd'
 import { useEffect, useState } from 'react'
 import { displayApiError } from '@/api/errors'
 import {
-  activateEuiccProfileMutation,
   addManagedModemMutation,
-  getEuiccStateOptions,
-  getEuiccStateQueryKey,
   listManagedModemsOptions,
   listManagedModemsQueryKey,
   listModemCandidatesOptions,
@@ -17,7 +14,7 @@ import {
 } from '@/api/generated/@tanstack/react-query.gen'
 import { readManagedModemEquipmentIdentity } from '@/api/generated/sdk.gen'
 import type { ManagedModem, ModemCandidate } from '@/api/generated/types.gen'
-import { PageHeader, PageSection, ResponsiveDataView } from '@/components/Page'
+import { PageHeader, ResponsiveDataView } from '@/components/Page'
 
 type CapabilityKey = keyof ManagedModem['capabilities']
 
@@ -26,7 +23,6 @@ const capabilityLabels: Array<[CapabilityKey, string]> = [
   ['digitalVoiceMedia', '数字音频'], ['hostVoWifiAuth', 'Host VoWiFi'],
   ['rfControl', '射频控制'], ['networkScan', '网络扫描'],
   ['manualNetworkSelection', '手动选网'], ['primarySimLockState', 'SIM 锁状态'],
-  ['euiccProfiles', 'eUICC'],
 ]
 
 const readinessLabels: Record<ModemCandidate['readinessReason'], string> = {
@@ -60,7 +56,6 @@ export default function Modems() {
   const queryClient = useQueryClient()
   const { message } = App.useApp()
   const modemsQuery = useQuery(listManagedModemsOptions())
-  const euiccQuery = useQuery({ ...getEuiccStateOptions(), retry: false })
   const [addOpen, setAddOpen] = useState(false)
   const candidatesQuery = useQuery({ ...listModemCandidatesOptions(), enabled: addOpen })
   const [selectedCandidate, setSelectedCandidate] = useState('')
@@ -102,16 +97,10 @@ export default function Modems() {
     },
     onSettled: () => setRFBusyModemId(''),
   })
-  const activateProfile = useMutation({
-    ...activateEuiccProfileMutation(),
-    onSuccess: (state) => queryClient.setQueryData(getEuiccStateQueryKey(), state),
-    onError: setOperationError,
-  })
-
   const reload = async () => {
     setOperationError(undefined)
     setRevealedIMEIs({})
-    await Promise.all([modemsQuery.refetch(), euiccQuery.refetch()])
+    await modemsQuery.refetch()
   }
   const toggleIMEI = (item: ManagedModem) => {
     if (revealedIMEIs[item.id]) {
@@ -209,19 +198,6 @@ export default function Modems() {
         ]} />
       </Card>}
     />
-
-    {euiccQuery.error && <Alert className="page-alert" type="info" showIcon title="eUICC 管理当前不可用" description="入口仍保留；当前后端未装配或状态读取失败。" />}
-    {euiccQuery.data && <PageSection title={`可拔插 eUICC · ${euiccQuery.data.eidHint}`} className="page-section">
-      <div className="responsive-card-grid">{euiccQuery.data.profiles.map((profile) => <Card key={profile.id} size="small">
-        <Descriptions column={1} size="small" items={[
-          { key: 'profile', label: 'Profile', children: profile.displayName },
-          { key: 'identity', label: 'Identity', children: profile.displayIdentityHint },
-        ]} />
-        <Button type={profile.active ? 'primary' : 'default'} disabled={profile.active} loading={activateProfile.isPending} onClick={() => activateProfile.mutate({ path: { profileId: profile.id } })}>
-          {profile.active ? '当前 Profile' : '激活'}
-        </Button>
-      </Card>)}</div>
-    </PageSection>}
 
     <Modal
       title="添加模组"

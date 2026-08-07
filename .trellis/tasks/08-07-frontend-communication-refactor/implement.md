@@ -218,7 +218,7 @@ corepack pnpm --dir web typecheck
 - [x] Notifications：typed Form/Table/Card、CRUD/test 错误、credential 不回显。
 - [x] Settings：密码校验、成功后 session cache 清除与 replace 登录。
 - [x] Setup/Login：补齐初始化、错误、session 与导航回归。
-- [x] EUICC/尚未装配能力继续可见但不可误报可用。
+- [x] 按用户批准的暂缓例外隐藏模组页 eUICC 标签、提示、Profile 和操作，并确保桌面/紧凑视图不发起 eUICC 请求；后端/OpenAPI 能力保留。
 
 验证：对每个页面运行 focused Vitest，然后运行全 Web test/typecheck/build。
 

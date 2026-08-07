@@ -86,6 +86,27 @@ Flex child can leave the only visible action at the start edge.
 - Show loading, empty, disabled/unavailable, partial-failure, and retry states
   explicitly. A disabled hardware action needs visible context, not silence.
 
+### Deferred eUICC Surface
+
+The Modems page has one product-approved exception to the usual unavailable
+state rule: until eUICC management is implemented as a complete workflow, do
+not render an `euiccProfiles` capability label, availability alert, Profile
+card, or activation action. The page must not mount or refresh the eUICC query.
+Keep the generated OpenAPI client and backend capability intact so a future
+implementation can restore the whole workflow without inventing a second
+contract.
+
+Cover both wide and compact presentations with observable assertions:
+
+```tsx
+expect(screen.queryByText(/eUICC/i)).not.toBeInTheDocument()
+expect(euiccRequests).toHaveLength(0)
+```
+
+Re-enabling any eUICC UI requires product approval and a coherent query,
+success, unavailable, and mutation test set; do not restore only the old
+placeholder alert.
+
 ## Responsive and Accessibility Contract
 
 - Use `Grid.useBreakpoint()` for behavior that genuinely changes by viewport;

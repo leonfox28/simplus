@@ -67,7 +67,7 @@
 
 - **Frontend stack**：已确认 Vite + React Router Declarative Mode + 直接使用 `antd` + TanStack Query；页面显式导入 `Layout/Table/Form/Card` 等所需组件，彻底移除 Umi/Pro Components，不以另一个元框架替代。
 - **Visual/UX continuity**：继续使用 Ant Design 视觉语言、中文优先、常见扁平左侧导航；桌面表格与手机 Card/List 双形态，宽表只在自身容器滚动。
-- **Capability visibility**：未装配/不可用功能入口保持可见，并显示禁用原因；不通过隐藏菜单误报产品能力。
+- **Capability visibility**：已进入产品界面的未装配/不可用功能通常保持可见，并显示禁用原因；eUICC 是用户明确批准的暂缓例外，在功能完整实现前不在模组页显示标签、提示、Profile 或操作，也不由该页面发起 eUICC 查询，但保留后端与 OpenAPI 能力边界。
 - **Communication**：HTTP snapshot/mutation + authenticated SSE invalidation。SSE 是 hint，不是业务数据或真相源；断线重连以 resync + HTTP refetch 收敛。
 - **Attention behavior**：只有新短信和来电产生明显页面内提示；普通配置/运行态变化静默刷新。
 - **Data client**：Hey API + Fetch + Zod + TanStack Query 生成链；生成结构验证后仍执行必要的 topology cross-reference guard。
@@ -96,7 +96,7 @@
 
 - [x] `rg`/`pnpm why` 证明源码、package 和 lockfile 不再包含 Umi Max、Umi plugins、Pro Components、`.umi` 或 Ant Design 4；没有页面直接调用 `fetch`。
 - [x] Vite dev/build 使用现有 host/port/proxy 环境，输出 `web/dist`；生产 `simplusd` 仍能承载根路径、hashed assets 和任意 SPA deep link。
-- [x] desktop Sider、mobile Drawer、公共 Login/Setup 和受保护 routes 均有可观察导航测试；不可用入口仍显示原因。
+- [x] desktop Sider、mobile Drawer、公共 Login/Setup 和受保护 routes 均有可观察导航测试；不可用入口仍显示原因。暂缓的 eUICC 例外在桌面/手机模组页均不显示且不发起查询。
 - [x] 最终记录依赖树与构建产物 before/after；依赖显著收敛且无重复 UI/router/server-state 主栈。
 
 ### API, state and errors

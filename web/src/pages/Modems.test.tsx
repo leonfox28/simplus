@@ -1,14 +1,16 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { Grid } from 'antd'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { noCapabilities, json, renderPage } from '@/test/render'
 import Modems from './Modems'
 
 describe('Modems safety workflows', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => vi.restoreAllMocks())
 
   it('keeps unknown RF disabled, reveals IMEI explicitly, and never promotes a scan result', async () => {
     const requests: Request[] = []
-    vi.stubGlobal('fetch', vi.fn(async (request: Request) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
       requests.push(request)
       const url = new URL(request.url)
       if (url.pathname === '/api/v1/modems' && request.method === 'GET') return json({ modems: [{
@@ -22,9 +24,8 @@ describe('Modems safety workflows', () => {
         model: 'Candidate', transport: 'usb', supportStatus: 'not-ready', addable: false,
         readinessReason: 'CONTROL_UNAVAILABLE', capabilities: noCapabilities, simPresence: 'unknown',
       }] })
-      if (url.pathname === '/api/v1/euicc') return json({ code: 'EUICC_UNAVAILABLE', retryable: false }, 503)
       throw new Error(`unexpected ${request.method} ${url.pathname}`)
-    }))
+    })
     const { queryClient } = renderPage(<Modems />)
     const modemID = 'modem_AAAAAAAAAAAAAAAAAAAAAA'
     const rf = await screen.findByTestId(`rf-toggle-${modemID}`)
@@ -37,7 +38,29 @@ describe('Modems safety workflows', () => {
     )?.imei === '123456789012345')).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '添加模组' }))
     expect(await screen.findByRole('radio', { name: 'Candidate：控制端点不可用' })).toBeDisabled()
-    expect(screen.getByText('eUICC 管理当前不可用')).toBeInTheDocument()
+    expect(screen.queryByText(/eUICC/i)).not.toBeInTheDocument()
+    expect(requests.filter((request) => new URL(request.url).pathname === '/api/v1/euicc')).toHaveLength(0)
     await waitFor(() => expect(requests.filter((request) => request.method === 'POST' && new URL(request.url).pathname === '/api/v1/modems')).toHaveLength(0))
+  })
+
+  it.each([
+    ['desktop', { md: true }],
+    ['compact', { md: false }],
+  ])('omits unavailable eUICC presentation and requests in the %s view', async (_, breakpoints) => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue(breakpoints)
+    const requests: Request[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      requests.push(request)
+      const url = new URL(request.url)
+      if (url.pathname === '/api/v1/modems' && request.method === 'GET') return json({ modems: [] })
+      throw new Error(`unexpected ${request.method} ${url.pathname}`)
+    })
+
+    renderPage(<Modems />)
+
+    expect(await screen.findByText('尚未添加模组')).toBeInTheDocument()
+    expect(screen.queryByText(/eUICC/i)).not.toBeInTheDocument()
+    expect(requests.filter((request) => new URL(request.url).pathname === '/api/v1/euicc')).toHaveLength(0)
   })
 })
