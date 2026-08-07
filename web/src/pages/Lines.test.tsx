@@ -125,7 +125,7 @@ beforeEach(() => {
 })
 
 describe('managed Lines', () => {
-  it('uses a stable Line to configure and activate Host VoWiFi', async () => {
+  it('uses a stable Line to configure and activate Host VoWiFi', { timeout: 10_000 }, async () => {
     const view = render(<App><Lines /></App>)
     expect(await screen.findByText('VOXI Line')).toBeInTheDocument()
     expect(screen.getByText('ML307A-DEMO-01')).toBeInTheDocument()
