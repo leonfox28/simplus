@@ -121,6 +121,25 @@ After implementation:
 - [ ] Checked that derived state points back to the source event identifier
       (`seq`, `id`, `version`) instead of inventing a second cursor
 
+### Browser Authorization and Proxy Checklist
+
+When a browser has public, bootstrap/setup, and authenticated API surfaces:
+
+- [ ] Enumerate each credential/cookie domain before adding global 401 logic;
+      the same status can mean rejected login, expired setup authorization, or
+      expired administrator session.
+- [ ] Classify authorization recovery from the originating operation/path, not
+      from HTTP status alone.
+- [ ] Trace all route-guard arrows together and add a bounded-navigation test;
+      a final-URL assertion alone can miss two guards redirecting in a loop.
+- [ ] For a development reverse proxy, decide explicitly whether the upstream
+      needs target authority or browser-facing authority.
+- [ ] If a backend builds redirect URLs from a validated Host, prove the proxy
+      preserves that Host and that a remote browser never receives a loopback
+      destination.
+- [ ] Keep host validation at the backend boundary; do not accept forwarding
+      headers merely to compensate for a proxy rewrite.
+
 ---
 
 ## Cross-Platform Template Consistency

@@ -8,7 +8,7 @@ let configured = false
 export function configureApiClient() {
   if (configured) return
   configured = true
-  client.interceptors.error.use((error, response) => {
+  client.interceptors.error.use((error, response, request) => {
     if (error instanceof ApiClientError) return error
     if (response && !response.ok) {
       const apiError = isApiError(error) ? error : undefined
@@ -19,7 +19,12 @@ export function configureApiClient() {
         status: response.status,
         reference: apiError?.reference,
       })
-      if (response.status === 401) notifySessionExpired()
+      const path = request ? new URL(request.url).pathname : ''
+      // Setup authorization uses a separate HttpOnly cookie, while a rejected
+      // login is not an expired administrator session. Their expected 401s
+      // must not clear private state or trigger route recovery.
+      const expectedUnauthorized = path.startsWith('/api/v1/setup/') || path === '/api/v1/auth/login'
+      if (response.status === 401 && !expectedUnauthorized) notifySessionExpired()
       return normalized
     }
     if (error instanceof ZodError && !response) {

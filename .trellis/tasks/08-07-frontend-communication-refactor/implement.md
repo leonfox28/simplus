@@ -291,6 +291,14 @@ git status --short
 
 禁止把 container/HIL 命令作为本任务普通 gate；Docker build 只有在实际修改 Docker build contract 且环境可用时才追加。
 
+### Runtime follow-up — 无头开发机 Setup/Login 循环
+
+- [x] 根因归类为跨层契约与集成测试缺口：setup-session 的正常 401 被全局 interceptor 当成管理员 session 过期；两个 route guard 因而互相重定向。
+- [x] 按请求 path 区分 setup、rejected login 与 protected administrator 401，保持原有 setup-required 门禁不变。
+- [x] Vite `/api` proxy 保留浏览器 LAN Host，避免 setup completion 把远端浏览器重定向到 loopback API target。
+- [x] 添加 runtime、真实 SetupPage route、Vite config 和实际 proxy Host 回归；无头浏览器从 1.5 秒 154 次循环导航收敛为有界启动导航并稳定停在 `/setup`。
+- [x] 将授权域、route-loop 与 dev proxy authority 约束写入 Web/infra code-spec 和 cross-layer checklist。
+
 ## 3. 完成定义
 
 - [x] 所有 PRD acceptance criteria 可指向测试、生成检查、审计输出或可观察 UI 行为。

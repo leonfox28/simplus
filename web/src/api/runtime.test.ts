@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getAuthSession, sendMessage } from './generated/sdk.gen'
+import { getAuthSession, getSetupSession, login, sendMessage } from './generated/sdk.gen'
 import { configureApiClient } from './setupClient'
 import { onSessionExpired } from './session'
 import { runtimeFetch } from './runtime'
@@ -41,6 +41,28 @@ describe('API runtime', () => {
       kind: 'http', code: 'AUTH_SESSION_UNAUTHORIZED', retryable: false, status: 401,
     })
     expect(expired).toHaveBeenCalledOnce()
+    unsubscribe()
+  })
+
+  it('keeps setup-session authorization separate from administrator expiry', async () => {
+    const expired = vi.fn()
+    const unsubscribe = onSessionExpired(expired)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'SETUP_SESSION_UNAUTHORIZED', retryable: false }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
+    await expect(getSetupSession({ throwOnError: true })).rejects.toMatchObject({
+      kind: 'http', code: 'SETUP_SESSION_UNAUTHORIZED', retryable: false, status: 401,
+    })
+    expect(expired).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
+  it('does not treat rejected credentials as an expired administrator session', async () => {
+    const expired = vi.fn()
+    const unsubscribe = onSessionExpired(expired)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'AUTH_INVALID_CREDENTIALS', retryable: false }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
+    await expect(login({ body: { username: 'admin', password: 'wrong-password' }, throwOnError: true })).rejects.toMatchObject({
+      kind: 'http', code: 'AUTH_INVALID_CREDENTIALS', retryable: false, status: 401,
+    })
+    expect(expired).not.toHaveBeenCalled()
     unsubscribe()
   })
 

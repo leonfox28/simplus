@@ -91,7 +91,7 @@ web/
 
 - 不保留 `web/config/`、`.umi/` 类型或 Umi runtime hooks。
 - 路由在 `AppRouter.tsx` 显式列出；没有文件系统路由或 React Router Framework Mode。
-- Vite 保持 `dist/` 输出、hash 静态资源和 `/api` 开发代理，生产继续由 `cmd/simplusd/web.go` 承载 SPA fallback。
+- Vite 保持 `dist/` 输出、hash 静态资源和 `/api` 开发代理；代理连接 loopback API 但不改写浏览器的 trusted-LAN Host，使 setup completion 返回远端浏览器实际可达的管理地址。生产继续由 `cmd/simplusd/web.go` 承载 SPA fallback。
 - 使用现代 evergreen 浏览器基线，不增加 legacy/polyfill 插件；现有 React 19 + Ant Design 6 已经是现代浏览器栈。
 
 ## 5. 路由、认证与应用壳
@@ -109,7 +109,7 @@ web/
 1. 读取 setup status；需要初始化时只允许 `/setup`。
 2. 已初始化时，受保护路由读取管理员 session；无会话时 replace 到 `/login`。
 
-全局 transport 捕获 401 后发布内存内 `session-expired` 信号。Provider 取消并清空私有 query cache，再 replace 到登录页。403 CSRF 错误保留为操作错误，不误判为会话过期。
+全局 transport 只对受保护管理员请求的 401 发布内存内 `session-expired` 信号。`/api/v1/setup/*` 使用独立 setup cookie，其 401 保留为 setup 授权错误；`/api/v1/auth/login` 的 401 保留为凭据错误。Provider 收到真正的管理员 session 过期后取消并清空私有 query cache，再 replace 到登录页。403 CSRF 错误保留为操作错误，不误判为会话过期。
 
 除 HTTPS/setup 完成后确实可能改变 origin 的流程外，普通登录、登出和导航不再使用 `window.location.replace`。
 
@@ -149,7 +149,7 @@ web/
 - mutation 从 `simplus_csrf` cookie 附加 `X-Simplus-CSRF`；
 - 合并 TanStack Query 的 `AbortSignal` 与操作超时；
 - 把 transport/HTTP/invalid-response/timeout/abort 统一为 `ApiClientError`；
-- 在 401 时通知 session boundary；
+- 按请求 path 区分授权域，只在受保护管理员请求 401 时通知 session boundary；
 - 保留原始 HTTP status、稳定 `code`、`retryable` 和可选 `reference`。
 
 页面不得调用 `fetch`，不得读取未经生成 schema/专用 guard 验证的网络 JSON。生成 Zod 负责结构与 OpenAPI 约束；`hardwareSchema.ts` 继续负责唯一 ID、引用关系、generation 和 capability subset 等 OpenAPI 无法表达的拓扑不变量。

@@ -69,6 +69,24 @@ the source change. If verification reports drift, fix the source/generator or
 commit the intentional regenerated result; do not conceal drift with a second
 formatter or local post-processing script.
 
+## Vite Trusted-LAN Development Proxy
+
+`scripts/dev/run-sim.sh` keeps `simplusd` on the loopback
+`SIMPLUS_LISTEN_ADDR` and supplies that address as `VITE_API_PROXY_TARGET`.
+Only Vite may bind `SIMPLUS_DEV_WEB_HOST=0.0.0.0` for an explicitly requested
+trusted-LAN preview. The Web remains same-origin: browser `/api` and SSE traffic
+flows through Vite to the loopback API.
+
+The proxy must use `changeOrigin: false`. `simplusd` validates the request Host
+as loopback/private trusted-LAN authority, and setup completion derives its
+browser-facing `managementUrl` from that validated authority. Rewriting Host to
+the API target can redirect a remote browser to its own loopback interface.
+Do not replace this contract with unvalidated `X-Forwarded-Host` handling.
+
+Keep `web/src/viteConfig.test.ts` and a real proxy smoke when changing this
+wiring. Authentication-context and redirect assertions are specified in
+[`web/frontend/state-management.md`](../../web/frontend/state-management.md#scenario-separate-setup-and-administrator-authorization).
+
 ## Third-Party and Packaging Inputs
 
 Third-party assets carry their own provenance and license boundaries:
