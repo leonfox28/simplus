@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/00-bootstrap-guidelines/research/trellis-bootstrap-repair.md","reason":"Verified package, repository, instruction, and hook evidence for the repair"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep package/spec/context flow consistent across Trellis configuration, tasks, and Codex injection"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Preserve stable package keys and avoid duplicating project conventions across AGENTS and specs"}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Protect the completed Web package mapping and existing frontend spec contract"}

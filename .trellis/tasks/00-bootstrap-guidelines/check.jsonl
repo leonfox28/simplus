@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/00-bootstrap-guidelines/research/trellis-bootstrap-repair.md","reason":"Audit every repaired claim and path against the recorded repository evidence"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review package discovery through task manifests and sub-agent context injection end to end"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated, divergent, or unstable configuration and conventions"}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Ensure the repair does not regress the completed Web package and frontend specs"}
