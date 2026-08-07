@@ -10,10 +10,7 @@ import { navigationItems } from './navigation'
 import { RealtimeBridge } from './RealtimeBridge'
 
 function Brand() {
-  return <div className="app-brand">
-    <Typography.Text strong>Simplus</Typography.Text>
-    <span>LAN Control Center</span>
-  </div>
+  return <div className="app-brand"><Typography.Text strong>Simplus</Typography.Text></div>
 }
 
 export function AppShell() {
@@ -50,9 +47,9 @@ export function AppShell() {
     disabled: logout.isPending,
     onClick: () => logout.mutate({}),
   }] }}>
-    <Button type="text" className="account-button">
+    <Button type="text" className="account-button" aria-label={`管理员菜单：${session.username}`}>
       <Avatar size="small" icon={<UserOutlined />} />
-      {!compact && session.username}
+      {!compact && <span className="account-name">{session.username}</span>}
     </Button>
   </Dropdown>
 
@@ -64,12 +61,14 @@ export function AppShell() {
     </Layout.Sider>}
     <Layout className="app-main">
       <Layout.Header className="app-header">
-        <Flex align="center" justify="space-between" gap="middle">
-          <Flex align="center" gap="small">
-            {compact && <Button aria-label="打开导航" type="text" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />}
-            {compact && <Brand />}
+        <Flex className="app-header-inner" align="center" gap="middle" wrap={false}>
+          {compact && <Flex className="app-header-leading" align="center" gap="small" wrap={false}>
+            <Button aria-label="打开导航" type="text" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />
+            <Brand />
+          </Flex>}
+          <Flex className="app-header-actions" role="group" aria-label="页面操作" align="center" justify="flex-end" gap="small" wrap={false}>
+            {account}
           </Flex>
-          {account}
         </Flex>
       </Layout.Header>
       <Layout.Content className="app-content"><Outlet /></Layout.Content>

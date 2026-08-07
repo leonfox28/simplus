@@ -47,9 +47,16 @@ component internals.
 EventSource. It must cover:
 
 - desktop login, navigation/core flow, cursor “load more,” realtime
-  invalidation, and no page-level horizontal overflow;
+  invalidation, no page-level horizontal overflow, and the Header action
+  group's right edge matching the 24px desktop padding;
 - mobile login/navigation Drawer, no unintended input focus, record-card
-  presentation, and no horizontal overflow.
+  presentation, no horizontal overflow, and the Header action group's right
+  edge matching the 12px compact padding.
+
+For alignment regressions, semantic DOM assertions are necessary but not
+sufficient: Playwright must compare `boundingBox()` edges. A flex group can
+have the expected role/class and still render on the wrong side. Assert the
+action group remains inside the Header and that obsolete brand text is absent.
 
 E2E must not depend on a modem, SIM, RF, private endpoint, existing database,
 real SMS/call, or HIL. Do not put sensitive evidence in screenshots, traces, or

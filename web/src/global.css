@@ -6,11 +6,15 @@ body { min-width: 320px; overflow-x: hidden; background: #f5f7fa; }
 .app-layout { min-height: 100vh; min-height: 100dvh; background: #f5f7fa; }
 .app-sider { position: sticky !important; top: 0; height: 100vh; border-right: 1px solid #f0f0f0; }
 .app-main { min-width: 0; }
-.app-header { position: sticky; z-index: 20; top: 0; height: 64px; padding: 0 24px; background: rgba(255, 255, 255, .96); border-bottom: 1px solid #f0f0f0; }
+.app-header { position: sticky; z-index: 20; top: 0; height: 64px; min-width: 0; padding: 0 24px; display: flex; align-items: center; background: rgba(255, 255, 255, .96); border-bottom: 1px solid #f0f0f0; }
+.app-header-inner { width: 100%; min-width: 0; }
+.app-header-leading { min-width: 0; }
+.app-header-actions { min-width: 0; max-width: 100%; margin-inline-start: auto; flex: 0 1 auto; }
 .app-content { min-width: 0; max-width: 100%; }
-.app-brand { height: 64px; padding: 12px 20px; display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
-.app-brand span { color: #8c8c8c; font-size: 10px; font-weight: 400; }
-.account-button { display: inline-flex; align-items: center; gap: 8px; }
+.app-brand { height: 64px; min-width: 0; padding: 0 20px; display: flex; align-items: center; line-height: 1; }
+.app-brand .ant-typography { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-button { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 8px; }
+.account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .page-content, .public-page { width: 100%; max-width: 1600px; margin: 0 auto; padding: 24px; min-width: 0; }
 .public-page { max-width: 960px; }

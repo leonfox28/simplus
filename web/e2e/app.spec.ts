@@ -146,6 +146,19 @@ async function expectNoGlobalOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
 }
 
+async function expectHeaderActionsRightAligned(page: Page, expectedPadding: number) {
+  const header = page.locator('.app-header')
+  const actions = page.getByRole('group', { name: '页面操作' })
+  await expect(actions.getByRole('button', { name: `管理员菜单：${session.username}` })).toBeVisible()
+  const [headerBox, actionsBox] = await Promise.all([header.boundingBox(), actions.boundingBox()])
+  expect(headerBox).not.toBeNull()
+  expect(actionsBox).not.toBeNull()
+  if (!headerBox || !actionsBox) return
+  expect(Math.abs((headerBox.x + headerBox.width) - (actionsBox.x + actionsBox.width) - expectedPadding)).toBeLessThanOrEqual(2)
+  expect(actionsBox.x).toBeGreaterThanOrEqual(headerBox.x)
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width)
+}
+
 test.beforeEach(async ({ page }) => {
   await installEventSource(page)
 })
@@ -157,6 +170,8 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
   await page.getByPlaceholder('密码').fill('synthetic-password')
   await page.getByRole('button', { name: /登\s*录/ }).click()
   await expect(page.getByRole('heading', { name: '概览' })).toBeVisible()
+  await expect(page.getByText('LAN Control Center')).toHaveCount(0)
+  await expectHeaderActionsRightAligned(page, 24)
 
   await page.getByText('模组配置', { exact: true }).click()
   await expect(page.getByText('Simulator', { exact: true })).toBeVisible()
@@ -181,6 +196,8 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
 test('@mobile Drawer navigation has no overflow or unintended autofocus', async ({ page }) => {
   await installApi(page, true)
   await page.goto('/dashboard')
+  await expect(page.getByText('LAN Control Center')).toHaveCount(0)
+  await expectHeaderActionsRightAligned(page, 12)
   await page.getByRole('button', { name: '打开导航' }).click()
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()

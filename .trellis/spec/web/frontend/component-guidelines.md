@@ -43,6 +43,33 @@ export default function ExamplePage() {
 
 These are thin project primitives, not a replacement design system.
 
+## Shell Header Alignment
+
+The authenticated Header has two explicit regions: an optional compact-only
+leading group (menu plus the single-line `Simplus` brand) and a trailing action
+group (administrator menu and any future global actions). The trailing group
+owns `margin-inline-start: auto`; do not rely on `justify-content:
+space-between` with an empty conditionally rendered leading item. A zero-width
+Flex child can leave the only visible action at the start edge.
+
+```tsx
+<Flex className="app-header-inner" align="center" wrap={false}>
+  {compact && <Flex className="app-header-leading">{/* menu + Brand */}</Flex>}
+  <Flex className="app-header-actions" role="group" aria-label="页面操作">
+    {/* account/global actions */}
+  </Flex>
+</Flex>
+```
+
+- Desktop actions end at the Header's 24px inline padding; compact actions end
+  at its 12px inline padding.
+- Do not render an empty leading group on desktop. Action and account labels
+  must truncate instead of widening the page.
+- The desktop Sider, compact Header, and Drawer use the same single-line
+  `Simplus` brand; do not restore the retired `LAN Control Center` subtitle.
+- The account button has an accessible administrator-menu name. Compact mode
+  may hide the visible username but keeps the label and avatar action.
+
 ## Tables, Cards, Forms, and Actions
 
 - Give tables `TableColumnsType<DomainType>` and a stable business `rowKey`.

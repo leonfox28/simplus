@@ -300,6 +300,13 @@ git status --short
 - [x] 添加 runtime、Login/真实 SetupPage route、Vite config 和实际 proxy Host 回归；无头浏览器从 1.5 秒 154 次循环导航收敛为有界启动导航，普通入口稳定停在 `/login`，direct setup 稳定停在 `/setup`。
 - [x] 将授权域、route-loop 与 dev proxy authority 约束写入 Web/infra code-spec 和 cross-layer checklist。
 
+### Runtime follow-up — 桌面 Header 用户区错位
+
+- [x] 根因归类为隐式布局假设与测试缺口：desktop 保留空 leading Flex，`space-between` 未把唯一可见的账号动作推到右侧；原测试只覆盖点击导航。
+- [x] 只在 compact 模式渲染 leading group，并用独立 action group 的 `margin-inline-start: auto` 明确右对齐。
+- [x] 桌面/手机 Playwright 分别验证 24px/12px 右边距、动作不越界和无全局 overflow；组件测试验证可访问账号入口及 Drawer 清理。
+- [x] Brand 按用户确认统一为单行 `Simplus`，删除 `LAN Control Center` 副标题。
+
 ## 3. 完成定义
 
 - [x] 所有 PRD acceptance criteria 可指向测试、生成检查、审计输出或可观察 UI 行为。
