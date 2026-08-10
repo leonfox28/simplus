@@ -82,7 +82,7 @@ corepack pnpm --dir web e2e
 
 - [x] 更新 ADR 0024、`docs/architecture.md`、active MVP follow-up 和相关 backend/frontend Trellis specs，删除 SMS createdAt-keyset 陈述，保留 Calls 条款。
 - [x] 使用 `trellis-update-spec` 做 source-backed 一致性检查。
-- [ ] 派发 `trellis-check` 独立检查 PRD、迁移、cursor 兼容、跨层顺序、unread、Web、隐私和测试质量；修复确认的问题。
+- [x] 派发 `trellis-check` 独立检查 PRD、迁移、cursor 兼容、跨层顺序、unread、Web、隐私和测试质量；修复确认的问题。
 
 验证：
 
@@ -95,9 +95,9 @@ git diff --check
 
 - [x] 运行 targeted→broad gates；只修本任务归因问题。
 - [x] 确认 diff 不含号码、Line/SIM/设备身份、截图、日志、数据库或私密现场材料。
-- [ ] 按逻辑边界提交代码/文档；不 push。
-- [ ] 构建三个 `dev` 镜像并 `SIMPLUS_IMAGE_TAG=dev docker compose up -d` 原地更新。
-- [ ] 检查 data-init/bootstrap exit 0、app/agent/netd healthy、镜像 revision、HTTP 200；不发送真实短信。
+- [x] 按逻辑边界提交代码/文档；不 push。
+- [x] 构建三个 `dev` 镜像并 `SIMPLUS_IMAGE_TAG=dev docker compose up -d` 原地更新。
+- [x] 检查 data-init/bootstrap exit 0、app/agent/netd healthy、镜像 revision、HTTP 200；不发送真实短信。
 
 ```bash
 make check-format
@@ -115,11 +115,11 @@ SIMPLUS_IMAGE_TAG=dev docker compose up -d
 
 ## 8. 完成定义
 
-- [ ] 所有 PRD acceptance criteria 有对应自动化测试或部署观察证据。
-- [ ] 已有缺陷形态和未来写入都按首次本地持久化顺序展示；分页、摘要和最近 Line 一致。
-- [ ] 迁移与 Down 保留消息/unread，Calls 与公共 JSON/SSE 行为不回归。
-- [ ] 全量 gate 与独立 Trellis 检查通过，工作树无私密材料。
-- [ ] 本地运行容器是本次产品提交且健康；没有真实通信副作用。
+- [x] 所有 PRD acceptance criteria 有对应自动化测试或部署观察证据。
+- [x] 已有缺陷形态和未来写入都按首次本地持久化顺序展示；分页、摘要和最近 Line 一致。
+- [x] 迁移与 Down 保留消息/unread，Calls 与公共 JSON/SSE 行为不回归。
+- [x] 全量 gate 与独立 Trellis 检查通过，工作树无私密材料。
+- [x] 本地运行容器是本次产品提交且健康；没有真实通信副作用。
 
 ## 9. 实现证据（2026-08-11）
 
@@ -131,5 +131,11 @@ SIMPLUS_IMAGE_TAG=dev docker compose up -d
   `make security`、`make build`、`make check-docs` 和 `git diff --check` 通过；
 - 非失败 warning：Vitest/jsdom 报告不支持 pseudo-element `getComputedStyle`；Playwright
   WebServer 报告 `FORCE_COLOR` 覆盖 `NO_COLOR`；Vite 报告既有大于 500 kB chunk；
-- 本实现未提交、未构建或部署容器，未读取私有运行态数据，也未执行真实短信、RF、模组
-  写入或 HIL；独立 `trellis-check`、提交与本地 Compose 更新由主会话继续负责。
+- 独立 `trellis-check` 未发现产品代码缺陷，并补强 sequence non-reuse、Down/Up unread
+  水位、service cursor continuation 与会话预览的断言；全部门禁重跑通过；
+- 产品代码按 `f20cd83`、`d36c2d6`、`b815a7b` 三个逻辑边界提交，未 push；
+- 三个 `dev` 镜像构建为 revision `b815a7bece69` 并原地更新 Compose；data-init/bootstrap
+  退出码为 0，app/agent/netd healthy，本机 HTTP 返回 200；
+- messages schema 为 v8，对报告缺陷对应既有记录的脱敏只读核对得到
+  `outbound -> inbound`；未输出或保存号码、Line、消息 ID、正文、数据库或截图；
+- 未执行真实短信、RF、模组写入或 HIL。

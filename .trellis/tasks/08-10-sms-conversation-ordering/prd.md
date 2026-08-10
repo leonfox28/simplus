@@ -53,16 +53,16 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1：新建出站记录后再持久化一个业务 `createdAt` 更早的入站记录，所有历史查询均返回入站为 newest，Web 展示为出站在上、入站在下。
-- [ ] AC2：上述两条属于同一 remote address 时，会话摘要的 `lastMessage` 是入站，会话排序与最近出站 Line 同时正确。
-- [ ] AC3：相同毫秒、时钟回拨、批量入站、并发写入和随机 message ID 不改变首次成功持久化顺序；replay/status update 不重排。
-- [ ] AC4：多页 global、remote-only、Line + remote 和 conversation keyset 分页无重复或遗漏；新 v2 cursor 的 boundary 删除后仍可继续，合法旧 v1 cursor 可过渡使用。
-- [ ] AC5：v7→v8 保留消息与 unread marker，并按入站 `updatedAt`/出站 `createdAt` 回填；当前缺陷形态升级后顺序被纠正。
-- [ ] AC6：v8→v7→v8 保留业务消息与未读状态，迁移对象、schema version、索引和 AUTOINCREMENT 行为符合预期。
-- [ ] AC7：Calls cursor round-trip/分页不变；非法 SMS cursor 仍映射到现有稳定 HTTP 错误，OpenAPI/generated drift 为零。
-- [ ] AC8：Messages 的 Vitest 与桌面/移动 Chromium E2E 覆盖反向业务时间、分页/滚动和 SSE 刷新，均不使用真实通信。
-- [ ] AC9：全量格式、生成、lint、test、security、build 与 docs gate 通过，工作树不含私密现场数据、截图或临时数据库副本。
-- [ ] AC10：在用户批准本规划后，构建新的本地 `dev` 镜像并原地更新当前 Compose；app/agent/netd 均 healthy、一次性任务退出 0、HTTP 200，且不触发真实短信测试。
+- [x] AC1：新建出站记录后再持久化一个业务 `createdAt` 更早的入站记录，所有历史查询均返回入站为 newest，Web 展示为出站在上、入站在下。
+- [x] AC2：上述两条属于同一 remote address 时，会话摘要的 `lastMessage` 是入站，会话排序与最近出站 Line 同时正确。
+- [x] AC3：相同毫秒、时钟回拨、批量入站、并发写入和随机 message ID 不改变首次成功持久化顺序；replay/status update 不重排。
+- [x] AC4：多页 global、remote-only、Line + remote 和 conversation keyset 分页无重复或遗漏；新 v2 cursor 的 boundary 删除后仍可继续，合法旧 v1 cursor 可过渡使用。
+- [x] AC5：v7→v8 保留消息与 unread marker，并按入站 `updatedAt`/出站 `createdAt` 回填；当前缺陷形态升级后顺序被纠正。
+- [x] AC6：v8→v7→v8 保留业务消息与未读状态，迁移对象、schema version、索引和 AUTOINCREMENT 行为符合预期。
+- [x] AC7：Calls cursor round-trip/分页不变；非法 SMS cursor 仍映射到现有稳定 HTTP 错误，OpenAPI/generated drift 为零。
+- [x] AC8：Messages 的 Vitest 与桌面/移动 Chromium E2E 覆盖反向业务时间、分页/滚动和 SSE 刷新，均不使用真实通信。
+- [x] AC9：全量格式、生成、lint、test、security、build 与 docs gate 通过，工作树不含私密现场数据、截图或临时数据库副本。
+- [x] AC10：在用户批准本规划后，构建新的本地 `dev` 镜像并原地更新当前 Compose；app/agent/netd 均 healthy、一次性任务退出 0、HTTP 200，且不触发真实短信测试。
 
 ## Out of Scope
 
