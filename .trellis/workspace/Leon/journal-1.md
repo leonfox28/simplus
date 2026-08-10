@@ -78,3 +78,28 @@ Initialized Trellis and Codex integration, corrected core/web package resolution
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: 修复短信会话时间乱序
+
+**Date**: 2026-08-11
+**Task**: 修复短信会话时间乱序
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+引入 messages v8 单调 record sequence 与 SMS v2 cursor，统一后端会话/历史顺序并让 Web 只消费服务端顺序；补齐迁移、分页、并发、桌面/移动 Chromium 回归和独立检查，将本地 Compose 更新到 b815a7b，并只读确认既有缺陷记录已按发送到收到排序。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f20cd83` | (see git log) |
+| `d36c2d6` | (see git log) |
+| `b815a7b` | (see git log) |
+| `06cab9d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
