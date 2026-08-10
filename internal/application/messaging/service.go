@@ -396,17 +396,20 @@ func (service *Service) ListPage(ctx context.Context, request PageRequest) (Page
 		(request.RemoteAddress != "" && !remoteAddressPattern.MatchString(request.RemoteAddress)) {
 		return PageResult{}, ErrRequestInvalid
 	}
-	after, err := pagination.Decode(request.Cursor)
+	after, err := pagination.DecodeSMS(request.Cursor)
 	if err != nil {
 		return PageResult{}, err
 	}
 	page, boundary, err := service.repository.ListSMSPageWithUnread(ctx, pagination.Request{Limit: limit, After: after}, request.LineID, request.RemoteAddress)
 	if err != nil {
+		if errors.Is(err, pagination.ErrCursorInvalid) {
+			return PageResult{}, pagination.ErrCursorInvalid
+		}
 		return PageResult{}, fmt.Errorf("%w: list SMS: %v", ErrPersistence, err)
 	}
 	result := PageResult{Messages: page.Items}
 	if page.Next != nil {
-		result.NextCursor, err = pagination.Encode(*page.Next)
+		result.NextCursor, err = pagination.EncodeSMS(*page.Next)
 		if err != nil {
 			return PageResult{}, fmt.Errorf("%w: encode SMS page cursor: %v", ErrPersistence, err)
 		}
@@ -428,12 +431,15 @@ func (service *Service) ListConversationPage(ctx context.Context, limit int, cur
 	if err != nil {
 		return ConversationPageResult{}, err
 	}
-	after, err := pagination.Decode(cursor)
+	after, err := pagination.DecodeSMS(cursor)
 	if err != nil {
 		return ConversationPageResult{}, err
 	}
 	page, err := service.repository.ListSMSConversationPage(ctx, pagination.Request{Limit: normalizedLimit, After: after})
 	if err != nil {
+		if errors.Is(err, pagination.ErrCursorInvalid) {
+			return ConversationPageResult{}, pagination.ErrCursorInvalid
+		}
 		return ConversationPageResult{}, fmt.Errorf("%w: list SMS conversations: %v", ErrPersistence, err)
 	}
 	total, err := service.repository.CountSMSConversations(ctx)
@@ -442,7 +448,7 @@ func (service *Service) ListConversationPage(ctx context.Context, limit int, cur
 	}
 	result := ConversationPageResult{Conversations: page.Items, TotalCount: total}
 	if page.Next != nil {
-		result.NextCursor, err = pagination.Encode(*page.Next)
+		result.NextCursor, err = pagination.EncodeSMS(*page.Next)
 		if err != nil {
 			return ConversationPageResult{}, fmt.Errorf("%w: encode SMS conversation cursor: %v", ErrPersistence, err)
 		}

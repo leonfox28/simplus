@@ -311,78 +311,92 @@ LIMIT 1
 
 type smsPageQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func listSMSPage(ctx context.Context, querier smsPageQuerier, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], error) {
+	afterSequence, err := resolveSMSRecordSequence(ctx, querier, request.After, lineID, remoteAddress)
+	if err != nil {
+		return pagination.Page[sms.Message]{}, err
+	}
 	var rows *sql.Rows
-	var err error
+	var queryErr error
 	if lineID != "" && request.After != nil {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
 WHERE line_id = ? AND remote_address = ?
-  AND (created_at_unix_ms, message_id) < (?, ?)
-ORDER BY created_at_unix_ms DESC, message_id DESC
+  AND record_sequence < ?
+ORDER BY record_sequence DESC
 LIMIT ?
-`, lineID, remoteAddress, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+`, lineID, remoteAddress, afterSequence, request.Limit+1)
 	} else if lineID != "" {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
 WHERE line_id = ? AND remote_address = ?
-ORDER BY created_at_unix_ms DESC, message_id DESC
+ORDER BY record_sequence DESC
 LIMIT ?
 		`, lineID, remoteAddress, request.Limit+1)
 	} else if remoteAddress != "" && request.After != nil {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
 WHERE remote_address = ?
-  AND (created_at_unix_ms, message_id) < (?, ?)
-ORDER BY created_at_unix_ms DESC, message_id DESC
+  AND record_sequence < ?
+ORDER BY record_sequence DESC
 LIMIT ?
-`, remoteAddress, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+`, remoteAddress, afterSequence, request.Limit+1)
 	} else if remoteAddress != "" {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
 WHERE remote_address = ?
-ORDER BY created_at_unix_ms DESC, message_id DESC
+ORDER BY record_sequence DESC
 LIMIT ?
 `, remoteAddress, request.Limit+1)
 	} else if request.After != nil {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
-WHERE (created_at_unix_ms, message_id) < (?, ?)
-ORDER BY created_at_unix_ms DESC, message_id DESC
+WHERE record_sequence < ?
+ORDER BY record_sequence DESC
 LIMIT ?
-`, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+`, afterSequence, request.Limit+1)
 	} else {
-		rows, err = querier.QueryContext(ctx, `
+		rows, queryErr = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
-       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+       record_sequence
 FROM sms_messages
-ORDER BY created_at_unix_ms DESC, message_id DESC
+ORDER BY record_sequence DESC
 LIMIT ?
 `, request.Limit+1)
 	}
-	if err != nil {
-		return pagination.Page[sms.Message]{}, fmt.Errorf("list SMS: %w", err)
+	if queryErr != nil {
+		return pagination.Page[sms.Message]{}, fmt.Errorf("list SMS: %w", queryErr)
 	}
 	defer rows.Close()
 	messages := make([]sms.Message, 0)
+	sequences := make([]int64, 0)
 	for rows.Next() {
-		message, err := scanSMS(rows)
+		var sequence int64
+		message, err := scanSMSWithTail(rows, &sequence)
 		if err != nil {
 			return pagination.Page[sms.Message]{}, err
 		}
 		messages = append(messages, message)
+		sequences = append(sequences, sequence)
 	}
 	if err := rows.Err(); err != nil {
 		return pagination.Page[sms.Message]{}, fmt.Errorf("iterate SMS: %w", err)
@@ -391,9 +405,52 @@ LIMIT ?
 	if len(messages) > request.Limit {
 		page.Items = messages[:request.Limit]
 		last := page.Items[len(page.Items)-1]
-		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+		page.Next = &pagination.Cursor{RecordSequence: sequences[request.Limit-1], ID: last.ID}
 	}
 	return page, nil
+}
+
+func resolveSMSRecordSequence(ctx context.Context, querier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, after *pagination.Cursor, lineID, remoteAddress string) (int64, error) {
+	if after == nil {
+		return 0, nil
+	}
+	if after.RecordSequence > 0 {
+		var storedID, storedLineID, storedRemoteAddress string
+		err := querier.QueryRowContext(ctx, `
+SELECT message_id, line_id, remote_address FROM sms_messages WHERE record_sequence = ?
+`, after.RecordSequence).Scan(&storedID, &storedLineID, &storedRemoteAddress)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("validate SMS sequence cursor: %w", err)
+		}
+		if err == nil && (storedID != after.ID ||
+			(lineID != "" && (storedLineID != lineID || storedRemoteAddress != remoteAddress)) ||
+			(lineID == "" && remoteAddress != "" && storedRemoteAddress != remoteAddress)) {
+			return 0, pagination.ErrCursorInvalid
+		}
+		return after.RecordSequence, nil
+	}
+	if after.ID == "" || after.CreatedAt.IsZero() {
+		return 0, pagination.ErrCursorInvalid
+	}
+	query := `SELECT record_sequence FROM sms_messages WHERE message_id = ? AND created_at_unix_ms = ?`
+	args := []any{after.ID, after.CreatedAt.UTC().UnixMilli()}
+	if lineID != "" {
+		query += ` AND line_id = ? AND remote_address = ?`
+		args = append(args, lineID, remoteAddress)
+	} else if remoteAddress != "" {
+		query += ` AND remote_address = ?`
+		args = append(args, remoteAddress)
+	}
+	var sequence int64
+	if err := querier.QueryRowContext(ctx, query, args...).Scan(&sequence); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, pagination.ErrCursorInvalid
+		}
+		return 0, fmt.Errorf("resolve legacy SMS cursor: %w", err)
+	}
+	return sequence, nil
 }
 
 func (set *Set) ListSMSConversationPage(ctx context.Context, request pagination.Request) (pagination.Page[sms.ConversationSummary], error) {
@@ -403,35 +460,40 @@ func (set *Set) ListSMSConversationPage(ctx context.Context, request pagination.
 	if request.Limit < 1 || request.Limit > pagination.MaximumLimit {
 		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("invalid SMS conversation page request")
 	}
+	afterSequence, err := resolveSMSRecordSequence(ctx, set.Messages, request.After, "", "")
+	if err != nil {
+		return pagination.Page[sms.ConversationSummary]{}, err
+	}
 	query := `
 WITH latest AS (
     SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
            provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+           record_sequence,
            ROW_NUMBER() OVER (
                PARTITION BY remote_address
-               ORDER BY created_at_unix_ms DESC, message_id DESC
+               ORDER BY record_sequence DESC
            ) AS position
     FROM sms_messages
 )
 SELECT latest.message_id, latest.operation_id, latest.direction, latest.line_id,
        latest.remote_address, latest.body, latest.status, latest.provider_message_id,
        latest.error_code, latest.created_at_unix_ms, latest.updated_at_unix_ms,
-       latest.sent_at_unix_ms,
+       latest.sent_at_unix_ms, latest.record_sequence,
        (SELECT COUNT(*) FROM sms_message_unread unread
         WHERE unread.remote_address = latest.remote_address) AS unread_count,
        COALESCE((SELECT outbound.line_id FROM sms_messages outbound
                  WHERE outbound.remote_address = latest.remote_address
                    AND outbound.direction = 'outbound'
-                 ORDER BY outbound.created_at_unix_ms DESC, outbound.message_id DESC
+                 ORDER BY outbound.record_sequence DESC
                  LIMIT 1), '') AS last_outbound_line_id
 FROM latest
 WHERE latest.position = 1`
 	args := make([]any, 0, 3)
 	if request.After != nil {
-		query += ` AND (latest.created_at_unix_ms, latest.message_id) < (?, ?)`
-		args = append(args, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID)
+		query += ` AND latest.record_sequence < ?`
+		args = append(args, afterSequence)
 	}
-	query += ` ORDER BY latest.created_at_unix_ms DESC, latest.message_id DESC LIMIT ?`
+	query += ` ORDER BY latest.record_sequence DESC LIMIT ?`
 	args = append(args, request.Limit+1)
 	rows, err := set.Messages.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -439,15 +501,18 @@ WHERE latest.position = 1`
 	}
 	defer rows.Close()
 	items := make([]sms.ConversationSummary, 0, request.Limit+1)
+	sequences := make([]int64, 0, request.Limit+1)
 	for rows.Next() {
 		var item sms.ConversationSummary
-		message, err := scanSMSWithTail(rows, &item.UnreadCount, &item.LastOutboundLineID)
+		var sequence int64
+		message, err := scanSMSWithTail(rows, &sequence, &item.UnreadCount, &item.LastOutboundLineID)
 		if err != nil {
 			return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("scan SMS conversation: %w", err)
 		}
 		item.RemoteAddress = message.RemoteAddress
 		item.LastMessage = message
 		items = append(items, item)
+		sequences = append(sequences, sequence)
 	}
 	if err := rows.Err(); err != nil {
 		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("iterate SMS conversations: %w", err)
@@ -456,7 +521,7 @@ WHERE latest.position = 1`
 	if len(items) > request.Limit {
 		page.Items = items[:request.Limit]
 		last := page.Items[len(page.Items)-1].LastMessage
-		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+		page.Next = &pagination.Cursor{RecordSequence: sequences[request.Limit-1], ID: last.ID}
 	}
 	return page, nil
 }

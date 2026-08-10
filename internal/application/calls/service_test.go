@@ -10,6 +10,7 @@ import (
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	"github.com/leonfox28/simplus/internal/domain/call"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
 )
 
@@ -47,6 +48,17 @@ func newCallService(t *testing.T) (*Service, *sqlitestore.Set) {
 	service.now = func() time.Time { clock = clock.Add(time.Second); return clock }
 	t.Cleanup(func() { _ = stores.Close() })
 	return service, stores
+}
+
+func TestCallsRejectSMSSequenceCursor(t *testing.T) {
+	service, _ := newCallService(t)
+	cursor, err := pagination.EncodeSMS(pagination.Cursor{RecordSequence: 1, ID: "message_abcdefghijklmnop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.List(context.Background(), 20, cursor); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("Calls accepted SMS sequence cursor: %v", err)
+	}
 }
 
 func TestSimulatorCallLifecycleAndSafety(t *testing.T) {

@@ -1042,7 +1042,7 @@ export const zListMessagesQuery = z.object({
 });
 
 /**
- * Most recent SMS records, newest first
+ * SMS records in newest-first order by their first successful local persistence
  */
 export const zListMessagesResponse = zSmsMessageListResponse;
 
@@ -1059,7 +1059,7 @@ export const zListMessageConversationsQuery = z.object({
 });
 
 /**
- * Most recent SMS conversations, newest first
+ * SMS conversations in newest-first order by each latest message's first successful local persistence
  */
 export const zListMessageConversationsResponse = zSmsConversationListResponse;
 

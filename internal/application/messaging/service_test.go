@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineapp "github.com/leonfox28/simplus/internal/application/line"
 	modemapp "github.com/leonfox28/simplus/internal/application/modem"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
@@ -151,6 +153,72 @@ func TestRecipientHistoryReadTokenValidationAndIdempotency(t *testing.T) {
 	conversations, err := service.ListConversationPage(ctx, 20, "")
 	if err != nil || conversations.TotalCount != 1 || len(conversations.Conversations) != 1 || conversations.Conversations[0].UnreadCount != 0 {
 		t.Fatalf("conversations=%#v error=%v", conversations, err)
+	}
+}
+
+func TestSMSServiceEmitsSequenceCursorAcceptsLegacyAndContinuesAfterBoundaryDeletion(t *testing.T) {
+	service, stores := newTestService(t, nil)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	for index := 0; index < 3; index++ {
+		if _, _, err := stores.CreateOutboundSMS(ctx, sms.Message{
+			ID: fmt.Sprintf("msg_service_page_%08d", index), OperationID: fmt.Sprintf("operation-service-page-%04d", index),
+			Direction: sms.DirectionOutbound, LineID: testManagedLineID1, RemoteAddress: fmt.Sprintf("+1202555012%d", index),
+			Body: "synthetic", Status: sms.StatusQueued, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := service.ListPage(ctx, PageRequest{Limit: 1})
+	if err != nil || len(first.Messages) != 1 || first.NextCursor == "" {
+		t.Fatalf("first page=%#v error=%v", first, err)
+	}
+	if _, err := pagination.Decode(first.NextCursor); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("Calls v1 decoder accepted emitted SMS cursor: %v", err)
+	}
+	decoded, err := pagination.DecodeSMS(first.NextCursor)
+	if err != nil || decoded.RecordSequence <= 0 || decoded.ID != first.Messages[0].ID {
+		t.Fatalf("decoded SMS cursor=%#v error=%v", decoded, err)
+	}
+	legacyCursor, err := pagination.Encode(pagination.Cursor{CreatedAt: first.Messages[0].CreatedAt, ID: first.Messages[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyPage, err := service.ListPage(ctx, PageRequest{Limit: 1, Cursor: legacyCursor})
+	if err != nil || len(legacyPage.Messages) != 1 || legacyPage.Messages[0].ID == first.Messages[0].ID {
+		t.Fatalf("legacy page=%#v error=%v", legacyPage, err)
+	}
+	if err := stores.DeleteSMS(ctx, first.Messages[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	afterDeletion, err := service.ListPage(ctx, PageRequest{Limit: 1, Cursor: first.NextCursor})
+	if err != nil || len(afterDeletion.Messages) != 1 || afterDeletion.Messages[0].ID != legacyPage.Messages[0].ID {
+		t.Fatalf("page after boundary deletion=%#v error=%v", afterDeletion, err)
+	}
+	if _, err := service.ListPage(ctx, PageRequest{Limit: 1, Cursor: legacyCursor}); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("deleted legacy boundary error=%v", err)
+	}
+
+	conversationFirst, err := service.ListConversationPage(ctx, 1, "")
+	if err != nil || len(conversationFirst.Conversations) != 1 || conversationFirst.NextCursor == "" {
+		t.Fatalf("conversation first page=%#v error=%v", conversationFirst, err)
+	}
+	conversationBoundary := conversationFirst.Conversations[0].LastMessage
+	legacyConversationCursor, err := pagination.Encode(pagination.Cursor{CreatedAt: conversationBoundary.CreatedAt, ID: conversationBoundary.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyConversationTail, err := service.ListConversationPage(ctx, 1, legacyConversationCursor)
+	if err != nil || len(legacyConversationTail.Conversations) != 1 {
+		t.Fatalf("legacy conversation tail=%#v error=%v", legacyConversationTail, err)
+	}
+	if err := stores.DeleteSMS(ctx, conversationBoundary.ID); err != nil {
+		t.Fatal(err)
+	}
+	conversationAfterDeletion, err := service.ListConversationPage(ctx, 1, conversationFirst.NextCursor)
+	if err != nil || len(conversationAfterDeletion.Conversations) != 1 ||
+		conversationAfterDeletion.Conversations[0].RemoteAddress != legacyConversationTail.Conversations[0].RemoteAddress {
+		t.Fatalf("conversation after boundary deletion=%#v error=%v", conversationAfterDeletion, err)
 	}
 }
 

@@ -424,7 +424,7 @@ paths:
           schema: { type: string, pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$" }
       responses:
         "200":
-          description: Most recent SMS records, newest first
+          description: SMS records in newest-first order by their first successful local persistence
           content:
             application/json:
               schema:
@@ -564,7 +564,7 @@ paths:
         - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
-          description: Most recent SMS conversations, newest first
+          description: SMS conversations in newest-first order by each latest message's first successful local persistence
           content:
             application/json:
               schema:

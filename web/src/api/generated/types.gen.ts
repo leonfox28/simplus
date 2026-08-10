@@ -1677,7 +1677,7 @@ export type ListMessagesError = ListMessagesErrors[keyof ListMessagesErrors];
 
 export type ListMessagesResponses = {
     /**
-     * Most recent SMS records, newest first
+     * SMS records in newest-first order by their first successful local persistence
      */
     200: SmsMessageListResponse;
 };
@@ -1800,7 +1800,7 @@ export type ListMessageConversationsError = ListMessageConversationsErrors[keyof
 
 export type ListMessageConversationsResponses = {
     /**
-     * Most recent SMS conversations, newest first
+     * SMS conversations in newest-first order by each latest message's first successful local persistence
      */
     200: SmsConversationListResponse;
 };

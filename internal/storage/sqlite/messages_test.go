@@ -3,7 +3,9 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +47,15 @@ func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t
 	if err != nil || len(first.Items) != 2 || first.Items[0].ID != items[3].id || first.Items[1].ID != items[2].id || first.Next == nil {
 		t.Fatalf("first page=%#v error=%v", first, err)
 	}
+	if _, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: &pagination.Cursor{
+		RecordSequence: first.Next.RecordSequence,
+		ID:             "msg_inconsistent_0000001",
+	}}, "", ""); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("inconsistent sequence cursor error=%v", err)
+	}
+	if _, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: first.Next}, items[0].line, items[0].remote); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("sequence cursor accepted outside filter: %v", err)
+	}
 	conversation, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2}, lineID, remote)
 	if err != nil || len(conversation.Items) != 2 || conversation.Next == nil || conversation.Items[0].ID != items[3].id {
 		t.Fatalf("conversation page=%#v error=%v", conversation, err)
@@ -64,6 +75,28 @@ func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t
 	}); err != nil {
 		t.Fatal(err)
 	}
+	legacyTail, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: &pagination.Cursor{
+		CreatedAt: first.Items[0].CreatedAt,
+		ID:        first.Items[0].ID,
+	}}, "", "")
+	if err != nil || len(legacyTail.Items) != 2 || legacyTail.Items[0].ID != items[2].id || legacyTail.Items[1].ID != items[1].id {
+		t.Fatalf("legacy cursor tail=%#v error=%v", legacyTail, err)
+	}
+	if _, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: &pagination.Cursor{
+		CreatedAt: first.Items[0].CreatedAt,
+		ID:        first.Items[0].ID,
+	}}, items[0].line, items[0].remote); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("legacy cursor accepted outside filter: %v", err)
+	}
+	if _, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: &pagination.Cursor{
+		CreatedAt: first.Items[0].CreatedAt.Add(time.Millisecond),
+		ID:        first.Items[0].ID,
+	}}, "", ""); !errors.Is(err, pagination.ErrCursorInvalid) {
+		t.Fatalf("legacy cursor accepted mismatched business time: %v", err)
+	}
+	if err := set.DeleteSMS(ctx, first.Items[1].ID); err != nil {
+		t.Fatal(err)
+	}
 	second, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: first.Next}, "", "")
 	if err != nil || len(second.Items) != 2 || second.Items[0].ID != items[1].id || second.Items[1].ID != items[0].id || second.Next != nil {
 		t.Fatalf("second page=%#v error=%v", second, err)
@@ -71,6 +104,120 @@ func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t
 	conversationTail, err := set.ListSMSPage(ctx, pagination.Request{Limit: 2, After: conversation.Next}, lineID, remote)
 	if err != nil || len(conversationTail.Items) != 1 || conversationTail.Items[0].ID != items[1].id || conversationTail.Next != nil {
 		t.Fatalf("conversation tail=%#v error=%v", conversationTail, err)
+	}
+}
+
+func TestSMSRecordSequenceOwnsHistorySummaryReplayStatusAndConcurrentWrites(t *testing.T) {
+	ctx := context.Background()
+	set, err := OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	base := time.Date(2026, 8, 10, 8, 0, 0, 0, time.UTC)
+	lineID := "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	remote := "+12025550123"
+	outbound, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+		ID: "msg_sequence_outbound_0001", OperationID: "operation-sequence-outbound1", Direction: sms.DirectionOutbound,
+		LineID: lineID, RemoteAddress: remote, Body: "persisted first", Status: sms.StatusQueued,
+		CreatedAt: base.Add(100 * time.Millisecond), UpdatedAt: base.Add(100 * time.Millisecond),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inboundRequest := sms.Message{
+		ID: "msg_sequence_inbound_00001", OperationID: "operation-sequence-inbound01", Direction: sms.DirectionInbound,
+		LineID: lineID, RemoteAddress: remote, Body: "persisted second", Status: sms.StatusReceived,
+		ProviderMessageID: "provider-sequence-inbound", CreatedAt: base, UpdatedAt: base.Add(500 * time.Millisecond),
+	}
+	inbound, replayed, err := set.CreateInboundSMS(ctx, inboundRequest)
+	if err != nil || replayed {
+		t.Fatalf("inbound=%#v replayed=%v error=%v", inbound, replayed, err)
+	}
+	page, err := set.ListSMSPage(ctx, pagination.Request{Limit: 10}, "", "")
+	if err != nil || len(page.Items) != 2 || page.Items[0].ID != inbound.ID || page.Items[1].ID != outbound.ID {
+		t.Fatalf("record-ordered history=%#v error=%v", page, err)
+	}
+	for _, filter := range []struct{ lineID, remote string }{{"", remote}, {lineID, remote}} {
+		filtered, err := set.ListSMSPage(ctx, pagination.Request{Limit: 10}, filter.lineID, filter.remote)
+		if err != nil || len(filtered.Items) != 2 || filtered.Items[0].ID != inbound.ID || filtered.Items[1].ID != outbound.ID {
+			t.Fatalf("filtered history line=%q page=%#v error=%v", filter.lineID, filtered, err)
+		}
+	}
+	conversations, err := set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].LastMessage.ID != inbound.ID ||
+		conversations.Items[0].LastOutboundLineID != lineID {
+		t.Fatalf("record-ordered conversation=%#v error=%v", conversations, err)
+	}
+	if _, replayed, err := set.CreateInboundSMS(ctx, inboundRequest); err != nil || !replayed {
+		t.Fatalf("replay replayed=%v error=%v", replayed, err)
+	}
+	if _, err := set.MarkOutboundSMSFailed(ctx, outbound.ID, "", "SMS_SYNTHETIC_FAILURE", base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	page, err = set.ListSMSPage(ctx, pagination.Request{Limit: 10}, "", remote)
+	if err != nil || page.Items[0].ID != inbound.ID || page.Items[1].ID != outbound.ID {
+		t.Fatalf("status update reordered page=%#v error=%v", page, err)
+	}
+
+	const concurrentMessages = 12
+	var wait sync.WaitGroup
+	errorsByWrite := make(chan error, concurrentMessages)
+	for index := 0; index < concurrentMessages; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			_, _, createErr := set.CreateOutboundSMS(ctx, sms.Message{
+				ID: fmt.Sprintf("msg_concurrent_%012d", index), OperationID: fmt.Sprintf("operation-concurrent-%08d", index),
+				Direction: sms.DirectionOutbound, LineID: lineID, RemoteAddress: remote, Body: "concurrent",
+				Status: sms.StatusQueued, CreatedAt: base, UpdatedAt: base,
+			})
+			errorsByWrite <- createErr
+		}(index)
+	}
+	wait.Wait()
+	close(errorsByWrite)
+	for createErr := range errorsByWrite {
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+	}
+	var count, distinct int
+	if err := set.Messages.QueryRowContext(ctx, `
+SELECT COUNT(*), COUNT(DISTINCT record_sequence)
+FROM sms_messages WHERE message_id LIKE 'msg_concurrent_%'
+`).Scan(&count, &distinct); err != nil {
+		t.Fatal(err)
+	}
+	if count != concurrentMessages || distinct != concurrentMessages {
+		t.Fatalf("concurrent sequences count=%d distinct=%d", count, distinct)
+	}
+	var maximum int64
+	var maximumID string
+	if err := set.Messages.QueryRowContext(ctx, `
+SELECT record_sequence, message_id
+FROM sms_messages
+WHERE message_id LIKE 'msg_concurrent_%'
+ORDER BY record_sequence DESC
+LIMIT 1
+`).Scan(&maximum, &maximumID); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.DeleteSMS(ctx, maximumID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+		ID: "msg_sequence_after_delete001", OperationID: "operation-sequence-after-delete", Direction: sms.DirectionOutbound,
+		LineID: lineID, RemoteAddress: remote, Body: "after delete", Status: sms.StatusQueued, CreatedAt: base, UpdatedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var afterDelete int64
+	if err := set.Messages.QueryRowContext(ctx, `SELECT record_sequence FROM sms_messages WHERE message_id = 'msg_sequence_after_delete001'`).Scan(&afterDelete); err != nil {
+		t.Fatal(err)
+	}
+	if afterDelete <= maximum {
+		t.Fatalf("record sequence reused after deletion: new=%d previous max=%d", afterDelete, maximum)
 	}
 }
 

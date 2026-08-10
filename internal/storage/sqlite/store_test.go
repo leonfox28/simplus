@@ -101,14 +101,238 @@ func TestKeysetIndexMigrationsDownAndReopenPreserveHistory(t *testing.T) {
 		database *sql.DB
 		index    string
 	}{
-		{set.Messages, "sms_messages_page_idx"},
-		{set.Messages, "sms_messages_conversation_page_idx"},
+		{set.Messages, "sms_messages_remote_sequence_idx"},
+		{set.Messages, "sms_messages_line_remote_sequence_idx"},
 		{set.Calls, "call_records_page_idx"},
 	} {
 		var count int
 		if err := check.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, check.index).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("reopened index %s count=%d error=%v", check.index, count, err)
 		}
+	}
+}
+
+func TestMessagesRecordSequenceMigrationPreservesUnreadAndRepairsHistoricalOrder(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err := sql.Open("sqlite", filepath.Join(root, MessagesDataset+".sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.SetMaxOpenConns(1)
+	migrationMu.Lock()
+	goose.SetLogger(goose.NopLogger())
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/messages", 7)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC).UnixMilli()
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO sms_messages (
+    message_id, operation_id, direction, line_id, remote_address, body, status,
+    provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+) VALUES
+    ('msg_v8_outbound_00000001', 'operation-v8-outbound-0001', 'outbound', 'line_AQEBAQEBAQEBAQEBAQEBAQ', '+12025550123', 'outbound', 'queued', '', '', ?, ?, NULL),
+    ('msg_v8_inbound_000000001', 'operation-v8-inbound-00001', 'inbound', 'line_AgICAgICAgICAgICAgICAg', '+12025550123', 'inbound', 'received', 'provider-v8-inbound-1', '', ?, ?, NULL)
+`, base+100, base+100, base, base+500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `
+INSERT INTO sms_message_unread (unread_id, message_id, remote_address)
+VALUES (41, 'msg_v8_inbound_000000001', '+12025550123')
+`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schemaVersion int64
+	if err := set.Messages.QueryRowContext(ctx, `SELECT schema_version FROM dataset_metadata WHERE singleton = 1`).Scan(&schemaVersion); err != nil || schemaVersion != 8 {
+		t.Fatalf("upgraded schema version=%d error=%v", schemaVersion, err)
+	}
+	for index, want := range map[string]int{
+		"sms_messages_remote_sequence_idx":      1,
+		"sms_messages_line_remote_sequence_idx": 1,
+		"sms_messages_page_idx":                 0,
+		"sms_messages_conversation_page_idx":    0,
+		"sms_messages_remote_page_idx":          0,
+	} {
+		var count int
+		if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil || count != want {
+			t.Fatalf("upgraded index %s count=%d want=%d error=%v", index, count, want, err)
+		}
+	}
+	page, err := set.ListSMSPage(ctx, pagination.Request{Limit: 10}, "", "")
+	if err != nil || len(page.Items) != 2 || page.Items[0].ID != "msg_v8_inbound_000000001" || page.Items[1].ID != "msg_v8_outbound_00000001" {
+		t.Fatalf("upgraded page=%#v error=%v", page, err)
+	}
+	var outboundSequence, inboundSequence, unreadID int64
+	if err := set.Messages.QueryRowContext(ctx, `SELECT record_sequence FROM sms_messages WHERE message_id = 'msg_v8_outbound_00000001'`).Scan(&outboundSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Messages.QueryRowContext(ctx, `SELECT record_sequence FROM sms_messages WHERE message_id = 'msg_v8_inbound_000000001'`).Scan(&inboundSequence); err != nil {
+		t.Fatal(err)
+	}
+	if outboundSequence != 1 || inboundSequence != 2 {
+		t.Fatalf("backfilled sequences outbound=%d inbound=%d", outboundSequence, inboundSequence)
+	}
+	if err := set.Messages.QueryRowContext(ctx, `SELECT unread_id FROM sms_message_unread WHERE message_id = 'msg_v8_inbound_000000001'`).Scan(&unreadID); err != nil || unreadID != 41 {
+		t.Fatalf("preserved unread id=%d error=%v", unreadID, err)
+	}
+	if _, _, err := set.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_v8_inbound_000000002", OperationID: "operation-v8-inbound-00002", Direction: sms.DirectionInbound,
+		LineID: "line_AgICAgICAgICAgICAgICAg", RemoteAddress: "+12025550123", Body: "new inbound", Status: sms.StatusReceived,
+		ProviderMessageID: "provider-v8-inbound-2", CreatedAt: time.UnixMilli(base - 100).UTC(), UpdatedAt: time.UnixMilli(base + 600).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var newSequence, newUnreadID int64
+	if err := set.Messages.QueryRowContext(ctx, `
+SELECT message.record_sequence, unread.unread_id
+FROM sms_messages message JOIN sms_message_unread unread USING (message_id)
+WHERE message.message_id = 'msg_v8_inbound_000000002'
+`).Scan(&newSequence, &newUnreadID); err != nil || newSequence <= inboundSequence || newUnreadID <= unreadID {
+		t.Fatalf("new sequence=%d unread=%d error=%v", newSequence, newUnreadID, err)
+	}
+	var foreignKeyViolations int
+	rows, err := set.Messages.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		foreignKeyViolations++
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeyViolations != 0 {
+		t.Fatalf("foreign key violations=%d", foreignKeyViolations)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err = sql.Open("sqlite", filepath.Join(root, MessagesDataset+".sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.SetMaxOpenConns(1)
+	migrationMu.Lock()
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/messages", 7)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT schema_version FROM dataset_metadata WHERE singleton = 1`).Scan(&schemaVersion); err != nil || schemaVersion != 7 {
+		t.Fatalf("down schema version=%d error=%v", schemaVersion, err)
+	}
+	for index, want := range map[string]int{
+		"sms_messages_created_at_idx":           1,
+		"sms_messages_line_created_at_idx":      1,
+		"sms_messages_page_idx":                 1,
+		"sms_messages_conversation_page_idx":    1,
+		"sms_messages_remote_page_idx":          1,
+		"sms_messages_remote_sequence_idx":      0,
+		"sms_messages_line_remote_sequence_idx": 0,
+		"sms_message_unread_remote_idx":         1,
+	} {
+		var count int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil || count != want {
+			t.Fatalf("down index %s count=%d want=%d error=%v", index, count, want, err)
+		}
+	}
+	var messages, unread int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&messages); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_message_unread`).Scan(&unread); err != nil {
+		t.Fatal(err)
+	}
+	if messages != 3 || unread != 2 {
+		t.Fatalf("down migration messages=%d unread=%d", messages, unread)
+	}
+	var preservedUnreadID int64
+	if err := database.QueryRowContext(ctx, `SELECT MAX(unread_id) FROM sms_message_unread`).Scan(&preservedUnreadID); err != nil || preservedUnreadID != newUnreadID {
+		t.Fatalf("down unread watermark=%d want=%d error=%v", preservedUnreadID, newUnreadID, err)
+	}
+	if _, err := database.ExecContext(ctx, `SELECT record_sequence FROM sms_messages LIMIT 1`); err == nil {
+		t.Fatal("v7 table retained record_sequence")
+	}
+	var foreignKeysEnabled int
+	if err := database.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeysEnabled); err != nil || foreignKeysEnabled != 1 {
+		t.Fatalf("down foreign_keys=%d error=%v", foreignKeysEnabled, err)
+	}
+	rows, err = database.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignKeyViolations = 0
+	for rows.Next() {
+		foreignKeyViolations++
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeyViolations != 0 {
+		t.Fatalf("down foreign key violations=%d", foreignKeyViolations)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&messages); err != nil || messages != 3 {
+		t.Fatalf("re-upgraded messages=%d error=%v", messages, err)
+	}
+	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_message_unread`).Scan(&unread); err != nil || unread != 2 {
+		t.Fatalf("re-upgraded unread=%d error=%v", unread, err)
+	}
+	if err := set.Messages.QueryRowContext(ctx, `SELECT MAX(unread_id) FROM sms_message_unread`).Scan(&preservedUnreadID); err != nil || preservedUnreadID != newUnreadID {
+		t.Fatalf("re-upgraded unread watermark=%d want=%d error=%v", preservedUnreadID, newUnreadID, err)
+	}
+	var maximumSequence int64
+	if err := set.Messages.QueryRowContext(ctx, `SELECT MAX(record_sequence) FROM sms_messages`).Scan(&maximumSequence); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := set.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_v8_inbound_000000003", OperationID: "operation-v8-inbound-00003", Direction: sms.DirectionInbound,
+		LineID: "line_AgICAgICAgICAgICAgICAg", RemoteAddress: "+12025550123", Body: "after re-upgrade", Status: sms.StatusReceived,
+		ProviderMessageID: "provider-v8-inbound-3", CreatedAt: time.UnixMilli(base - 200).UTC(), UpdatedAt: time.UnixMilli(base + 700).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Messages.QueryRowContext(ctx, `
+SELECT message.record_sequence, unread.unread_id
+FROM sms_messages message JOIN sms_message_unread unread USING (message_id)
+WHERE message.message_id = 'msg_v8_inbound_000000003'
+`).Scan(&newSequence, &newUnreadID); err != nil || newSequence <= maximumSequence || newUnreadID <= preservedUnreadID {
+		t.Fatalf("post-re-upgrade sequence=%d unread=%d previous sequence=%d unread=%d error=%v",
+			newSequence, newUnreadID, maximumSequence, preservedUnreadID, err)
 	}
 }
 
