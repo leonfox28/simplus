@@ -84,7 +84,11 @@ async function installEventSource(page: Page) {
 async function installApi(page: Page, authenticated = false) {
   let loggedIn = authenticated
   let messageRequests = 0
+  let readStateRequests = 0
+  let lastSendBody: unknown
   await page.exposeFunction('__messageRequestCount', () => messageRequests)
+  await page.exposeFunction('__readStateRequestCount', () => readStateRequests)
+  await page.exposeFunction('__lastSendBody', () => lastSendBody)
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -122,20 +126,52 @@ async function installApi(page: Page, authenticated = false) {
     }] })
     if (path === '/api/v1/mihomo/subscriptions') return json(route, { subscriptions: [] })
     if (path === '/api/v1/contacts') return json(route, { contacts: [] })
+    if (path === '/api/v1/message-conversations') return json(route, {
+      conversations: [{
+        remoteAddress: '+12025550123',
+        lastMessage: {
+          id: 'message_page_000000', operationId: 'operation_message_page_000000',
+          direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: 'First page',
+          status: 'received', providerMessageId: 'synthetic-provider-page-0', errorCode: '',
+          createdAt: '2026-08-07T00:19:00Z', updatedAt: '2026-08-07T00:19:00Z',
+        },
+        unreadCount: 1,
+      }],
+      conversationTotalCount: 1, messageTotalCount: 21, capacity: 1000, nearCapacity: false,
+    })
+    if (path === '/api/v1/message-conversations/read-state' && request.method() === 'PUT') {
+      readStateRequests += 1
+      return json(route, null, 204)
+    }
     if (path === '/api/v1/messages') {
+      if (request.method() === 'POST') {
+        lastSendBody = request.postDataJSON()
+        const body = lastSendBody as { operationId: string; lineId: string; destination: string; body: string }
+        return json(route, {
+          id: 'message_browser_sent_01', operationId: body.operationId, direction: 'outbound',
+          lineId: body.lineId, remoteAddress: body.destination, body: body.body, status: 'sent',
+          providerMessageId: 'synthetic-provider-browser-sent', errorCode: '',
+          createdAt: '2026-08-07T00:30:00Z', updatedAt: '2026-08-07T00:30:00Z', sentAt: '2026-08-07T00:30:00Z',
+        }, 201)
+      }
       messageRequests += 1
       const second = url.searchParams.get('cursor') === 'cursor_next'
       return json(route, {
-        messages: [{
-          id: second ? 'message_second_1234' : 'message_first_12345',
-          operationId: second ? 'operation_message_second_1234' : 'operation_message_first_12345',
-          direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: second ? 'Second page' : 'First page',
-          status: 'received', providerMessageId: '', errorCode: '',
-          createdAt: second ? '2026-08-06T00:00:00Z' : '2026-08-07T00:00:00Z',
-          updatedAt: second ? '2026-08-06T00:00:00Z' : '2026-08-07T00:00:00Z',
-        }],
-        totalCount: 2, capacity: 1000, nearCapacity: false,
-        ...(second ? {} : { nextCursor: 'cursor_next' }),
+        messages: second ? [{
+          id: 'message_second_1234', operationId: 'operation_message_second_1234',
+          direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: 'Second page',
+          status: 'received', providerMessageId: 'synthetic-provider-second', errorCode: '',
+          createdAt: '2026-08-06T00:00:00Z', updatedAt: '2026-08-06T00:00:00Z',
+        }] : Array.from({ length: 20 }, (_, index) => ({
+          id: `message_page_${String(index).padStart(6, '0')}`,
+          operationId: `operation_message_page_${String(index).padStart(6, '0')}`,
+          direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: index === 0 ? 'First page' : `Synthetic history ${index}`,
+          status: 'received', providerMessageId: `synthetic-provider-page-${index}`, errorCode: '',
+          createdAt: `2026-08-07T00:${String(19 - index).padStart(2, '0')}:00Z`,
+          updatedAt: `2026-08-07T00:${String(19 - index).padStart(2, '0')}:00Z`,
+        })),
+        totalCount: 21, capacity: 1000, nearCapacity: false,
+        ...(second ? {} : { nextCursor: 'cursor_next', readThroughToken: `synthetic_read_token_${messageRequests}` }),
       })
     }
     return json(route, { code: 'E2E_FIXTURE_MISSING', retryable: false }, 503)
@@ -183,13 +219,34 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()
   await page.getByText('短信', { exact: true }).click()
-  await expect(page.getByText('First page')).toBeVisible()
-  await page.getByRole('button', { name: '加载更多' }).click()
+  await expect(page.getByLabel('短信记录').getByText('First page')).toBeVisible()
+  await expect.poll(() => page.getByLabel('短信记录').evaluate((element) => (
+    element.scrollTop + element.clientHeight >= element.scrollHeight - 1
+  ))).toBe(true)
+  await page.getByLabel('短信内容').fill('Browser synthetic outbound')
+  await page.getByRole('button', { name: /发送短信/ }).click()
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __lastSendBody: () => Promise<unknown> }
+  ).__lastSendBody())).toEqual(expect.objectContaining({
+    lineId: line.id, destination: '+12025550123', body: 'Browser synthetic outbound',
+  }))
+  await page.getByRole('button', { name: /新建短信/ }).click()
+  const newMessageDialog = page.getByRole('dialog')
+  await expect(newMessageDialog.getByRole('combobox', { name: /收件人/ })).toBeVisible()
+  await newMessageDialog.getByRole('button', { name: /取\s*消|Cancel/ }).click()
+  await page.getByRole('button', { name: /联系人管理/ }).click()
+  const contactDrawer = page.getByRole('dialog')
+  await expect(contactDrawer.getByLabel('名称')).toBeVisible()
+  await contactDrawer.getByRole('button', { name: '关闭' }).click()
+  await page.getByRole('button', { name: '加载更早短信' }).click()
   await expect(page.getByText('Second page')).toBeVisible()
+  expect(await page.getByLabel('短信记录').evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
 
   const before = await page.evaluate(() => (window as unknown as { __messageRequestCount: () => Promise<number> }).__messageRequestCount())
+  const readsBefore = await page.evaluate(() => (window as unknown as { __readStateRequestCount: () => Promise<number> }).__readStateRequestCount())
   await page.evaluate(() => (window as unknown as { __emitSimplusEvent: (name: string, payload: unknown) => void }).__emitSimplusEvent('update', { topics: ['messages'] }))
   await expect.poll(() => page.evaluate(() => (window as unknown as { __messageRequestCount: () => Promise<number> }).__messageRequestCount())).toBeGreaterThan(before)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __readStateRequestCount: () => Promise<number> }).__readStateRequestCount())).toBeGreaterThan(readsBefore)
   await expectNoGlobalOverflow(page)
 })
 
@@ -208,5 +265,14 @@ test('@mobile Drawer navigation has no overflow or unintended autofocus', async 
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
   await expect(page.locator('.mobile-record-card')).toBeVisible()
   await expect(page.locator('.ant-table')).toHaveCount(0)
+  await page.getByRole('button', { name: '打开导航' }).click()
+  const messagesDrawer = page.getByRole('dialog')
+  await messagesDrawer.getByText('短信', { exact: true }).click()
+  await expect(page.getByRole('button', { name: /\+12025550123/ })).toBeVisible()
+  await page.getByRole('button', { name: /\+12025550123/ }).click()
+  await expect(page.getByLabel('短信记录')).toBeVisible()
+  await expect(page.getByText('First page')).toBeVisible()
+  await page.getByRole('button', { name: '返回会话列表' }).click()
+  await expect(page.getByRole('button', { name: /\+12025550123/ })).toBeVisible()
   await expectNoGlobalOverflow(page)
 })

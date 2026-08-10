@@ -34,6 +34,38 @@ body { min-width: 320px; overflow-x: hidden; background: #f5f7fa; }
 .contact-tags { margin-top: 16px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 
+.messages-page { max-width: 1800px; }
+.messages-workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; height: calc(100dvh - 180px); min-height: 620px; min-width: 0; }
+.conversation-pane, .message-pane { height: 100%; min-width: 0; overflow: hidden; }
+.conversation-pane .ant-card-body, .message-pane .ant-card-body { height: 100%; min-width: 0; display: flex; flex-direction: column; }
+.conversation-toolbar { padding: 16px; border-bottom: 1px solid #f0f0f0; }
+.conversation-list { min-height: 0; overflow-y: auto; }
+.conversation-list-item { padding: 0 !important; border-block-end: 1px solid #f0f0f0 !important; }
+.conversation-button { width: 100%; min-width: 0; padding: 14px 16px; border: 0; color: inherit; text-align: start; background: transparent; cursor: pointer; }
+.conversation-button:hover, .conversation-button:focus-visible { background: #f5f8ff; outline: none; }
+.conversation-button.selected { background: #e6f4ff; box-shadow: inset 3px 0 #1677ff; }
+.conversation-identity { display: flex; min-width: 0; flex-direction: column; }
+.conversation-time { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+.conversation-preview { min-width: 0; }
+.conversation-load-more { margin-top: auto; padding: 12px; border-top: 1px solid #f0f0f0; }
+.message-pane-header { flex: 0 0 auto; min-height: 68px; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; }
+.message-pane-identity { min-width: 0; }
+.message-pane-identity .ant-typography { margin: 0; }
+.message-history { flex: 1 1 auto; min-height: 0; padding: 20px; overflow-y: auto; background: #f7f8fa; }
+.message-load-older { padding-top: 0; padding-bottom: 16px; }
+.message-row { display: flex; width: 100%; margin-bottom: 14px; }
+.message-row.inbound { justify-content: flex-start; }
+.message-row.outbound { justify-content: flex-end; }
+.message-bubble { width: fit-content; max-width: min(76%, 720px); min-width: 0; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); overflow-wrap: anywhere; }
+.message-row.outbound .message-bubble { border-color: #91caff; background: #e6f4ff; }
+.message-bubble .ant-typography { min-width: 0; margin-bottom: 6px; white-space: pre-wrap; }
+.message-meta { font-size: 12px; }
+.message-composer { flex: 0 0 auto; padding: 14px 16px; border-top: 1px solid #f0f0f0; background: #fff; }
+.message-composer .ant-alert { margin-bottom: 12px; }
+.message-composer .ant-form-item { margin-bottom: 10px; }
+.message-pane-empty { display: grid; flex: 1; place-items: center; }
+.contact-list { margin-top: 24px; }
+
 .login-page { min-height: 100vh; min-height: 100dvh; display: flex; overflow: auto; background: linear-gradient(135deg, #f0f5ff, #f5f7fa); }
 .login-content { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 32px 16px; }
 .login-card { width: min(100%, 390px); box-shadow: 0 16px 48px rgba(22, 119, 255, .12); }
@@ -54,4 +86,11 @@ body { min-width: 320px; overflow-x: hidden; background: #f5f7fa; }
   .page-header h2 { font-size: 24px; }
   .ant-drawer-content-wrapper, .ant-modal { max-width: 100vw; }
   .ant-form-item { min-width: 0; }
+  .messages-page { padding: 12px; }
+  .messages-page .page-header { margin-bottom: 12px; }
+  .messages-workspace { display: block; height: calc(100dvh - 132px); min-height: 520px; }
+  .conversation-pane, .message-pane { width: 100%; }
+  .message-history { padding: 14px 10px; }
+  .message-bubble { max-width: 88%; }
+  .message-composer { padding: 10px 12px; }
 }

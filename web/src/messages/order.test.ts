@@ -21,7 +21,7 @@ function message(overrides: Partial<SMSMessage>): SMSMessage {
 }
 
 describe('SMS display ordering', () => {
-  it('matches the server keyset order by exact created time and stable id', () => {
+  it('reverses the server pages into stable chronological bubble order', () => {
     const outbound = message({})
     const inbound = message({
       id: 'msg_inbound012345678901234',
@@ -40,9 +40,9 @@ describe('SMS display ordering', () => {
     })
 
     expect(sortSMSMessagesForDisplay([outbound, older, inbound]).map((item) => item.id)).toEqual([
-      outbound.id,
-      inbound.id,
       older.id,
+      inbound.id,
+      outbound.id,
     ])
   })
 
@@ -63,10 +63,10 @@ describe('SMS display ordering', () => {
     ]
 
     expect(sortSMSMessagesForDisplay(ids.map((id) => message({ id, createdAt }))).map((item) => item.id)).toEqual([
-      'msg_a0000000000000000000',
-      'msg__0000000000000000000',
-      'msg_A0000000000000000000',
       'msg_-0000000000000000000',
+      'msg_A0000000000000000000',
+      'msg__0000000000000000000',
+      'msg_a0000000000000000000',
     ])
   })
 })
