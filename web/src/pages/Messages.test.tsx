@@ -48,6 +48,7 @@ function installApi(requests: Request[], options?: {
   allIneligible?: boolean
   unavailableRecent?: boolean
   historyError?: boolean
+  orderingRegression?: boolean
 }) {
   const address = options?.alpha ? 'Service_Notice' : remoteAddress
   vi.stubGlobal('fetch', vi.fn(async (request: Request) => {
@@ -65,7 +66,10 @@ function installApi(requests: Request[], options?: {
     if (url.pathname === `/api/v1/contacts/${contact.id}` && request.method === 'PUT') return json(contact)
     if (url.pathname === `/api/v1/contacts/${contact.id}` && request.method === 'DELETE') return json(null, 204)
     if (url.pathname === '/api/v1/message-conversations') {
-      const latest = sms(options?.deletedLine ? {
+      const latest = sms(options?.orderingRegression ? {
+        id: 'message_inbound_later_record', direction: 'inbound', body: '后持久化的入站',
+        createdAt: '2026-08-10T08:00:00.000Z', updatedAt: '2026-08-10T08:00:01.500Z',
+      } : options?.deletedLine ? {
         remoteAddress: address, direction: 'outbound', lineId: secondLine.id, body: '失败后重新编辑',
         status: 'failed', errorCode: 'SMS_TRANSPORT_FAILED', providerMessageId: '',
       } : { remoteAddress: address })
@@ -95,7 +99,17 @@ function installApi(requests: Request[], options?: {
         return json({ messages: [sms({ id: 'message_older_123456', body: '更早短信', createdAt: '2026-08-09T08:00:00Z', remoteAddress: address })], totalCount: 2, capacity: 10000, nearCapacity: false })
       }
       return json({
-        messages: [sms(options?.deletedLine ? {
+        messages: options?.orderingRegression ? [
+          sms({
+            id: 'message_inbound_later_record', direction: 'inbound', body: '后持久化的入站',
+            createdAt: '2026-08-10T08:00:00.000Z', updatedAt: '2026-08-10T08:00:01.500Z',
+          }),
+          sms({
+            id: 'message_outbound_first_record', operationId: 'operation_outbound_first', direction: 'outbound',
+            body: '先持久化的出站', status: 'sent', providerMessageId: 'provider-outbound-first',
+            createdAt: '2026-08-10T08:00:00.100Z', updatedAt: '2026-08-10T08:00:01.000Z', sentAt: '2026-08-10T08:00:01.000Z',
+          }),
+        ] : [sms(options?.deletedLine ? {
           remoteAddress: address, direction: 'outbound', lineId: secondLine.id, body: '失败后重新编辑',
           status: 'failed', errorCode: 'SMS_TRANSPORT_FAILED', providerMessageId: '',
         } : { remoteAddress: address })],
@@ -133,6 +147,21 @@ describe('Messages conversations', () => {
     const readRequest = requests.find((request) => new URL(request.url).pathname === '/api/v1/message-conversations/read-state')
     expect(readRequest?.method).toBe('PUT')
     await expect(readRequest?.clone().json()).resolves.toEqual({ remoteAddress, readThroughToken: 'read_token_1234567890' })
+  })
+
+  it('renders server record order when provider business time runs backward', async () => {
+    installMatchMedia(true)
+    const requests: Request[] = []
+    installApi(requests, { orderingRegression: true })
+    renderPage(<Messages />)
+
+    expect(await screen.findByText('后持久化的入站', { selector: '.conversation-preview' })).toBeInTheDocument()
+    const history = screen.getByLabelText('短信记录')
+    await waitFor(() => expect(history.querySelectorAll('.message-row')).toHaveLength(2))
+    const bubbles = Array.from(history.querySelectorAll('.message-row')).map((row) => row.textContent)
+    expect(bubbles).toHaveLength(2)
+    expect(bubbles[0]).toContain('先持久化的出站')
+    expect(bubbles[1]).toContain('后持久化的入站')
   })
 
   it('uses mobile list-detail-back navigation, loads older history, and keeps deletion behind the more menu and confirmation', async () => {

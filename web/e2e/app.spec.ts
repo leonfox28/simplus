@@ -133,7 +133,7 @@ async function installApi(page: Page, authenticated = false) {
           id: 'message_page_000000', operationId: 'operation_message_page_000000',
           direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: 'First page',
           status: 'received', providerMessageId: 'synthetic-provider-page-0', errorCode: '',
-          createdAt: '2026-08-07T00:19:00Z', updatedAt: '2026-08-07T00:19:00Z',
+          createdAt: '2026-08-07T00:18:00Z', updatedAt: '2026-08-07T00:20:00Z',
         },
         unreadCount: 1,
       }],
@@ -162,14 +162,29 @@ async function installApi(page: Page, authenticated = false) {
           direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: 'Second page',
           status: 'received', providerMessageId: 'synthetic-provider-second', errorCode: '',
           createdAt: '2026-08-06T00:00:00Z', updatedAt: '2026-08-06T00:00:00Z',
-        }] : Array.from({ length: 20 }, (_, index) => ({
-          id: `message_page_${String(index).padStart(6, '0')}`,
-          operationId: `operation_message_page_${String(index).padStart(6, '0')}`,
-          direction: 'inbound', lineId: line.id, remoteAddress: '+12025550123', body: index === 0 ? 'First page' : `Synthetic history ${index}`,
-          status: 'received', providerMessageId: `synthetic-provider-page-${index}`, errorCode: '',
-          createdAt: `2026-08-07T00:${String(19 - index).padStart(2, '0')}:00Z`,
-          updatedAt: `2026-08-07T00:${String(19 - index).padStart(2, '0')}:00Z`,
-        })),
+        }] : Array.from({ length: 20 }, (_, index) => {
+          const inboundLatest = index === 0
+          const outboundBeforeInbound = index === 1
+          const createdAt = inboundLatest
+            ? '2026-08-07T00:18:00Z'
+            : outboundBeforeInbound
+              ? '2026-08-07T00:19:00Z'
+              : `2026-08-07T00:${String(19 - index).padStart(2, '0')}:00Z`
+          return {
+            id: `message_page_${String(index).padStart(6, '0')}`,
+            operationId: `operation_message_page_${String(index).padStart(6, '0')}`,
+            direction: outboundBeforeInbound ? 'outbound' : 'inbound',
+            lineId: line.id,
+            remoteAddress: '+12025550123',
+            body: inboundLatest ? 'First page' : outboundBeforeInbound ? 'Outbound before inbound' : `Synthetic history ${index}`,
+            status: outboundBeforeInbound ? 'sent' : 'received',
+            providerMessageId: `synthetic-provider-page-${index}`,
+            errorCode: '',
+            createdAt,
+            updatedAt: inboundLatest ? '2026-08-07T00:20:00Z' : createdAt,
+            ...(outboundBeforeInbound ? { sentAt: createdAt } : {}),
+          }
+        }),
         totalCount: 21, capacity: 1000, nearCapacity: false,
         ...(second ? {} : { nextCursor: 'cursor_next', readThroughToken: `synthetic_read_token_${messageRequests}` }),
       })
@@ -219,7 +234,11 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()
   await page.getByText('短信', { exact: true }).click()
+  await expect(page.locator('.conversation-preview').first()).toHaveText('First page')
   await expect(page.getByLabel('短信记录').getByText('First page')).toBeVisible()
+  const desktopRecordBodies = await page.getByLabel('短信记录').locator('.message-row').allTextContents()
+  expect(desktopRecordBodies.at(-2)).toContain('Outbound before inbound')
+  expect(desktopRecordBodies.at(-1)).toContain('First page')
   await expect.poll(() => page.getByLabel('短信记录').evaluate((element) => (
     element.scrollTop + element.clientHeight >= element.scrollHeight - 1
   ))).toBe(true)
@@ -269,9 +288,13 @@ test('@mobile Drawer navigation has no overflow or unintended autofocus', async 
   const messagesDrawer = page.getByRole('dialog')
   await messagesDrawer.getByText('短信', { exact: true }).click()
   await expect(page.getByRole('button', { name: /\+12025550123/ })).toBeVisible()
+  await expect(page.locator('.conversation-preview').first()).toHaveText('First page')
   await page.getByRole('button', { name: /\+12025550123/ }).click()
   await expect(page.getByLabel('短信记录')).toBeVisible()
   await expect(page.getByText('First page')).toBeVisible()
+  const mobileRecordBodies = await page.getByLabel('短信记录').locator('.message-row').allTextContents()
+  expect(mobileRecordBodies.at(-2)).toContain('Outbound before inbound')
+  expect(mobileRecordBodies.at(-1)).toContain('First page')
   await page.getByRole('button', { name: '返回会话列表' }).click()
   await expect(page.getByRole('button', { name: /\+12025550123/ })).toBeVisible()
   await expectNoGlobalOverflow(page)

@@ -48,7 +48,7 @@ import {
 } from '@/api/generated/@tanstack/react-query.gen'
 import type { Contact, ManagedLine } from '@/api/generated/types.gen'
 import { PageHeader } from '@/components/Page'
-import { sortSMSMessagesForDisplay } from '@/messages/order'
+import { smsMessagesForDisplay } from '@/messages/order'
 import { smsStatusPresentation } from '@/messages/status'
 
 type ComposerValues = { body: string }
@@ -125,7 +125,7 @@ export default function Messages() {
     [conversationsQuery.data],
   )
   const messages = useMemo(
-    () => sortSMSMessagesForDisplay(messagesQuery.data?.pages.flatMap((page) => page.messages) ?? []),
+    () => smsMessagesForDisplay(messagesQuery.data?.pages.map((page) => page.messages) ?? []),
     [messagesQuery.data],
   )
   const contactByNumber = useMemo(() => new Map(contacts.map((contact) => [contact.phoneNumber, contact])), [contacts])

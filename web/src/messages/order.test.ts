@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SmsMessage as SMSMessage } from '@/api/generated/types.gen'
-import { sortSMSMessagesForDisplay } from './order'
+import { smsMessagesForDisplay } from './order'
 
 function message(overrides: Partial<SMSMessage>): SMSMessage {
   return {
@@ -21,7 +21,7 @@ function message(overrides: Partial<SMSMessage>): SMSMessage {
 }
 
 describe('SMS display ordering', () => {
-  it('reverses the server pages into stable chronological bubble order', () => {
+  it('reverses flattened newest-first server pages without consulting business time or IDs', () => {
     const outbound = message({})
     const inbound = message({
       id: 'msg_inbound012345678901234',
@@ -32,28 +32,36 @@ describe('SMS display ordering', () => {
       updatedAt: '2026-08-05T20:16:33.102Z',
       sentAt: undefined,
     })
-    const older = message({
+    const oldest = message({
       id: 'msg_older01234567890123456',
       operationId: 'operation-older0123456789',
       createdAt: '2026-08-05T20:16:25.999Z',
       updatedAt: '2026-08-05T20:17:00.000Z',
     })
 
-    expect(sortSMSMessagesForDisplay([outbound, older, inbound]).map((item) => item.id)).toEqual([
-      older.id,
-      inbound.id,
+    // The first page is newest. Inbound was persisted after outbound even
+    // though its provider-created time is earlier.
+    expect(smsMessagesForDisplay([[inbound, outbound], [oldest]]).map((item) => item.id)).toEqual([
+      oldest.id,
       outbound.id,
+      inbound.id,
     ])
   })
 
   it('does not mutate the API response array', () => {
-    const original = [message({}), message({ id: 'msg_second0123456789012345' })]
-    const sorted = sortSMSMessagesForDisplay(original)
-    expect(sorted).not.toBe(original)
-    expect(original[0]?.id).toBe('msg_0123456789abcdef012345')
+    const firstPage = [message({}), message({ id: 'msg_second0123456789012345' })]
+    const secondPage = [message({ id: 'msg_third01234567890123456' })]
+    const originalPages = [firstPage, secondPage]
+    const displayed = smsMessagesForDisplay(originalPages)
+    expect(displayed).not.toBe(firstPage)
+    expect(originalPages).toEqual([firstPage, secondPage])
+    expect(firstPage.map((item) => item.id)).toEqual([
+      'msg_0123456789abcdef012345',
+      'msg_second0123456789012345',
+    ])
   })
 
-  it('uses SQLite BINARY order for mixed-case and punctuation IDs at the same timestamp', () => {
+  it('preserves random-ID server sequence at the same timestamp', () => {
     const createdAt = '2026-08-05T20:16:26.295Z'
     const ids = [
       'msg_A0000000000000000000',
@@ -62,11 +70,11 @@ describe('SMS display ordering', () => {
       'msg_-0000000000000000000',
     ]
 
-    expect(sortSMSMessagesForDisplay(ids.map((id) => message({ id, createdAt }))).map((item) => item.id)).toEqual([
+    expect(smsMessagesForDisplay([ids.map((id) => message({ id, createdAt }))]).map((item) => item.id)).toEqual([
       'msg_-0000000000000000000',
-      'msg_A0000000000000000000',
-      'msg__0000000000000000000',
       'msg_a0000000000000000000',
+      'msg__0000000000000000000',
+      'msg_A0000000000000000000',
     ])
   })
 })

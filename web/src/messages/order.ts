@@ -1,12 +1,8 @@
 import type { SmsMessage as SMSMessage } from '@/api/generated/types.gen'
 
-export function sortSMSMessagesForDisplay(messages: readonly SMSMessage[]): SMSMessage[] {
-  return [...messages].sort((left, right) => {
-    const createdDifference = Date.parse(left.createdAt) - Date.parse(right.createdAt)
-    if (createdDifference !== 0) return createdDifference
-    // IDs are contractually ASCII. Relational comparison therefore follows
-    // the same byte/code-unit order as SQLite's default BINARY collation.
-    if (left.id === right.id) return 0
-    return left.id < right.id ? -1 : 1
-  })
+// Infinite-query pages and every page's messages are both newest-first. Keep
+// that authoritative server sequence intact while flattening, then reverse a
+// fresh array for oldest-first chat rendering.
+export function smsMessagesForDisplay(pages: readonly (readonly SMSMessage[])[]): SMSMessage[] {
+  return pages.flatMap((page) => page).reverse()
 }
