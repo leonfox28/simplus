@@ -28,3 +28,29 @@ Initialized Trellis and Codex integration, corrected core/web package resolution
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 完成前端与通信重构
+
+**Date**: 2026-08-10
+**Task**: 完成前端与通信重构
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+以 Vite、React Router、直接使用 Ant Design 和 TanStack Query 替换 Umi/Pro 前端运行时，新增 HTTP 权威快照加鉴权 SSE 失效同步，修复首次配置与页头布局，并按产品决定隐藏暂缓的 eUICC 界面；完成测试、构建和本地容器验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc02810` | (see git log) |
+| `588f6c4` | (see git log) |
+| `83feb39` | (see git log) |
+| `6a9ceef` | (see git log) |
+| `8527529` | (see git log) |
+
+### Status
+
+[OK] **Completed**
