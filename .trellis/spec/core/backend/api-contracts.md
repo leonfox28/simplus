@@ -73,8 +73,9 @@ is the shared invalidation stream.
   address and the opaque read-through token returned by that recipient's
   newest message page.
 - `GET /api/v1/calls?limit={1..50}&cursor={opaque}`.
-- Responses contain `messages` or `calls` in
-  `(created_at_unix_ms DESC, stable_id DESC)` order and optional `nextCursor`.
+- Message responses are newest-first by first-successful local persistence
+  sequence. Call responses remain newest-first by
+  `(created_at_unix_ms DESC, call_id DESC)`. Both may contain `nextCursor`.
 - `GET /api/v1/events` returns authenticated `text/event-stream` named events
   `update` or `resync` with `RealtimeEvent` JSON data.
 - `RealtimeEvent` is `{topics: RealtimeTopic[], attention?:
@@ -85,11 +86,14 @@ is the shared invalidation stream.
 - Omitted `limit` means 20. Explicit `limit=0`, an explicitly empty cursor,
   malformed base64url, unsupported cursor version, or a cursor longer than 256
   bytes is invalid rather than omitted.
-- Cursors are opaque versioned base64url values built only from UTC Unix
-  milliseconds and a stable business ID. Clients return them byte-for-byte and
-  never inspect them.
+- Cursors are opaque, versioned, length-bounded base64url values. Calls use v1
+  UTC Unix milliseconds plus call ID. SMS responses use an SMS-kind v2 positive
+  record sequence plus message ID; SMS temporarily accepts v1 only when the
+  boundary message still exists and its time/filter match. Calls reject v2.
+  Clients return cursors byte-for-byte and never inspect them.
 - Stores fetch `limit+1`; they return at most `limit` records and emit a cursor
-  from the last returned row only when another row exists.
+  from the last returned row only when another row exists. SMS v2 uses strict
+  sequence `<`, so deletion of that boundary does not invalidate the page.
 - Remote addresses are compared exactly and never normalized. Global,
   remote-only, and paired Line + remote message reads are valid; Line-only or
   an explicitly empty filter is invalid.
@@ -121,6 +125,8 @@ is the shared invalidation stream.
 | `limit` absent | 20 |
 | `limit < 1` or `limit > 50`, including explicit zero | `400 PAGE_LIMIT_INVALID` |
 | cursor present but empty/malformed/version/ID invalid | `400 PAGE_CURSOR_INVALID` |
+| SMS v2 passed to Calls, or sequence/ID mismatch while boundary exists | `400 PAGE_CURSOR_INVALID` |
+| legacy SMS v1 boundary missing or outside the exact filter | `400 PAGE_CURSOR_INVALID` |
 | remote address only | cross-Line recipient history |
 | Line + remote address | exact legacy Line history |
 | Line only or any explicitly empty filter | `400 MESSAGE_FILTER_INVALID` |
@@ -134,8 +140,8 @@ is the shared invalidation stream.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: read 20 messages, use the returned cursor unchanged, and receive the
-  next strictly older records with no duplicate at an equal timestamp.
+- Good: read 20 messages, use the returned SMS v2 cursor unchanged, delete the
+  boundary if desired, and still receive the next strictly older sequences.
 - Base: a background VoWiFi change publishes topics only; clients refetch the
   current HTTP snapshot silently.
 - Bad: offset pagination while inserts arrive can skip/duplicate rows; sending
@@ -143,8 +149,10 @@ is the shared invalidation stream.
 
 ### 6. Tests Required
 
-- Domain cursor round-trip plus malformed, version, length, time, and ID cases.
-- Store tests for equal timestamps, page boundaries, remote-only cross-Line
+- Domain cursor round-trip plus malformed, kind, version, length, sequence,
+  time, ID, legacy compatibility, and Calls-isolation cases.
+- Store tests for equal/reversed timestamps, page boundaries, boundary deletion,
+  remote-only cross-Line
   history, conversation isolation, no duplicates/skips, unread watermark
   races/idempotency/deletion, and index migration Down/reopen.
 - HTTP tests for omitted versus explicit empty/zero parameters, exact filters,
@@ -158,14 +166,12 @@ is the shared invalidation stream.
 ### 7. Wrong vs Correct
 
 ```go
-// Wrong: cursor omission and explicit invalid input collapse to the same value.
-limit := params.Limit.Or(20)
+// Wrong: SMS reconstructs persistence order from provider/local business time.
+ORDER BY created_at_unix_ms DESC, message_id DESC
 
-// Correct: bind/query presence first, then normalize and map exact errors.
-limit, err := pagination.NormalizeLimit(boundLimit)
-if errors.Is(err, pagination.ErrLimitInvalid) {
-    writeAPIError(w, http.StatusBadRequest, "PAGE_LIMIT_INVALID", false)
-}
+// Correct: SMS uses its persisted monotonic fact and SMS-only cursor.
+ORDER BY record_sequence DESC
+nextCursor, err := pagination.EncodeSMS(boundary)
 ```
 
 ## Bounded Internal Unix Protocols

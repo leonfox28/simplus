@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-10-sms-conversation-ordering/research/repository-evidence.md","reason":"Review against the confirmed root cause and approved sequence/cursor design rather than timestamp heuristics."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Check lossless v7/v8 migration, unread foreign keys, AUTOINCREMENT, and index/query alignment."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Check SMS cursor versioning, Calls isolation, OpenAPI/generated consistency, errors, and SSE privacy."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check concurrency, rollback/reopen, failure-path, and broad backend evidence quality."}
+{"file":".trellis/spec/web/frontend/hook-guidelines.md","reason":"Check server-owned ordering, infinite pages, scroll anchors, refetch, and automatic read-state behavior."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Check Vitest/Playwright coverage across desktop/mobile without real communication."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Audit the diff for private live data, raw troubleshooting evidence, screenshots, and identities."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Confirm no real SMS, RF, modem-persistent, or HIL action was used as a gate."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the record sequence end to end and detect competing timestamp ordering owners."}

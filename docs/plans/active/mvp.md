@@ -37,6 +37,22 @@
 | 26：容器化生产部署 | 三镜像权限边界、Compose 生命周期、精确 USB/sysfs 映射、bridge 内 netd 和本地开发不容器化 |
 | 27：显式前端运行时与后端权威通信 | Vite/React Router/直接 Ant Design/TanStack Query、生成客户端、游标分页与有界 SSE 失效流 |
 | 28：收件人短信会话 | 跨 Line 收件人会话、持久未读水位、桌面双栏与手机主从工作区 |
+| 29：短信首次持久化顺序 | messages v8 record sequence、SMS v2 cursor、历史修复和服务端顺序消费 |
+
+## Milestone 29：短信首次持久化顺序（已完成）
+
+- [x] 接受 [`0024`](../../decisions/0024-sms-record-sequence-ordering.md)，把短信业务时间与
+  Simplus 首次持久化顺序分开；Calls 的 created-time keyset 保持不变；
+- [x] messages schema v8 增加全局 AUTOINCREMENT record sequence，并按入站 `updatedAt`、
+  出站 `createdAt` 回填 v7 历史；Up/Down 保留业务消息、unread marker、外键和水位；
+- [x] 全局、remote-only、Line + remote、会话摘要与最近出站 Line 统一使用 sequence，
+  replay、状态更新和删除不重排或复用序号；
+- [x] SMS 响应改发 kind/version 隔离的 v2 sequence cursor；仍存在且 scope 一致的 v1
+  boundary 可过渡映射，删除后的 v2 boundary 继续分页，Calls 明确只接受 v1；
+- [x] Web 只反转拼接后的服务端 newest-first 页面，不再按 `createdAt/message ID` 推断；
+  Vitest 与 synthetic desktop/mobile Playwright 覆盖业务时间倒退而本地后持久化的场景；
+- [x] 全部验证使用临时 SQLite 与合成 fixture；未执行真实短信、RF、Host VoWiFi、模组
+  写入或 HIL。
 
 ## Milestone 28：收件人短信会话（已完成）
 
@@ -71,9 +87,9 @@
 - [x] 让 `@hey-api/openapi-ts` 从 OpenAPI 生成 Fetch SDK、TypeScript 类型、Zod
   schema 和 Query keys/options，由唯一手写 runtime 负责同源 cookie、CSRF、
   取消/超时、稳定错误与少量领域跨字段 guard；页面不直接 fetch 或复制公共 payload；
-- [x] 为 Messages/Calls 实现 `(createdAt, stable ID)` opaque keyset pagination，
-  Messages 会话 filter 成对使用 Line 与 remote address，并补齐匹配 SQLite 索引、
-  migration Down 与边界/并发/reopen 测试；
+- [x] 当时为 Messages/Calls 实现 `(createdAt, stable ID)` opaque keyset pagination；
+  Messages 的排序现已由 [`0024`](../../decisions/0024-sms-record-sequence-ordering.md) 改为
+  首次持久化 sequence，Calls 仍保持原契约；
 - [x] 增加同源鉴权、有界且不阻塞发布者的 SSE 失效/attention 流；HTTP 继续承载
   权威 snapshot 和 mutation，断线或丢失 hint 通过 resync + active query refetch
   收敛，只有新短信和来电产生明显页面内提示；

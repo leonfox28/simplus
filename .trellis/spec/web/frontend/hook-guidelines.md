@@ -65,7 +65,11 @@ const query = useInfiniteQuery({
   grouping the currently loaded message page. Only the newest remote-only page
   can supply `readThroughToken`; return that token unchanged in the generated
   read-state mutation and never derive a watermark from message time/ID.
-- Flatten pages for display without mutating generated data.
+- Message pages and messages within each page arrive newest-first by the
+  backend's private persistence sequence. Flatten pages in server order, then
+  reverse a fresh array for oldest-first bubbles. Never sort by `createdAt`,
+  message ID, status, or any reconstructed client key, and never mutate
+  generated data.
 - Recipient history renders oldest-to-newest, starts at the latest message,
   preserves the visible scroll anchor when older pages are prepended, and
   follows a newly arrived message only when the reader was already near the

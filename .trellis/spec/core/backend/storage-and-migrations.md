@@ -64,14 +64,21 @@ old rows, reopens, and verifies the message-v4/v5 and Line-v21/v22 upgrades;
 it also checks schema tampering, swapped datasets, symlinks, hard links,
 permissions, and foreign-key integrity.
 
-Messages v6 and Calls v3 add keyset-pagination indexes ordered by
-`(created_at_unix_ms DESC, message_id/call_id DESC)`. The Messages conversation
-index prefixes that tuple with `(line_id, remote_address)`. Store methods must
-use the identical tuple and strict `<` boundary, query `limit+1`, and construct
-the next cursor from the final returned record. Migration tests must downgrade,
-prove every new index is absent, preserve rows, reopen through `OpenSet`, and
-prove the indexes are recreated. Do not substitute offsets or timestamp-only
-cursors; equal timestamps require the stable-ID tiebreaker.
+Calls v3 adds a keyset-pagination index ordered by
+`(created_at_unix_ms DESC, call_id DESC)`. Calls store methods must use the
+identical tuple and strict `<` boundary, query `limit+1`, and construct the next
+cursor from the final returned record. Do not substitute offsets or
+timestamp-only cursors; equal call timestamps require the stable-ID tiebreaker.
+
+Messages v8 replaces the older created-time page indexes with
+`record_sequence INTEGER PRIMARY KEY AUTOINCREMENT`, plus
+`(remote_address, record_sequence DESC)` and
+`(line_id, remote_address, record_sequence DESC)`. Global, recipient, paired
+Line/recipient, conversation-latest, conversation order, and last outbound
+Line reads all use sequence. New inserts let SQLite allocate the sequence;
+replay, status changes, and deletion never update or reuse it. Pages use strict
+`record_sequence < ?`, query `limit+1`, and return the last included sequence
+in an SMS v2 cursor, so deleting the boundary row does not break continuation.
 
 Messages v7 adds `(remote_address, created_at_unix_ms DESC, message_id DESC)`
 for recipient history and summaries plus `sms_message_unread`. Each newly
@@ -83,6 +90,17 @@ message deletion cascades markers, and read-state deletion is bounded by exact
 remote address plus an opaque token's unread ID/message boundary. The migration
 creates an empty ledger so v6 history starts read; Down removes read state and
 the remote index without rebuilding or deleting `sms_messages`.
+
+The v8 rebuild preserves that unread table and its explicit AUTOINCREMENT IDs
+while changing `message_id` from the table primary key to a UNIQUE business
+key referenced by the existing foreign key. v7 history is assigned explicit
+sequence values in ascending recoverable persistence order:
+`CASE direction WHEN 'inbound' THEN updated_at_unix_ms ELSE created_at_unix_ms END`,
+then `created_at_unix_ms, message_id`. Up and Down run with foreign keys disabled
+only around their explicit transaction, restore them afterward, preserve all
+messages and unread markers, and must pass `foreign_key_check` plus Down/re-Up
+tests. Never sort future SMS records by this backfill expression; it exists only
+to recover v7 history.
 
 Never edit an already released migration to make a new checkout pass. Add a
 new migration and a regression from the prior version.

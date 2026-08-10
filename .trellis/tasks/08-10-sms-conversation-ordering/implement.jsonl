@@ -1,0 +1,13 @@
+{"file":".trellis/tasks/08-10-sms-conversation-ordering/research/repository-evidence.md","reason":"Provides the sanitized root-cause trace, current cursor/storage contracts, and approved implementation shape."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Defines root Go package ownership, OpenAPI-first boundaries, and mandatory backend pre-development checks."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Owns messages dataset migrations, keyset indexes, transactions, foreign keys, and sensitive persistence rules."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Owns opaque cursor compatibility, OpenAPI generation, HTTP errors, and SSE authority boundaries."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Defines focused-to-broad Go validation and migration/restart test expectations."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Defines generated Query ownership and the React page boundary."}
+{"file":".trellis/spec/web/frontend/hook-guidelines.md","reason":"Owns infinite-query pagination, server ordering, scroll anchoring, and SSE invalidation behavior."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Defines Vitest, Chromium E2E, generated drift, and responsive regression checks."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Defines canonical ADR/architecture/active-plan ownership for the ordering correction."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Prevents live message, Line, identity, screenshot, and troubleshooting evidence from entering tracked artifacts."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Constrains the approved local Compose rebuild and health verification without widening privileges."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Keeps all validation synthetic and prevents real SMS/RF/HIL actions during deployment checks."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Ensures one ordering fact flows consistently from SQLite through cursor/service/API to Web."}

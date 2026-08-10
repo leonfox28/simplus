@@ -96,7 +96,9 @@ production-build checks.
   attention.
 - Messages/Calls preserve opaque cursor order and stop at absent `nextCursor`;
   recipient summaries come from the backend and message bubbles display loaded
-  pages in stable chronological order.
+  pages by reversing the flattened server sequence. Regressions use a provider
+  `createdAt` that runs backward relative to persistence to prove the browser
+  does not reclaim ordering ownership.
 - Loading, empty, error, disabled, retry, and mutation-failure states are
   visible.
 - Desktop and mobile presentations expose the same essential record data and
