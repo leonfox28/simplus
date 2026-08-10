@@ -36,6 +36,29 @@
 | 25：strongSwan 插件发布边界 | 同仓库独立 GPL 组件、锁定 Debian 输入、独立 `.deb`、对应源码和隔离 CI |
 | 26：容器化生产部署 | 三镜像权限边界、Compose 生命周期、精确 USB/sysfs 映射、bridge 内 netd 和本地开发不容器化 |
 | 27：显式前端运行时与后端权威通信 | Vite/React Router/直接 Ant Design/TanStack Query、生成客户端、游标分页与有界 SSE 失效流 |
+| 28：收件人短信会话 | 跨 Line 收件人会话、持久未读水位、桌面双栏与手机主从工作区 |
+
+## Milestone 28：收件人短信会话（已完成）
+
+- [x] 接受 [`0023`](../../decisions/0023-recipient-sms-conversations.md)，以 exact remote
+  address 作为产品会话身份，跨 Line 合并历史，同时保留每条消息的实际 Line 与显式发送
+  Line；不猜测本地号/国际号等价；
+- [x] messages schema v7 增加 remote-address keyset 索引和 `AUTOINCREMENT` unread
+  marker ledger；首次入站 message + marker 同 transaction，duplicate 不重复计数，删除
+  级联，v6 旧历史升级后自然已读，Down/再 Up 保留业务短信；
+- [x] 增加后端会话摘要分页、remote-only 历史与 snapshot read-through token；旧全局与
+  Line + remote 查询保持兼容，Line-only fail closed，并覆盖同毫秒、跨 Line、并发新入站、
+  重复/乱序 token、删除和 reopen；
+- [x] OpenAPI、Go handler 与生成 Web Query 同步提供会话 list/read-state；鉴权 HTTP/SQLite
+  始终权威，既有 `messages + sms.received` SSE 只失效 active query，不携带通信数据或未读；
+- [x] 短信页改为桌面双栏和手机 list→detail→back，提供联系人名称/号码、摘要/角标、
+  跨 Line 气泡、状态、历史 Line 回退、分页、显式 Line composer、字母地址只读、failed
+  重新编辑、单条二次确认删除、临时新会话和联系人 CRUD；
+- [x] 只有 detail 可见、页面前台且最新 HTTP snapshot 成功渲染后才提交其 opaque token；
+  不自动重发、不 optimistic append、不在最近 Line 不可用时静默回退；
+- [x] 以临时 SQLite、httptest、Vitest 与 synthetic desktop/mobile Playwright 验证迁移、
+  分页、未读 race、HTTP contract、响应式主路径和无全局横向溢出；未执行真实短信、RF、
+  Host VoWiFi、模组写入或 HIL。
 
 ## Milestone 27：显式前端运行时与后端权威通信（已完成）
 

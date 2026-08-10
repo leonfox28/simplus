@@ -33,7 +33,7 @@ co-located with source and use Testing Library for visible behavior.
   navigation, desktop Sider, mobile Drawer, and logout failure/success.
 - Pages: loading/error/unavailable/success states, form/action behavior,
   candidate freshness, mutation invalidation, and responsive rendering.
-- Pure feature logic: message ordering/conversations/status, call media cleanup,
+- Pure feature logic: message ordering/status, call media cleanup,
   and Mihomo transforms.
 
 Prefer queries by role, accessible name, label, or visible text. Use test IDs
@@ -94,7 +94,9 @@ production-build checks.
 - Pages use generated Query/SDK contracts and do not call Fetch/EventSource.
 - HTTP remains authoritative; SSE only invalidates/refetches and carries generic
   attention.
-- Messages/Calls preserve opaque cursor order and stop at absent `nextCursor`.
+- Messages/Calls preserve opaque cursor order and stop at absent `nextCursor`;
+  recipient summaries come from the backend and message bubbles display loaded
+  pages in stable chronological order.
 - Loading, empty, error, disabled, retry, and mutation-failure states are
   visible.
 - Desktop and mobile presentations expose the same essential record data and

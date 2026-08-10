@@ -73,6 +73,17 @@ prove every new index is absent, preserve rows, reopen through `OpenSet`, and
 prove the indexes are recreated. Do not substitute offsets or timestamp-only
 cursors; equal timestamps require the stable-ID tiebreaker.
 
+Messages v7 adds `(remote_address, created_at_unix_ms DESC, message_id DESC)`
+for recipient history and summaries plus `sms_message_unread`. Each newly
+inserted inbound message creates one unread row in the same transaction;
+duplicate/replayed inbound sources do not. `unread_id INTEGER PRIMARY KEY
+AUTOINCREMENT` is a separate arrival order because millisecond message time and
+random IDs cannot safely watermark concurrent arrivals. Counts are derived,
+message deletion cascades markers, and read-state deletion is bounded by exact
+remote address plus an opaque token's unread ID/message boundary. The migration
+creates an empty ledger so v6 history starts read; Down removes read state and
+the remote index without rebuilding or deleting `sms_messages`.
+
 Never edit an already released migration to make a new checkout pass. Add a
 new migration and a regression from the prior version.
 

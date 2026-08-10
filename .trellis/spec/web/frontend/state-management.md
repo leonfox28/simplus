@@ -6,6 +6,10 @@
 
 - The Go API and SQLite are authoritative for persistent Modem, Line, Message,
   Call, notification, eUICC, VoWiFi, and Mihomo state.
+- SMS conversation identity, summaries, and unread markers are backend-owned.
+  The browser keeps only the selected exact remote address and submits a
+  server-issued snapshot token after visible detail renders; it never derives
+  unread counts by grouping cached messages.
 - TanStack Query owns replaceable HTTP snapshots, loading/error metadata, and
   generated query keys. It is not an offline database.
 - `BootstrapGate` owns setup/session routing; only a protected administrator

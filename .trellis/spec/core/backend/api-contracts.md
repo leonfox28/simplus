@@ -64,8 +64,14 @@ is the shared invalidation stream.
 
 ### 2. Signatures
 
-- `GET /api/v1/messages?limit={1..50}&cursor={opaque}`; optional conversation
-  filter requires both `lineId` and `remoteAddress`.
+- `GET /api/v1/messages?limit={1..50}&cursor={opaque}`; optional exact
+  `remoteAddress` returns one recipient across Lines, while optional `lineId`
+  is valid only together with `remoteAddress` for the legacy exact-Line view.
+- `GET /api/v1/message-conversations?limit={1..50}&cursor={opaque}` returns
+  recipient summaries ordered by their last message tuple.
+- `PUT /api/v1/message-conversations/read-state` accepts an exact remote
+  address and the opaque read-through token returned by that recipient's
+  newest message page.
 - `GET /api/v1/calls?limit={1..50}&cursor={opaque}`.
 - Responses contain `messages` or `calls` in
   `(created_at_unix_ms DESC, stable_id DESC)` order and optional `nextCursor`.
@@ -84,8 +90,20 @@ is the shared invalidation stream.
   never inspect them.
 - Stores fetch `limit+1`; they return at most `limit` records and emit a cursor
   from the last returned row only when another row exists.
-- Conversation fields are paired and compared exactly; the server does not
-  trim or normalize a cursor/filter into another request.
+- Remote addresses are compared exactly and never normalized. Global,
+  remote-only, and paired Line + remote message reads are valid; Line-only or
+  an explicitly empty filter is invalid.
+- A remote-only newest page may return an opaque read-through token derived
+  from the same SQLite snapshot. It contains no address or body. Marking read
+  deletes only that remote address's unread markers at or below the token's
+  monotonic boundary; a later inbound marker is never cleared by an old token.
+- Conversation summaries contain the last message, durable unread count, and
+  optional most recent outbound Line. Contacts remain a separate browser join.
+- Generated query binding can reject malformed pagination before the operation
+  handler runs. Every new cursor-paginated path must be added to the centralized
+  pagination-parameter error classifier so malformed/empty `limit` and
+  `cursor` still map to `PAGE_LIMIT_INVALID` / `PAGE_CURSOR_INVALID`, not the
+  generic `API_REQUEST_INVALID` fallback.
 - SSE is advisory and privacy-bounded. It carries topic/attention metadata, not
   resource records, message bodies, addresses, identities, or secrets.
 - Every subscriber first receives `resync` for all topics. A slow subscriber's
@@ -103,7 +121,11 @@ is the shared invalidation stream.
 | `limit` absent | 20 |
 | `limit < 1` or `limit > 50`, including explicit zero | `400 PAGE_LIMIT_INVALID` |
 | cursor present but empty/malformed/version/ID invalid | `400 PAGE_CURSOR_INVALID` |
-| only one message conversation field present/empty | `400 MESSAGE_FILTER_INVALID` |
+| remote address only | cross-Line recipient history |
+| Line + remote address | exact legacy Line history |
+| Line only or any explicitly empty filter | `400 MESSAGE_FILTER_INVALID` |
+| read token malformed or mismatched | `400 MESSAGE_READ_STATE_INVALID` |
+| read boundary message deleted | `404 MESSAGE_READ_BOUNDARY_NOT_FOUND` |
 | no live administrator session | `401 AUTH_SESSION_UNAUTHORIZED` |
 | instance not ready | 409 typed `ApiError` |
 | trusted-LAN authority invalid | 421 typed `ApiError` |
@@ -122,10 +144,12 @@ is the shared invalidation stream.
 ### 6. Tests Required
 
 - Domain cursor round-trip plus malformed, version, length, time, and ID cases.
-- Store tests for equal timestamps, page boundaries, conversation isolation,
-  no duplicates/skips, cancellation, and index migration Down/reopen.
+- Store tests for equal timestamps, page boundaries, remote-only cross-Line
+  history, conversation isolation, no duplicates/skips, unread watermark
+  races/idempotency/deletion, and index migration Down/reopen.
 - HTTP tests for omitted versus explicit empty/zero parameters, exact filters,
-  stable JSON errors, auth/trusted-LAN, and next-cursor behavior.
+  stable JSON errors, auth/trusted-LAN, next-cursor behavior, and generated
+  binding failures on every paginated route before its handler is entered.
 - Hub/SSE tests for initial resync, normalized topics, privacy, backpressure,
   heartbeat, session expiry, write deadlines, and cancellation.
 - Application/background tests proving durable changes publish the correct

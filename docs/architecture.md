@@ -142,9 +142,13 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
   路径、拓扑、命令或诊断材料，也不构成业务真相源；客户端只失效当前活跃 query，
   再经 HTTP 取得权威快照，慢连接和丢失 hint 不得阻塞 mutation、后台同步或造成
   无限队列；
-- Messages 与 Calls 使用按 `(createdAt, stable ID)` 稳定倒序的 opaque keyset cursor；
-  Messages 会话查询必须同时提供 Line 与 remote address。游标不含通信内容或身份，
-  前端只在当前 infinite query 生命周期内使用它；
+- Messages 与 Calls 使用按 `(createdAt, stable ID)` 稳定倒序的 opaque keyset cursor。
+  短信产品会话只以 exact remote address 标识并跨 Line 合并；全局、remote-only 以及兼容
+  的 Line + remote 查询都由匹配索引支持，Line-only 继续拒绝。每条消息仍保存和展示
+  实际 Line，游标不含通信内容或身份；
+- 短信会话摘要由后端分页返回最后消息、持久未读数和最近出站 Line。浏览器只有在会话
+  detail 实际可见、页面前台且 remote-only 最新页成功渲染后，才原样提交该 HTTP snapshot
+  的 opaque read-through token；联系人只在 Web 以 exact 号码关联名称，不拥有会话身份；
 - 登录、基础初始化以及导航中的模组、线路、短信、语音、Mihomo、通知和系统设置页面
   使用同一套直接 Ant Design 视觉语言；桌面以 Table/Sider 为主，手机以 Card/List 与
   Drawer 为主，宽表只在自身容器滚动，加载、空、错误、部分失败和不可用原因明确可见；
@@ -258,11 +262,12 @@ Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独�
 
 ```text
 modem/IMS worker -> bounded typed read -> simplusd
-    -> persist raw/decoded message
+    -> transactionally persist raw/decoded message + unread marker
     -> confirm persistence
     -> delete/ack modem copy when applicable
     -> bounded messages invalidation/attention
-    -> active Web query refetches authoritative HTTP snapshot
+    -> active Web summary/history queries refetch authoritative HTTP snapshots
+    -> visible detail submits its snapshot read-through token
 ```
 
 Simulator 提供固定 welcome 入站消息；Host VoWiFi worker 则解析 SIP MESSAGE、network→MS RP-DATA 和 SMS-DELIVER，包括数字号码与 GSM7 字母型 TP-Originating-Address。后台执行有界同步：单段消息先落库再发送新的 SIP MESSAGE/RP-ACK；multipart 每片先进入持久 spool 再独立确认，完整且唯一的组才解码为一条可见消息。控制面重启后可继续组装，ACK 失败会保留已落库记录并重试，引用号复用导致的歧义组 fail closed。
@@ -282,6 +287,9 @@ Web -> emergency/number validation -> modem worker
 当前代码使用五个 SQLite 数据库和独立录音目录。这不是 MVP 必须维持的领域边界，但立即合库会延迟核心功能，因此：
 
 - 当前 migration 和数据库继续工作；
+- messages v7 使用 `(remote_address, created_at_unix_ms DESC, message_id DESC)` 支持跨 Line
+  历史和摘要；`sms_message_unread` 以 `AUTOINCREMENT` 到达序号记录新 schema 生效后的
+  首次入站。计数从 marker 派生，message 删除级联 marker，旧历史升级时 ledger 为空；
 - core 数据库保存 Host VoWiFi `desired_active`，但不保存网络运行事实或鉴权材料；
 - 新表放到语义最接近的现有库；
 - 不新增 dataset identity、备份协议或跨库事务框架；
@@ -306,6 +314,10 @@ Web -> emergency/number validation -> modem worker
 14. 浏览器 mutation 和权威快照只走鉴权 HTTP；SSE 只能发送有界失效/attention hint，慢订阅者不得阻塞业务写入。
 15. 公共浏览器 operation、payload 结构和 query identity 由 OpenAPI 生成边界拥有；页面不得直接 fetch 或另建 payload 契约。
 16. Messages/Calls 分页必须使用与 SQLite 索引一致的 `(createdAt, stable ID)` keyset 顺序，不能退化为 offset。
+17. 短信会话只按 exact remote address 跨 Line 合并；Line 仍是每条消息的事实与发送时的
+    显式身份，最近 Line 不可用时不得静默切换。
+18. 未读只能由首次入站持久化在 messages 数据集内原子创建 marker；已读只能使用成功
+    显示的 HTTP snapshot opaque 水位清除不晚于它的 marker，SSE 不承载未读真相。
 
 这些规则应优先由类型、测试和小型检查器强制执行，而不是在多份文档中重复描述。
 

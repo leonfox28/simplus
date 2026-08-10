@@ -1,0 +1,15 @@
+{"file":".trellis/tasks/08-10-sms-conversation-redesign/research/repository-evidence.md","reason":"Current Messages/API/storage evidence and the approved recipient-centric/unread design implications."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Keep messaging ports narrow, preserve Line identity and uncertain-send fail-closed behavior."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"OpenAPI-first HTTP, keyset pagination, stable errors, authenticated mutations and privacy-bounded SSE."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Messages dataset ownership, Goose Up/Down rules, keyset indexes and real old-schema migration tests."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Required co-located store/application/httptest coverage and deterministic no-HIL validation ladder."}
+{"file":".trellis/spec/web/frontend/directory-structure.md","reason":"Generated API ownership and placement of routed page, page-local components and feature transforms."}
+{"file":".trellis/spec/web/frontend/component-guidelines.md","reason":"Direct Ant Design composition, responsive/accessibility rules, destructive confirmation and explicit unavailable states."}
+{"file":".trellis/spec/web/frontend/hook-guidelines.md","reason":"Generated Query/infinite-query/mutation patterns, no mutation retry and SSE invalidation ownership."}
+{"file":".trellis/spec/web/frontend/state-management.md","reason":"HTTP/SQLite authority, local-only drafts/selections, mutation invalidation and advisory SSE semantics."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Generated TypeScript/Zod contracts and typed placement for reusable message projections."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Vitest/Playwright desktop-mobile expectations, generated drift and synthetic fixture constraints."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Run the declared OpenAPI generation path and keep generated outputs in drift verification."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"ADR, architecture and sole active-plan ownership for the durable conversation identity change."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace unread marker/watermark and conversation summary formats across SQLite, service, OpenAPI, Query and UI."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse shared pagination/status/query patterns instead of introducing parallel implementations."}

@@ -1,6 +1,6 @@
 # Simplus 当前开发交接
 
-> 更新：2026-08-07
+> 更新：2026-08-10
 >
 > 状态：V1 管理面、Vite/React Query 前端、持久模组/线路层、Host VoWiFi 与 SMS over IMS 纵切已完成；生产 Docker Compose 已在 Debian 13 开发 VM 完成三镜像构建、隔离 smoke、真实模组发现、Mihomo/Host VoWiFi 和单段自号码短信回环 HIL，clean-VM 生命周期验收尚待完成。
 
@@ -42,7 +42,9 @@
 
 ### Simulator 业务纵切
 
-- 短信 GSM7/UCS-2、长短信、persist-before-ACK、幂等发送、会话视图和联系人；
+- 短信 GSM7/UCS-2、长短信、persist-before-ACK、幂等发送，以及按 exact remote address
+  跨 Line 合并的会话工作区；新入站在 messages SQLite 内原子创建持久 unread marker，
+  visible detail 只用成功 HTTP snapshot 的 opaque 水位标记已读，刷新和重启不丢失；
 - 电话呼入/呼出/接听/拒绝/挂断/DTMF、紧急号码前置拒绝和通话历史；
 - 浏览器数字音频 fixture；
 - 可拔插 eUICC 的已安装 Profile 列表、切换确认和重启持久化；
@@ -66,7 +68,7 @@
 - `simplus-netd` 独占 Mihomo、namespace、路由、nftables、strongSwan 和 XFRM 生命周期；
 - Host VoWiFi 已完成真实 ePDG/IMS 注册、持续 keepalive、连续提前刷新、有界重连、停用清理和服务恢复验证；
 - Web/API 返回阶段、在线状态、出口、注册时间、下次刷新、稳定错误码，以及 IMS 明确授权时从 `P-Associated-URI` 提取的 E.164 手机号；无法确认时返回空值，重连或停用时清空，不返回原始 IMPU、内部地址、进程、SPI、P-CSCF 或鉴权材料。
-- Host VoWiFi worker 已实现条件 `+g.3gpp.smsip` 注册、binary SIP MESSAGE、RP-DATA/RP-ACK/RP-ERROR、REGISTER `P-Associated-URI` 身份选择、`In-Reply-To`/RP reference transaction 关联和类型化 `simplus-netd` 短信 API；现有短信历史页直接复用该 transport；
+- Host VoWiFi worker 已实现条件 `+g.3gpp.smsip` 注册、binary SIP MESSAGE、RP-DATA/RP-ACK/RP-ERROR、REGISTER `P-Associated-URI` 身份选择、`In-Reply-To`/RP reference transaction 关联和类型化 `simplus-netd` 短信 API；收件人会话页直接复用同一 transport-neutral 消息记录；
 - multipart 入站使用 SQLite 分片 spool：每片落库后独立 RP-ACK，十分钟内唯一完整组才成为可见消息，并已用关闭/重开数据库的 fixture 验证恢复；后台新落库消息通过 SSE 失效提示令活跃短信查询重新读取 HTTP 权威快照，不要求用户轮询刷新浏览器；
 - 出站请求收齐各段 SIP 最终响应即返回，不等待 RP 报告；SIP 已接受时带 provider ID 持久化为 `unconfirmed`，后台取得关联 RP-ACK 后才异步提升为 `sent`，报告缺失、响应未知和 multipart 部分拒绝均不自动重发。入站只有业务数据库持久化后才发送 RP-ACK；普通成功 SMS-DELIVER-REPORT 使用带空 TP-PI 的两字节 TPDU，不虚构 PID/DCS/UD 可选字段。受控 HIL 已完成真实单段与 multipart 入站，以及一条单段 GSM7 服务请求的关联出站 RP-ACK 和新 multipart 业务回复；失败同步使用有界指数退避。
 

@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-10-sms-conversation-redesign/research/repository-evidence.md","reason":"Audit implementation against the exact pre-change contracts and approved decisions."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify OpenAPI/handler/generated compatibility, filter matrix, cursor privacy, auth/CSRF and stable errors."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Verify v6/v7/Down migration safety, matching indexes, atomic unread markers, monotonic watermark and derived counts."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check edge, persistence, concurrency, privacy and restart evidence at the narrowest layer."}
+{"file":".trellis/spec/web/frontend/state-management.md","reason":"Ensure no duplicate server state, optimistic SMS outcome or SSE-authored unread state."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Reject handwritten public payload copies, unsafe casts and generated schema drift."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Verify observable desktop/mobile behavior, accessibility, overflow, E2E and no-HIL fixtures."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Check synthetic communication data and prevent numbers, screenshots, logs or private evidence entering public artifacts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit end-to-end boundary ownership and race-safe round trips rather than layer-local success only."}

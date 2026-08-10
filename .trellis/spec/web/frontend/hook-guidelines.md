@@ -58,8 +58,18 @@ const query = useInfiniteQuery({
 
 - Pass `nextCursor` back unchanged; never decode or synthesize it in the UI.
 - Stop when `nextCursor` is absent.
-- Conversation filters require both `lineId` and `remoteAddress`.
+- Recipient conversation history passes exact `remoteAddress` alone and spans
+  Lines. The legacy exact-Line history passes both `lineId` and
+  `remoteAddress`; Line-only remains invalid.
+- Conversation summaries use their generated infinite query rather than
+  grouping the currently loaded message page. Only the newest remote-only page
+  can supply `readThroughToken`; return that token unchanged in the generated
+  read-state mutation and never derive a watermark from message time/ID.
 - Flatten pages for display without mutating generated data.
+- Recipient history renders oldest-to-newest, starts at the latest message,
+  preserves the visible scroll anchor when older pages are prepended, and
+  follows a newly arrived message only when the reader was already near the
+  bottom.
 - A cursor failure is surfaced as `PAGE_CURSOR_INVALID`; offer a fresh reload
   rather than trying to repair the cursor.
 
@@ -98,6 +108,10 @@ timer. SSE, window-focus refetch, and explicit refresh remain the normal paths.
   for trivial primitives.
 - Use an operation key/ID when busy state belongs to one row; do not block the
   whole page unnecessarily.
+- Automatic conversation read requires visible detail, a visible document,
+  and a successfully rendered newest HTTP page. Hidden, unselected, failed, or
+  older cursor pages never advance read state; mutation failure keeps the
+  durable unread badge.
 
 ## Avoid
 
