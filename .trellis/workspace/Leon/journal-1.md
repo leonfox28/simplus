@@ -54,3 +54,27 @@ Initialized Trellis and Codex integration, corrected core/web package resolution
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: 重做短信会话页面
+
+**Date**: 2026-08-10
+**Task**: 重做短信会话页面
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+完成按收件人聚合的短信会话、持久化未读状态、响应式主从聊天界面、线路故障闭锁与联系人管理；全量质量门禁和桌面/移动端 Chromium E2E 通过，并将本地 Compose 服务更新到 107b1de。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8391ad` | (see git log) |
+| `2dc4241` | (see git log) |
+| `107b1de` | (see git log) |
+
+### Status
+
+[OK] **Completed**
