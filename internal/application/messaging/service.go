@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +28,9 @@ const (
 	ErrorTransportFailed            = "SMS_TRANSPORT_FAILED"
 	HistoryCapacity                 = 10000
 	InboundFragmentRetention        = 7 * 24 * time.Hour
+	readTokenVersion                = byte(1)
+	readTokenPrefixLen              = 9
+	maximumReadTokenLen             = 256
 )
 
 var (
@@ -57,7 +61,10 @@ type Repository interface {
 	MarkOutboundSMSUnconfirmed(context.Context, string, string, string, time.Time) (sms.Message, error)
 	MarkOutboundSMSFailed(context.Context, string, string, string, time.Time) (sms.Message, error)
 	MarkQueuedOutboundSMSUnconfirmed(context.Context, string, time.Time) (int64, error)
-	ListSMSPage(context.Context, pagination.Request, string, string) (pagination.Page[sms.Message], error)
+	ListSMSPageWithUnread(context.Context, pagination.Request, string, string) (pagination.Page[sms.Message], *sms.UnreadBoundary, error)
+	ListSMSConversationPage(context.Context, pagination.Request) (pagination.Page[sms.ConversationSummary], error)
+	CountSMSConversations(context.Context) (int64, error)
+	MarkSMSConversationRead(context.Context, string, sms.UnreadBoundary) (bool, error)
 	CountSMS(context.Context) (int64, error)
 	DeleteSMS(context.Context, string) error
 }
@@ -174,8 +181,15 @@ type PageRequest struct {
 }
 
 type PageResult struct {
-	Messages   []sms.Message
-	NextCursor string
+	Messages         []sms.Message
+	NextCursor       string
+	ReadThroughToken string
+}
+
+type ConversationPageResult struct {
+	Conversations []sms.ConversationSummary
+	NextCursor    string
+	TotalCount    int64
 }
 
 type serialGate struct {
@@ -377,15 +391,16 @@ func (service *Service) ListPage(ctx context.Context, request PageRequest) (Page
 	if err != nil {
 		return PageResult{}, err
 	}
-	if (request.LineID == "") != (request.RemoteAddress == "") ||
-		(request.LineID != "" && (!lineIDPattern.MatchString(request.LineID) || !remoteAddressPattern.MatchString(request.RemoteAddress))) {
+	if (request.LineID != "" && request.RemoteAddress == "") ||
+		(request.LineID != "" && !lineIDPattern.MatchString(request.LineID)) ||
+		(request.RemoteAddress != "" && !remoteAddressPattern.MatchString(request.RemoteAddress)) {
 		return PageResult{}, ErrRequestInvalid
 	}
 	after, err := pagination.Decode(request.Cursor)
 	if err != nil {
 		return PageResult{}, err
 	}
-	page, err := service.repository.ListSMSPage(ctx, pagination.Request{Limit: limit, After: after}, request.LineID, request.RemoteAddress)
+	page, boundary, err := service.repository.ListSMSPageWithUnread(ctx, pagination.Request{Limit: limit, After: after}, request.LineID, request.RemoteAddress)
 	if err != nil {
 		return PageResult{}, fmt.Errorf("%w: list SMS: %v", ErrPersistence, err)
 	}
@@ -396,7 +411,68 @@ func (service *Service) ListPage(ctx context.Context, request PageRequest) (Page
 			return PageResult{}, fmt.Errorf("%w: encode SMS page cursor: %v", ErrPersistence, err)
 		}
 	}
+	if boundary != nil {
+		result.ReadThroughToken, err = encodeReadThroughToken(*boundary)
+		if err != nil {
+			return PageResult{}, fmt.Errorf("%w: encode SMS read boundary: %v", ErrPersistence, err)
+		}
+	}
 	return result, nil
+}
+
+func (service *Service) ListConversationPage(ctx context.Context, limit int, cursor string) (ConversationPageResult, error) {
+	if service == nil || service.repository == nil {
+		return ConversationPageResult{}, ErrPersistence
+	}
+	normalizedLimit, err := pagination.NormalizeLimit(limit)
+	if err != nil {
+		return ConversationPageResult{}, err
+	}
+	after, err := pagination.Decode(cursor)
+	if err != nil {
+		return ConversationPageResult{}, err
+	}
+	page, err := service.repository.ListSMSConversationPage(ctx, pagination.Request{Limit: normalizedLimit, After: after})
+	if err != nil {
+		return ConversationPageResult{}, fmt.Errorf("%w: list SMS conversations: %v", ErrPersistence, err)
+	}
+	total, err := service.repository.CountSMSConversations(ctx)
+	if err != nil {
+		return ConversationPageResult{}, fmt.Errorf("%w: count SMS conversations: %v", ErrPersistence, err)
+	}
+	result := ConversationPageResult{Conversations: page.Items, TotalCount: total}
+	if page.Next != nil {
+		result.NextCursor, err = pagination.Encode(*page.Next)
+		if err != nil {
+			return ConversationPageResult{}, fmt.Errorf("%w: encode SMS conversation cursor: %v", ErrPersistence, err)
+		}
+	}
+	return result, nil
+}
+
+func (service *Service) MarkConversationRead(ctx context.Context, remoteAddress, token string) (bool, error) {
+	if service == nil || service.repository == nil {
+		return false, ErrPersistence
+	}
+	if !remoteAddressPattern.MatchString(remoteAddress) {
+		return false, ErrRequestInvalid
+	}
+	boundary, err := decodeReadThroughToken(token)
+	if err != nil {
+		return false, ErrRequestInvalid
+	}
+	changed, err := service.repository.MarkSMSConversationRead(ctx, remoteAddress, boundary)
+	if err != nil {
+		switch {
+		case errors.Is(err, sms.ErrReadBoundaryInvalid):
+			return false, ErrRequestInvalid
+		case errors.Is(err, sms.ErrMessageNotFound):
+			return false, sms.ErrMessageNotFound
+		default:
+			return false, fmt.Errorf("%w: mark SMS conversation read: %v", ErrPersistence, err)
+		}
+	}
+	return changed, nil
 }
 
 func (service *Service) Stats(ctx context.Context) (HistoryStats, error) {
@@ -507,6 +583,37 @@ func validateSendRequest(request SendRequest) error {
 		return ErrRequestInvalid
 	}
 	return nil
+}
+
+func encodeReadThroughToken(boundary sms.UnreadBoundary) (string, error) {
+	if boundary.UnreadID <= 0 || !operationIDPattern.MatchString(boundary.MessageID) {
+		return "", ErrRequestInvalid
+	}
+	payload := make([]byte, readTokenPrefixLen+len(boundary.MessageID))
+	payload[0] = readTokenVersion
+	binary.BigEndian.PutUint64(payload[1:readTokenPrefixLen], uint64(boundary.UnreadID))
+	copy(payload[readTokenPrefixLen:], boundary.MessageID)
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	if len(encoded) > maximumReadTokenLen {
+		return "", ErrRequestInvalid
+	}
+	return encoded, nil
+}
+
+func decodeReadThroughToken(encoded string) (sms.UnreadBoundary, error) {
+	if encoded == "" || len(encoded) > maximumReadTokenLen {
+		return sms.UnreadBoundary{}, ErrRequestInvalid
+	}
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
+	if err != nil || len(payload) <= readTokenPrefixLen || payload[0] != readTokenVersion {
+		return sms.UnreadBoundary{}, ErrRequestInvalid
+	}
+	unreadID := binary.BigEndian.Uint64(payload[1:readTokenPrefixLen])
+	messageID := string(payload[readTokenPrefixLen:])
+	if unreadID == 0 || unreadID > uint64(^uint64(0)>>1) || !operationIDPattern.MatchString(messageID) {
+		return sms.UnreadBoundary{}, ErrRequestInvalid
+	}
+	return sms.UnreadBoundary{UnreadID: int64(unreadID), MessageID: messageID}, nil
 }
 
 func transportErrorCode(err error) string {

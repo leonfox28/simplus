@@ -430,6 +430,28 @@ export type SmsMessageListResponse = {
     capacity: number;
     nearCapacity: boolean;
     nextCursor?: string;
+    readThroughToken?: string;
+};
+
+export type SmsConversationSummary = {
+    remoteAddress: string;
+    lastMessage: SmsMessage;
+    unreadCount: number;
+    lastOutboundLineId?: string;
+};
+
+export type SmsConversationListResponse = {
+    conversations: Array<SmsConversationSummary>;
+    conversationTotalCount: number;
+    messageTotalCount: number;
+    capacity: number;
+    nearCapacity: boolean;
+    nextCursor?: string;
+};
+
+export type MarkSmsConversationReadRequest = {
+    remoteAddress: string;
+    readThroughToken: string;
 };
 
 export type RealtimeTopic = 'system' | 'inventory' | 'modems' | 'lines' | 'vowifi' | 'messages' | 'calls' | 'contacts' | 'mihomo' | 'notifications' | 'euicc';
@@ -1609,11 +1631,11 @@ export type ListMessagesData = {
          */
         cursor?: string;
         /**
-         * Stable Line identity for a conversation; remoteAddress is required with it
+         * Optional stable Line identity; remoteAddress is required when lineId is present
          */
         lineId?: string;
         /**
-         * Conversation peer; lineId is required with it
+         * Optional exact conversation peer; without lineId, returns the peer history across Lines
          */
         remoteAddress?: string;
     };
@@ -1726,6 +1748,121 @@ export type SendMessageResponses = {
 };
 
 export type SendMessageResponse = SendMessageResponses[keyof SendMessageResponses];
+
+export type ListMessageConversationsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Maximum records returned; defaults to 20
+         */
+        limit?: number;
+        /**
+         * Versioned opaque cursor from the previous page
+         */
+        cursor?: string;
+    };
+    url: '/api/v1/message-conversations';
+};
+
+export type ListMessageConversationsErrors = {
+    /**
+     * Pagination cursor or limit is invalid
+     */
+    400: ApiError;
+    /**
+     * No live administrator session is present
+     */
+    401: ApiError;
+    /**
+     * The instance is not ready for business APIs
+     */
+    409: ApiError;
+    /**
+     * The HTTP authority is not a permitted trusted-LAN host
+     */
+    421: ApiError;
+    /**
+     * Message conversations could not be read
+     */
+    500: ApiError;
+    /**
+     * Messaging is not configured for this runtime
+     */
+    503: ApiError;
+    /**
+     * The request exceeded the bounded control-plane deadline
+     */
+    504: ApiError;
+};
+
+export type ListMessageConversationsError = ListMessageConversationsErrors[keyof ListMessageConversationsErrors];
+
+export type ListMessageConversationsResponses = {
+    /**
+     * Most recent SMS conversations, newest first
+     */
+    200: SmsConversationListResponse;
+};
+
+export type ListMessageConversationsResponse = ListMessageConversationsResponses[keyof ListMessageConversationsResponses];
+
+export type MarkMessageConversationReadData = {
+    body: MarkSmsConversationReadRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/message-conversations/read-state';
+};
+
+export type MarkMessageConversationReadErrors = {
+    /**
+     * The remote address or opaque read boundary is invalid
+     */
+    400: ApiError;
+    /**
+     * No live administrator session is present
+     */
+    401: ApiError;
+    /**
+     * CSRF validation failed
+     */
+    403: ApiError;
+    /**
+     * The boundary message no longer exists
+     */
+    404: ApiError;
+    /**
+     * The instance is not ready for business APIs
+     */
+    409: ApiError;
+    /**
+     * The HTTP authority is not a permitted trusted-LAN host
+     */
+    421: ApiError;
+    /**
+     * The read state could not be persisted
+     */
+    500: ApiError;
+    /**
+     * Messaging is not configured for this runtime
+     */
+    503: ApiError;
+    /**
+     * The request exceeded the bounded control-plane deadline
+     */
+    504: ApiError;
+};
+
+export type MarkMessageConversationReadError = MarkMessageConversationReadErrors[keyof MarkMessageConversationReadErrors];
+
+export type MarkMessageConversationReadResponses = {
+    /**
+     * The snapshot boundary is read or was already read
+     */
+    204: void;
+};
+
+export type MarkMessageConversationReadResponse = MarkMessageConversationReadResponses[keyof MarkMessageConversationReadResponses];
 
 export type GetEuiccStateData = {
     body?: never;

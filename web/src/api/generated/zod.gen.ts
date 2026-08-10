@@ -498,7 +498,29 @@ export const zSmsMessageListResponse = z.object({
     totalCount: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     capacity: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     nearCapacity: z.boolean(),
+    nextCursor: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
+    readThroughToken: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional()
+});
+
+export const zSmsConversationSummary = z.object({
+    remoteAddress: z.string().regex(/^(?:\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$/),
+    lastMessage: zSmsMessage,
+    unreadCount: z.coerce.bigint().gte(BigInt(0)).lte(BigInt(10000)),
+    lastOutboundLineId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional()
+});
+
+export const zSmsConversationListResponse = z.object({
+    conversations: z.array(zSmsConversationSummary).max(50),
+    conversationTotalCount: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    messageTotalCount: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    capacity: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    nearCapacity: z.boolean(),
     nextCursor: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional()
+});
+
+export const zMarkSmsConversationReadRequest = z.object({
+    remoteAddress: z.string().regex(/^(?:\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$/),
+    readThroughToken: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/)
 });
 
 export const zRealtimeTopic = z.enum([
@@ -1030,6 +1052,23 @@ export const zSendMessageBody = zSendSmsRequest;
  * An idempotent replay of an existing operation
  */
 export const zSendMessageResponse = zSmsMessage;
+
+export const zListMessageConversationsQuery = z.object({
+    limit: z.int().gte(1).lte(50).optional().default(20),
+    cursor: z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/).optional()
+});
+
+/**
+ * Most recent SMS conversations, newest first
+ */
+export const zListMessageConversationsResponse = zSmsConversationListResponse;
+
+export const zMarkMessageConversationReadBody = zMarkSmsConversationReadRequest;
+
+/**
+ * The snapshot boundary is read or was already read
+ */
+export const zMarkMessageConversationReadResponse = z.void();
 
 /**
  * Simulator eUICC state

@@ -74,6 +74,160 @@ func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t
 	}
 }
 
+func TestSMSRecipientConversationsUnreadWatermarksAndRemoteOnlyHistory(t *testing.T) {
+	ctx := context.Background()
+	set, err := OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	now := time.Date(2026, 8, 10, 8, 0, 0, 123_000_000, time.UTC)
+	remote := "+447700900123"
+	createInbound := func(id, operationID, providerID, lineID, address, body string, createdAt time.Time) sms.Message {
+		t.Helper()
+		message, replayed, err := set.CreateInboundSMS(ctx, sms.Message{
+			ID: id, OperationID: operationID, Direction: sms.DirectionInbound,
+			LineID: lineID, RemoteAddress: address, Body: body, Status: sms.StatusReceived,
+			ProviderMessageID: providerID, CreatedAt: createdAt, UpdatedAt: createdAt,
+		})
+		if err != nil || replayed {
+			t.Fatalf("create inbound=%#v replayed=%v error=%v", message, replayed, err)
+		}
+		return message
+	}
+	first := createInbound("msg_unread_000000000001", "operation-unread-00000001", "provider-unread-1",
+		"line_AQEBAQEBAQEBAQEBAQEBAQ", remote, "first", now)
+	if _, replayed, err := set.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_unread_replay000001", OperationID: "operation-unread-replay01", Direction: sms.DirectionInbound,
+		LineID: first.LineID, RemoteAddress: remote, Body: first.Body, Status: sms.StatusReceived,
+		ProviderMessageID: first.ProviderMessageID, CreatedAt: now, UpdatedAt: now,
+	}); err != nil || !replayed {
+		t.Fatalf("inbound replay replayed=%v error=%v", replayed, err)
+	}
+	if _, _, err := set.CreateOutboundSMS(ctx, sms.Message{
+		ID: "msg_outbound_0000000001", OperationID: "operation-outbound-000001", Direction: sms.DirectionOutbound,
+		LineID: "line_AgICAgICAgICAgICAgICAg", RemoteAddress: remote, Body: "reply", Status: sms.StatusQueued,
+		CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createInbound("msg_unread_000000000002", "operation-unread-00000002", "provider-unread-2",
+		"line_AgICAgICAgICAgICAgICAg", "447700900123", "different exact address", now.Add(2*time.Second))
+	if _, err := set.MarkOutboundSMSFailed(ctx, "msg_outbound_0000000001", "", "SMS_SYNTHETIC_FAILURE", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	page, boundary, err := set.ListSMSPageWithUnread(ctx, pagination.Request{Limit: 10}, "", remote)
+	if err != nil || len(page.Items) != 2 || boundary == nil || boundary.MessageID != first.ID {
+		t.Fatalf("remote page=%#v boundary=%#v error=%v", page, boundary, err)
+	}
+	if _, err := set.MarkSMSConversationRead(ctx, "447700900123", *boundary); !errors.Is(err, sms.ErrReadBoundaryInvalid) {
+		t.Fatalf("mismatched remote boundary error=%v", err)
+	}
+	if _, err := set.MarkSMSConversationRead(ctx, remote, sms.UnreadBoundary{UnreadID: boundary.UnreadID + 1, MessageID: boundary.MessageID}); !errors.Is(err, sms.ErrReadBoundaryInvalid) {
+		t.Fatalf("mismatched unread id error=%v", err)
+	}
+	if _, err := set.MarkSMSConversationRead(ctx, remote, sms.UnreadBoundary{UnreadID: boundary.UnreadID, MessageID: "msg_outbound_0000000001"}); !errors.Is(err, sms.ErrReadBoundaryInvalid) {
+		t.Fatalf("outbound boundary error=%v", err)
+	}
+	conversations, err := set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 2 {
+		t.Fatalf("conversations=%#v error=%v", conversations, err)
+	}
+	conversationHead, err := set.ListSMSConversationPage(ctx, pagination.Request{Limit: 1})
+	if err != nil || len(conversationHead.Items) != 1 || conversationHead.Next == nil || conversationHead.Items[0].RemoteAddress != "447700900123" {
+		t.Fatalf("conversation head=%#v error=%v", conversationHead, err)
+	}
+	conversationTail, err := set.ListSMSConversationPage(ctx, pagination.Request{Limit: 1, After: conversationHead.Next})
+	if err != nil || len(conversationTail.Items) != 1 || conversationTail.Next != nil || conversationTail.Items[0].RemoteAddress != remote {
+		t.Fatalf("conversation tail=%#v error=%v", conversationTail, err)
+	}
+	var merged sms.ConversationSummary
+	for _, item := range conversations.Items {
+		if item.RemoteAddress == remote {
+			merged = item
+		}
+	}
+	if merged.UnreadCount != 1 || merged.LastMessage.Body != "reply" || merged.LastOutboundLineID != "line_AgICAgICAgICAgICAgICAg" {
+		t.Fatalf("merged conversation=%#v", merged)
+	}
+
+	second := createInbound("msg_unread_000000000000", "operation-unread-00000003", "provider-unread-3",
+		"line_AgICAgICAgICAgICAgICAg", remote, "later same millisecond", now)
+	changed, err := set.MarkSMSConversationRead(ctx, remote, *boundary)
+	if err != nil || !changed {
+		t.Fatalf("mark first boundary changed=%v error=%v", changed, err)
+	}
+	changed, err = set.MarkSMSConversationRead(ctx, remote, *boundary)
+	if err != nil || changed {
+		t.Fatalf("repeat old boundary changed=%v error=%v", changed, err)
+	}
+	conversations, err = set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range conversations.Items {
+		if item.RemoteAddress == remote && item.UnreadCount != 1 {
+			t.Fatalf("newer unread count after old watermark=%d", item.UnreadCount)
+		}
+	}
+	_, latestBoundary, err := set.ListSMSPageWithUnread(ctx, pagination.Request{Limit: 10}, "", remote)
+	if err != nil || latestBoundary == nil || latestBoundary.MessageID != second.ID || latestBoundary.UnreadID <= boundary.UnreadID {
+		t.Fatalf("latest boundary=%#v old=%#v error=%v", latestBoundary, boundary, err)
+	}
+	if err := set.DeleteSMS(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := set.MarkSMSConversationRead(ctx, remote, *latestBoundary); !errors.Is(err, sms.ErrMessageNotFound) {
+		t.Fatalf("deleted boundary error=%v", err)
+	}
+	conversations, err = set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range conversations.Items {
+		if item.RemoteAddress == remote && item.UnreadCount != 0 {
+			t.Fatalf("deleted unread marker count=%d", item.UnreadCount)
+		}
+	}
+	if err := set.DeleteSMS(ctx, "msg_outbound_0000000001"); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.DeleteSMS(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	conversations, err = set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].RemoteAddress != "447700900123" {
+		t.Fatalf("conversations after deleting last recipient message=%#v error=%v", conversations, err)
+	}
+}
+
+func TestCreateInboundSMSRollsBackWhenUnreadMarkerCannotBeCreated(t *testing.T) {
+	ctx := context.Background()
+	set, err := OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	if _, err := set.Messages.ExecContext(ctx, `DROP TABLE sms_message_unread`); err != nil {
+		t.Fatal(err)
+	}
+	messageID := "msg_atomic_unread_000001"
+	_, _, err = set.CreateInboundSMS(ctx, sms.Message{
+		ID: messageID, OperationID: "operation-atomic-unread-01", Direction: sms.DirectionInbound,
+		LineID: "line_AQEBAQEBAQEBAQEBAQEBAQ", RemoteAddress: "+447700900123", Body: "atomic inbound",
+		Status: sms.StatusReceived, ProviderMessageID: "provider-atomic-unread-1",
+		CreatedAt: time.Date(2026, 8, 10, 8, 30, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 8, 10, 8, 30, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("CreateInboundSMS succeeded without the unread ledger")
+	}
+	var count int
+	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages WHERE message_id = ?`, messageID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rolled-back inbound count=%d error=%v", count, err)
+	}
+}
+
 func TestOutboundSMSPersistsReplaysAndCompletes(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "db")

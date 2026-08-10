@@ -106,6 +106,8 @@ type NotificationManager interface {
 type Messenger interface {
 	Send(context.Context, messageapp.SendRequest) (messageapp.SendResult, error)
 	ListPage(context.Context, messageapp.PageRequest) (messageapp.PageResult, error)
+	ListConversationPage(context.Context, int, string) (messageapp.ConversationPageResult, error)
+	MarkConversationRead(context.Context, string, string) (bool, error)
 	Stats(context.Context) (messageapp.HistoryStats, error)
 	Delete(context.Context, string) error
 }
@@ -321,7 +323,7 @@ func writeOpenAPIParameterError(w http.ResponseWriter, r *http.Request, err erro
 
 func paginationParameterErrorCode(r *http.Request, parameter string) string {
 	if r != nil && r.Method == http.MethodGet &&
-		(r.URL.Path == "/api/v1/messages" || r.URL.Path == "/api/v1/calls") {
+		(r.URL.Path == "/api/v1/messages" || r.URL.Path == "/api/v1/message-conversations" || r.URL.Path == "/api/v1/calls") {
 		switch parameter {
 		case "limit":
 			return "PAGE_LIMIT_INVALID"
@@ -1911,7 +1913,7 @@ func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request, param
 	} else if _, present := r.URL.Query()["remoteAddress"]; present {
 		remotePresent = true
 	}
-	if linePresent != remotePresent || (linePresent && (request.LineID == "" || request.RemoteAddress == "")) {
+	if (linePresent && !remotePresent) || (linePresent && request.LineID == "") || (remotePresent && request.RemoteAddress == "") {
 		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MESSAGE_FILTER_INVALID", Retryable: false})
 		return
 	}
@@ -1949,7 +1951,110 @@ func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request, param
 	if page.NextCursor != "" {
 		result.NextCursor = &page.NextCursor
 	}
+	if page.ReadThroughToken != "" {
+		result.ReadThroughToken = &page.ReadThroughToken
+	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (server *Server) ListMessageConversations(w http.ResponseWriter, r *http.Request, params openapi.ListMessageConversationsParams) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.messages == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MESSAGING_UNAVAILABLE", Retryable: true})
+		return
+	}
+	limit := 0
+	if params.Limit != nil {
+		if *params.Limit == 0 {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+			return
+		}
+		limit = *params.Limit
+	}
+	cursor := ""
+	if params.Cursor != nil {
+		if *params.Cursor == "" {
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+			return
+		}
+		cursor = *params.Cursor
+	} else if _, present := r.URL.Query()["cursor"]; present {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+		return
+	}
+	page, err := server.messages.ListConversationPage(r.Context(), limit, cursor)
+	if err != nil {
+		switch {
+		case errors.Is(err, pagination.ErrCursorInvalid):
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_CURSOR_INVALID", Retryable: false})
+		case errors.Is(err, pagination.ErrLimitInvalid):
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "PAGE_LIMIT_INVALID", Retryable: false})
+		default:
+			server.logger.ErrorContext(r.Context(), "message conversation read failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_HISTORY_UNAVAILABLE", Retryable: true})
+		}
+		return
+	}
+	stats, err := server.messages.Stats(r.Context())
+	if err != nil {
+		server.logger.ErrorContext(r.Context(), "message conversation stats failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_HISTORY_UNAVAILABLE", Retryable: true})
+		return
+	}
+	conversations := make([]openapi.SMSConversationSummary, 0, len(page.Conversations))
+	for _, item := range page.Conversations {
+		response := openapi.SMSConversationSummary{
+			RemoteAddress: item.RemoteAddress,
+			LastMessage:   smsMessageResponse(item.LastMessage),
+			UnreadCount:   item.UnreadCount,
+		}
+		if item.LastOutboundLineID != "" {
+			response.LastOutboundLineId = &item.LastOutboundLineID
+		}
+		conversations = append(conversations, response)
+	}
+	result := openapi.SMSConversationListResponse{
+		Conversations: conversations, ConversationTotalCount: page.TotalCount,
+		MessageTotalCount: stats.TotalCount, Capacity: stats.Capacity, NearCapacity: stats.NearCapacity,
+	}
+	if page.NextCursor != "" {
+		result.NextCursor = &page.NextCursor
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (server *Server) MarkMessageConversationRead(w http.ResponseWriter, r *http.Request) {
+	if !server.requireBusinessAPI(w, r) {
+		return
+	}
+	if server.messages == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MESSAGING_UNAVAILABLE", Retryable: true})
+		return
+	}
+	var request openapi.MarkSMSConversationReadRequest
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MESSAGE_READ_STATE_INVALID", Retryable: false})
+		return
+	}
+	changed, err := server.messages.MarkConversationRead(r.Context(), request.RemoteAddress, request.ReadThroughToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, messageapp.ErrRequestInvalid):
+			writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MESSAGE_READ_STATE_INVALID", Retryable: false})
+		case errors.Is(err, sms.ErrMessageNotFound):
+			writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MESSAGE_READ_BOUNDARY_NOT_FOUND", Retryable: false})
+		default:
+			server.logger.ErrorContext(r.Context(), "message read state update failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MESSAGE_PERSIST_FAILED", Retryable: true})
+		}
+		return
+	}
+	if changed {
+		server.publish([]realtime.Topic{realtime.TopicMessages}, "")
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (server *Server) DeleteMessage(w http.ResponseWriter, r *http.Request, messageID string) {

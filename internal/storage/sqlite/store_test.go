@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/domain/call"
+	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/pressly/goose/v3"
 )
@@ -108,6 +109,119 @@ func TestKeysetIndexMigrationsDownAndReopenPreserveHistory(t *testing.T) {
 		if err := check.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, check.index).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("reopened index %s count=%d error=%v", check.index, count, err)
 		}
+	}
+}
+
+func TestMessagesConversationMigrationInitializesOldHistoryReadAndPreservesMessages(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "db")
+	set, err := OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	old, _, err := set.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_migration_v7_old0001", OperationID: "operation-migration-v7-old", Direction: sms.DirectionInbound,
+		LineID: "line_AQEBAQEBAQEBAQEBAQEBAQ", RemoteAddress: "+447700900123", Body: "old history",
+		Status: sms.StatusReceived, ProviderMessageID: "provider-migration-v7-old", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", filepath.Join(root, MessagesDataset+".sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	goose.SetLogger(goose.NopLogger())
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/messages", 6)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	for _, object := range []string{"sms_message_unread", "sms_messages_remote_page_idx", "sms_message_unread_remote_idx"} {
+		var count int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name = ?`, object).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("down migration object %s count=%d error=%v", object, count, err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversations, err := set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].UnreadCount != 0 || conversations.Items[0].LastMessage.ID != old.ID {
+		t.Fatalf("upgraded old conversations=%#v error=%v", conversations, err)
+	}
+	if _, _, err := set.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_migration_v7_new0001", OperationID: "operation-migration-v7-new", Direction: sms.DirectionInbound,
+		LineID: old.LineID, RemoteAddress: old.RemoteAddress, Body: "new history", Status: sms.StatusReceived,
+		ProviderMessageID: "provider-migration-v7-new", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversations, err = set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].UnreadCount != 1 {
+		t.Fatalf("reopened conversations=%#v error=%v", conversations, err)
+	}
+	messages, err := set.ListSMS(ctx, 10)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("preserved messages=%#v error=%v", messages, err)
+	}
+	if err := set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err = sql.Open("sqlite", filepath.Join(root, MessagesDataset+".sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	err = goose.SetDialect("sqlite3")
+	if err == nil {
+		err = goose.DownToContext(ctx, database, "migrations/messages", 6)
+	}
+	migrationMu.Unlock()
+	if err != nil {
+		_ = database.Close()
+		t.Fatal(err)
+	}
+	var preserved int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&preserved); err != nil || preserved != 2 {
+		t.Fatalf("down-migrated message count=%d error=%v", preserved, err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	set, err = OpenSet(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	conversations, err = set.ListSMSConversationPage(ctx, pagination.Request{Limit: 10})
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].UnreadCount != 0 {
+		t.Fatalf("re-upgraded conversations=%#v error=%v", conversations, err)
+	}
+	messages, err = set.ListSMS(ctx, 10)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("re-upgraded messages=%#v error=%v", messages, err)
 	}
 }
 

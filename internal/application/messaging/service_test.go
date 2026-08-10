@@ -116,6 +116,44 @@ func newTestService(t *testing.T, sender Sender) (*Service, *sqlitestore.Set) {
 	return service, stores
 }
 
+func TestRecipientHistoryReadTokenValidationAndIdempotency(t *testing.T) {
+	service, stores := newTestService(t, nil)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	message, replayed, err := stores.CreateInboundSMS(ctx, sms.Message{
+		ID: "msg_service_unread000001", OperationID: "operation-service-unread01", Direction: sms.DirectionInbound,
+		LineID: testManagedLineID1, RemoteAddress: "+447700900123", Body: "synthetic inbound",
+		Status: sms.StatusReceived, ProviderMessageID: "provider-service-unread-1", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || replayed {
+		t.Fatalf("create inbound=%#v replayed=%v error=%v", message, replayed, err)
+	}
+	page, err := service.ListPage(ctx, PageRequest{Limit: 20, RemoteAddress: message.RemoteAddress})
+	if err != nil || len(page.Messages) != 1 || page.ReadThroughToken == "" {
+		t.Fatalf("recipient page=%#v error=%v", page, err)
+	}
+	if _, err := service.ListPage(ctx, PageRequest{Limit: 20, LineID: testManagedLineID1}); !errors.Is(err, ErrRequestInvalid) {
+		t.Fatalf("line-only filter error=%v", err)
+	}
+	for _, token := range []string{"", "***", "AA", "_" + page.ReadThroughToken, page.ReadThroughToken + "="} {
+		if _, err := service.MarkConversationRead(ctx, message.RemoteAddress, token); !errors.Is(err, ErrRequestInvalid) {
+			t.Fatalf("invalid token %q error=%v", token, err)
+		}
+	}
+	changed, err := service.MarkConversationRead(ctx, message.RemoteAddress, page.ReadThroughToken)
+	if err != nil || !changed {
+		t.Fatalf("mark read changed=%v error=%v", changed, err)
+	}
+	changed, err = service.MarkConversationRead(ctx, message.RemoteAddress, page.ReadThroughToken)
+	if err != nil || changed {
+		t.Fatalf("repeat mark read changed=%v error=%v", changed, err)
+	}
+	conversations, err := service.ListConversationPage(ctx, 20, "")
+	if err != nil || conversations.TotalCount != 1 || len(conversations.Conversations) != 1 || conversations.Conversations[0].UnreadCount != 0 {
+		t.Fatalf("conversations=%#v error=%v", conversations, err)
+	}
+}
+
 func TestSendPersistsBeforeDispatchAndReplaysByOperationID(t *testing.T) {
 	var calls int
 	var stores *sqlitestore.Set

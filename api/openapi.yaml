@@ -416,11 +416,11 @@ paths:
         - $ref: "#/components/parameters/PageCursor"
         - name: lineId
           in: query
-          description: Stable Line identity for a conversation; remoteAddress is required with it
+          description: Optional stable Line identity; remoteAddress is required when lineId is present
           schema: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         - name: remoteAddress
           in: query
-          description: Conversation peer; lineId is required with it
+          description: Optional exact conversation peer; without lineId, returns the peer history across Lines
           schema: { type: string, pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$" }
       responses:
         "200":
@@ -544,6 +544,131 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "503":
           description: The SMS transport or inventory is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/message-conversations:
+    get:
+      operationId: listMessageConversations
+      summary: List durable SMS conversations by exact remote address
+      tags: [messages]
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+      responses:
+        "200":
+          description: Most recent SMS conversations, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSConversationListResponse"
+        "400":
+          description: Pagination cursor or limit is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted trusted-LAN host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Message conversations could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Messaging is not configured for this runtime
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "504":
+          description: The request exceeded the bounded control-plane deadline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/v1/message-conversations/read-state:
+    put:
+      operationId: markMessageConversationRead
+      summary: Mark one visible SMS conversation snapshot as read
+      tags: [messages]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkSMSConversationReadRequest"
+      responses:
+        "204":
+          description: The snapshot boundary is read or was already read
+        "400":
+          description: The remote address or opaque read boundary is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: No live administrator session is present
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: CSRF validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: The boundary message no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: The instance is not ready for business APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "421":
+          description: The HTTP authority is not a permitted trusted-LAN host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: The read state could not be persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Messaging is not configured for this runtime
           content:
             application/json:
               schema:
@@ -2444,6 +2569,76 @@ components:
         nearCapacity:
           type: boolean
         nextCursor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: "^[A-Za-z0-9_-]+$"
+        readThroughToken:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: "^[A-Za-z0-9_-]+$"
+    SMSConversationSummary:
+      type: object
+      additionalProperties: false
+      required: [remoteAddress, lastMessage, unreadCount]
+      properties:
+        remoteAddress:
+          type: string
+          pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$"
+        lastMessage:
+          $ref: "#/components/schemas/SMSMessage"
+        unreadCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 10000
+        lastOutboundLineId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+    SMSConversationListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - conversations
+        - conversationTotalCount
+        - messageTotalCount
+        - capacity
+        - nearCapacity
+      properties:
+        conversations:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SMSConversationSummary"
+        conversationTotalCount:
+          type: integer
+          format: int64
+          minimum: 0
+        messageTotalCount:
+          type: integer
+          format: int64
+          minimum: 0
+        capacity:
+          type: integer
+          format: int64
+          minimum: 1
+        nearCapacity:
+          type: boolean
+        nextCursor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: "^[A-Za-z0-9_-]+$"
+    MarkSMSConversationReadRequest:
+      type: object
+      additionalProperties: false
+      required: [remoteAddress, readThroughToken]
+      properties:
+        remoteAddress:
+          type: string
+          pattern: "^(?:\\+?[0-9]{3,20}|[A-Za-z][A-Za-z0-9 ._-]{0,19})$"
+        readThroughToken:
           type: string
           minLength: 1
           maxLength: 256

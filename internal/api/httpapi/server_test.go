@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -1011,15 +1012,76 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	}
 	foundSent := false
 	foundInbound := false
+	inboundRemote := ""
 	for _, message := range history.Messages {
 		foundSent = foundSent || message.Id == sent.Id
-		foundInbound = foundInbound || message.Direction == openapi.SMSDirection("inbound")
+		if message.Direction == openapi.SMSDirection("inbound") {
+			foundInbound = true
+			inboundRemote = message.RemoteAddress
+		}
 	}
 	if len(history.Messages) != 2 || !foundSent || !foundInbound {
 		t.Fatalf("message history = %#v", history)
 	}
 	if history.TotalCount != 2 || history.Capacity != messageapp.HistoryCapacity || history.NearCapacity {
 		t.Fatalf("message history capacity = %#v", history)
+	}
+	remoteRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages?remoteAddress="+url.QueryEscape(inboundRemote), nil)
+	remoteRequest.Host = "127.0.0.1:8080"
+	remoteResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(remoteResponse, remoteRequest)
+	var remoteHistory openapi.SMSMessageListResponse
+	if remoteResponse.Code != http.StatusOK || json.Unmarshal(remoteResponse.Body.Bytes(), &remoteHistory) != nil ||
+		len(remoteHistory.Messages) != 1 || remoteHistory.Messages[0].Direction != openapi.SMSDirection("inbound") || remoteHistory.ReadThroughToken == nil {
+		t.Fatalf("remote history status=%d body=%s", remoteResponse.Code, remoteResponse.Body.String())
+	}
+	conversationRequest := httptest.NewRequest(http.MethodGet, "/api/v1/message-conversations", nil)
+	conversationRequest.Host = "127.0.0.1:8080"
+	conversationResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(conversationResponse, conversationRequest)
+	var conversations openapi.SMSConversationListResponse
+	if conversationResponse.Code != http.StatusOK || json.Unmarshal(conversationResponse.Body.Bytes(), &conversations) != nil ||
+		len(conversations.Conversations) != 2 || conversations.ConversationTotalCount != 2 || conversations.MessageTotalCount != 2 {
+		t.Fatalf("conversation list status=%d body=%s", conversationResponse.Code, conversationResponse.Body.String())
+	}
+	unreadFound := false
+	for _, conversation := range conversations.Conversations {
+		unreadFound = unreadFound || (conversation.RemoteAddress == inboundRemote && conversation.UnreadCount == 1)
+	}
+	if !unreadFound {
+		t.Fatalf("conversation unread state=%#v", conversations.Conversations)
+	}
+	readBody, err := json.Marshal(openapi.MarkSMSConversationReadRequest{
+		RemoteAddress: inboundRemote, ReadThroughToken: *remoteHistory.ReadThroughToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readRequest := httptest.NewRequest(http.MethodPut, "/api/v1/message-conversations/read-state", bytes.NewReader(readBody))
+	readRequest.Host = "127.0.0.1:8080"
+	readRequest.Header.Set("Content-Type", "application/json")
+	readResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(readResponse, readRequest)
+	if readResponse.Code != http.StatusNoContent {
+		t.Fatalf("read state status=%d body=%s", readResponse.Code, readResponse.Body.String())
+	}
+	idempotentReadRequest := httptest.NewRequest(http.MethodPut, "/api/v1/message-conversations/read-state", bytes.NewReader(readBody))
+	idempotentReadRequest.Host = "127.0.0.1:8080"
+	idempotentReadRequest.Header.Set("Content-Type", "application/json")
+	idempotentReadResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(idempotentReadResponse, idempotentReadRequest)
+	if idempotentReadResponse.Code != http.StatusNoContent {
+		t.Fatalf("idempotent read state status=%d body=%s", idempotentReadResponse.Code, idempotentReadResponse.Body.String())
+	}
+	conversationResponse = httptest.NewRecorder()
+	authorized.ServeHTTP(conversationResponse, conversationRequest.Clone(context.Background()))
+	if conversationResponse.Code != http.StatusOK || json.Unmarshal(conversationResponse.Body.Bytes(), &conversations) != nil {
+		t.Fatalf("conversation refresh status=%d body=%s", conversationResponse.Code, conversationResponse.Body.String())
+	}
+	for _, conversation := range conversations.Conversations {
+		if conversation.RemoteAddress == inboundRemote && conversation.UnreadCount != 0 {
+			t.Fatalf("conversation remained unread=%#v", conversation)
+		}
 	}
 	filteredRequest := httptest.NewRequest(http.MethodGet, "/api/v1/messages?lineId="+testBusinessLineID+"&remoteAddress=%2B8613800138000", nil)
 	filteredRequest.Host = "127.0.0.1:8080"
@@ -1040,6 +1102,11 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 		{path: "/api/v1/messages?limit=0", code: "PAGE_LIMIT_INVALID"},
 		{path: "/api/v1/messages?limit=51", code: "PAGE_LIMIT_INVALID"},
 		{path: "/api/v1/messages?limit=not-an-integer", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/message-conversations?limit=0", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/message-conversations?limit=51", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/message-conversations?limit=not-an-integer", code: "PAGE_LIMIT_INVALID"},
+		{path: "/api/v1/message-conversations?cursor=", code: "PAGE_CURSOR_INVALID"},
+		{path: "/api/v1/message-conversations?cursor=invalid", code: "PAGE_CURSOR_INVALID"},
 	} {
 		invalidRequest := httptest.NewRequest(http.MethodGet, test.path, nil)
 		invalidRequest.Host = "127.0.0.1:8080"
@@ -1069,6 +1136,23 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	if secondPageResponse.Code != http.StatusOK || json.Unmarshal(secondPageResponse.Body.Bytes(), &secondPage) != nil || len(secondPage.Messages) != 1 || secondPage.Messages[0].Id == firstPage.Messages[0].Id || secondPage.NextCursor != nil {
 		t.Fatalf("second page status=%d body=%s", secondPageResponse.Code, secondPageResponse.Body.String())
 	}
+	deleteInboundRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/messages/"+remoteHistory.Messages[0].Id, nil)
+	deleteInboundRequest.Host = "127.0.0.1:8080"
+	deleteInboundResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(deleteInboundResponse, deleteInboundRequest)
+	if deleteInboundResponse.Code != http.StatusNoContent {
+		t.Fatalf("delete inbound status=%d body=%s", deleteInboundResponse.Code, deleteInboundResponse.Body.String())
+	}
+	deletedBoundaryRequest := httptest.NewRequest(http.MethodPut, "/api/v1/message-conversations/read-state", bytes.NewReader(readBody))
+	deletedBoundaryRequest.Host = "127.0.0.1:8080"
+	deletedBoundaryRequest.Header.Set("Content-Type", "application/json")
+	deletedBoundaryResponse := httptest.NewRecorder()
+	authorized.ServeHTTP(deletedBoundaryResponse, deletedBoundaryRequest)
+	var deletedBoundaryError openapi.ApiError
+	if deletedBoundaryResponse.Code != http.StatusNotFound || json.Unmarshal(deletedBoundaryResponse.Body.Bytes(), &deletedBoundaryError) != nil ||
+		deletedBoundaryError.Code != "MESSAGE_READ_BOUNDARY_NOT_FOUND" || deletedBoundaryError.Retryable {
+		t.Fatalf("deleted boundary status=%d body=%s", deletedBoundaryResponse.Code, deletedBoundaryResponse.Body.String())
+	}
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/messages/"+sent.Id, nil)
 	deleteRequest.Host = "127.0.0.1:8080"
 	deleteResponse := httptest.NewRecorder()
@@ -1077,7 +1161,7 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 		t.Fatalf("delete status = %d body = %s", deleteResponse.Code, deleteResponse.Body.String())
 	}
 	remaining, err := stores.CountSMS(ctx)
-	if err != nil || remaining != 1 {
+	if err != nil || remaining != 0 {
 		t.Fatalf("remaining message count = %d error = %v", remaining, err)
 	}
 }

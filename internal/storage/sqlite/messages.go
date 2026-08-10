@@ -74,7 +74,12 @@ func (set *Set) CreateInboundSMS(ctx context.Context, message sms.Message) (sms.
 	if updatedAt < createdAt {
 		updatedAt = createdAt
 	}
-	result, err := set.Messages.ExecContext(ctx, `
+	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return sms.Message{}, false, fmt.Errorf("begin inbound SMS transaction: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO sms_messages (
     message_id, operation_id, direction, line_id, remote_address, body, status,
     provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
@@ -88,7 +93,12 @@ ON CONFLICT(line_id, provider_message_id) WHERE direction = 'inbound' AND provid
 	if err != nil {
 		return sms.Message{}, false, fmt.Errorf("read inbound SMS creation result: %w", err)
 	}
-	stored, found, err := set.smsInboundBySource(ctx, message.LineID, message.ProviderMessageID)
+	stored, found, err := scanOptionalSMS(tx.QueryRowContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE direction = 'inbound' AND line_id = ? AND provider_message_id = ?
+`, message.LineID, message.ProviderMessageID))
 	if err != nil {
 		return sms.Message{}, false, err
 	}
@@ -99,7 +109,18 @@ ON CONFLICT(line_id, provider_message_id) WHERE direction = 'inbound' AND provid
 		if stored.RemoteAddress != message.RemoteAddress || stored.Body != message.Body || stored.Direction != sms.DirectionInbound {
 			return sms.Message{}, false, sms.ErrSourceConflict
 		}
+		if err := tx.Commit(); err != nil {
+			return sms.Message{}, false, fmt.Errorf("commit replayed inbound SMS: %w", err)
+		}
 		return stored, true, nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO sms_message_unread (message_id, remote_address) VALUES (?, ?)
+`, stored.ID, stored.RemoteAddress); err != nil {
+		return sms.Message{}, false, fmt.Errorf("create inbound SMS unread marker: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return sms.Message{}, false, fmt.Errorf("commit inbound SMS: %w", err)
 	}
 	return stored, false, nil
 }
@@ -239,16 +260,64 @@ func (set *Set) ListSMS(ctx context.Context, limit int) ([]sms.Message, error) {
 }
 
 func (set *Set) ListSMSPage(ctx context.Context, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], error) {
+	page, _, err := set.ListSMSPageWithUnread(ctx, request, lineID, remoteAddress)
+	return page, err
+}
+
+// ListSMSPageWithUnread returns a read boundary only for the newest
+// remote-address-only page. The page and boundary are read from one SQLite
+// transaction so the token never claims messages outside that snapshot.
+func (set *Set) ListSMSPageWithUnread(ctx context.Context, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], *sms.UnreadBoundary, error) {
 	if set == nil || set.Messages == nil {
-		return pagination.Page[sms.Message]{}, fmt.Errorf("messages database is not open")
+		return pagination.Page[sms.Message]{}, nil, fmt.Errorf("messages database is not open")
 	}
-	if request.Limit < 1 || request.Limit > pagination.MaximumLimit || (lineID == "") != (remoteAddress == "") {
-		return pagination.Page[sms.Message]{}, fmt.Errorf("invalid SMS page request")
+	if request.Limit < 1 || request.Limit > pagination.MaximumLimit || (lineID != "" && remoteAddress == "") {
+		return pagination.Page[sms.Message]{}, nil, fmt.Errorf("invalid SMS page request")
 	}
+	if lineID == "" && remoteAddress != "" && request.After == nil {
+		tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return pagination.Page[sms.Message]{}, nil, fmt.Errorf("begin SMS page snapshot: %w", err)
+		}
+		defer tx.Rollback()
+		page, err := listSMSPage(ctx, tx, request, lineID, remoteAddress)
+		if err != nil {
+			return pagination.Page[sms.Message]{}, nil, err
+		}
+		var boundary sms.UnreadBoundary
+		err = tx.QueryRowContext(ctx, `
+SELECT unread_id, message_id
+FROM sms_message_unread
+WHERE remote_address = ?
+ORDER BY unread_id DESC
+LIMIT 1
+`, remoteAddress).Scan(&boundary.UnreadID, &boundary.MessageID)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		} else if err != nil {
+			return pagination.Page[sms.Message]{}, nil, fmt.Errorf("read SMS unread boundary: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return pagination.Page[sms.Message]{}, nil, fmt.Errorf("commit SMS page snapshot: %w", err)
+		}
+		if boundary.UnreadID == 0 {
+			return page, nil, nil
+		}
+		return page, &boundary, nil
+	}
+	page, err := listSMSPage(ctx, set.Messages, request, lineID, remoteAddress)
+	return page, nil, err
+}
+
+type smsPageQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func listSMSPage(ctx context.Context, querier smsPageQuerier, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], error) {
 	var rows *sql.Rows
 	var err error
 	if lineID != "" && request.After != nil {
-		rows, err = set.Messages.QueryContext(ctx, `
+		rows, err = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
@@ -258,16 +327,35 @@ ORDER BY created_at_unix_ms DESC, message_id DESC
 LIMIT ?
 `, lineID, remoteAddress, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
 	} else if lineID != "" {
-		rows, err = set.Messages.QueryContext(ctx, `
+		rows, err = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
 WHERE line_id = ? AND remote_address = ?
 ORDER BY created_at_unix_ms DESC, message_id DESC
 LIMIT ?
-`, lineID, remoteAddress, request.Limit+1)
+		`, lineID, remoteAddress, request.Limit+1)
+	} else if remoteAddress != "" && request.After != nil {
+		rows, err = querier.QueryContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE remote_address = ?
+  AND (created_at_unix_ms, message_id) < (?, ?)
+ORDER BY created_at_unix_ms DESC, message_id DESC
+LIMIT ?
+`, remoteAddress, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
+	} else if remoteAddress != "" {
+		rows, err = querier.QueryContext(ctx, `
+SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+       provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
+FROM sms_messages
+WHERE remote_address = ?
+ORDER BY created_at_unix_ms DESC, message_id DESC
+LIMIT ?
+`, remoteAddress, request.Limit+1)
 	} else if request.After != nil {
-		rows, err = set.Messages.QueryContext(ctx, `
+		rows, err = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
@@ -276,7 +364,7 @@ ORDER BY created_at_unix_ms DESC, message_id DESC
 LIMIT ?
 `, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit+1)
 	} else {
-		rows, err = set.Messages.QueryContext(ctx, `
+		rows, err = querier.QueryContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
@@ -306,6 +394,131 @@ LIMIT ?
 		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
 	return page, nil
+}
+
+func (set *Set) ListSMSConversationPage(ctx context.Context, request pagination.Request) (pagination.Page[sms.ConversationSummary], error) {
+	if set == nil || set.Messages == nil {
+		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("messages database is not open")
+	}
+	if request.Limit < 1 || request.Limit > pagination.MaximumLimit {
+		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("invalid SMS conversation page request")
+	}
+	query := `
+WITH latest AS (
+    SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
+           provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms,
+           ROW_NUMBER() OVER (
+               PARTITION BY remote_address
+               ORDER BY created_at_unix_ms DESC, message_id DESC
+           ) AS position
+    FROM sms_messages
+)
+SELECT latest.message_id, latest.operation_id, latest.direction, latest.line_id,
+       latest.remote_address, latest.body, latest.status, latest.provider_message_id,
+       latest.error_code, latest.created_at_unix_ms, latest.updated_at_unix_ms,
+       latest.sent_at_unix_ms,
+       (SELECT COUNT(*) FROM sms_message_unread unread
+        WHERE unread.remote_address = latest.remote_address) AS unread_count,
+       COALESCE((SELECT outbound.line_id FROM sms_messages outbound
+                 WHERE outbound.remote_address = latest.remote_address
+                   AND outbound.direction = 'outbound'
+                 ORDER BY outbound.created_at_unix_ms DESC, outbound.message_id DESC
+                 LIMIT 1), '') AS last_outbound_line_id
+FROM latest
+WHERE latest.position = 1`
+	args := make([]any, 0, 3)
+	if request.After != nil {
+		query += ` AND (latest.created_at_unix_ms, latest.message_id) < (?, ?)`
+		args = append(args, request.After.CreatedAt.UTC().UnixMilli(), request.After.ID)
+	}
+	query += ` ORDER BY latest.created_at_unix_ms DESC, latest.message_id DESC LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := set.Messages.QueryContext(ctx, query, args...)
+	if err != nil {
+		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("list SMS conversations: %w", err)
+	}
+	defer rows.Close()
+	items := make([]sms.ConversationSummary, 0, request.Limit+1)
+	for rows.Next() {
+		var item sms.ConversationSummary
+		message, err := scanSMSWithTail(rows, &item.UnreadCount, &item.LastOutboundLineID)
+		if err != nil {
+			return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("scan SMS conversation: %w", err)
+		}
+		item.RemoteAddress = message.RemoteAddress
+		item.LastMessage = message
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("iterate SMS conversations: %w", err)
+	}
+	page := pagination.Page[sms.ConversationSummary]{Items: items}
+	if len(items) > request.Limit {
+		page.Items = items[:request.Limit]
+		last := page.Items[len(page.Items)-1].LastMessage
+		page.Next = &pagination.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	return page, nil
+}
+
+func (set *Set) CountSMSConversations(ctx context.Context) (int64, error) {
+	if set == nil || set.Messages == nil {
+		return 0, fmt.Errorf("messages database is not open")
+	}
+	var count int64
+	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(DISTINCT remote_address) FROM sms_messages`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count SMS conversations: %w", err)
+	}
+	return count, nil
+}
+
+func (set *Set) MarkSMSConversationRead(ctx context.Context, remoteAddress string, boundary sms.UnreadBoundary) (bool, error) {
+	if set == nil || set.Messages == nil || remoteAddress == "" || boundary.UnreadID <= 0 || boundary.MessageID == "" {
+		return false, sms.ErrReadBoundaryInvalid
+	}
+	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return false, fmt.Errorf("begin SMS read-state transaction: %w", err)
+	}
+	defer tx.Rollback()
+	var storedRemote, direction string
+	if err := tx.QueryRowContext(ctx, `SELECT remote_address, direction FROM sms_messages WHERE message_id = ?`, boundary.MessageID).Scan(&storedRemote, &direction); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrSMSMessageNotFound
+		}
+		return false, fmt.Errorf("find SMS read boundary: %w", err)
+	}
+	if storedRemote != remoteAddress || direction != sms.DirectionInbound {
+		return false, sms.ErrReadBoundaryInvalid
+	}
+	var storedUnreadID int64
+	err = tx.QueryRowContext(ctx, `SELECT unread_id FROM sms_message_unread WHERE message_id = ?`, boundary.MessageID).Scan(&storedUnreadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit idempotent SMS read state: %w", err)
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read SMS unread marker: %w", err)
+	}
+	if storedUnreadID != boundary.UnreadID {
+		return false, sms.ErrReadBoundaryInvalid
+	}
+	result, err := tx.ExecContext(ctx, `
+DELETE FROM sms_message_unread WHERE remote_address = ? AND unread_id <= ?
+`, remoteAddress, boundary.UnreadID)
+	if err != nil {
+		return false, fmt.Errorf("mark SMS conversation read: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read SMS read-state result: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit SMS read state: %w", err)
+	}
+	return changed > 0, nil
 }
 
 func (set *Set) CountSMS(ctx context.Context) (int64, error) {
@@ -618,6 +831,27 @@ func scanSMS(scanner smsScanner) (sms.Message, error) {
 		&message.ID, &message.OperationID, &message.Direction, &message.LineID, &message.RemoteAddress, &message.Body, &message.Status,
 		&message.ProviderMessageID, &message.ErrorCode, &createdAt, &updatedAt, &sentAt,
 	); err != nil {
+		return sms.Message{}, err
+	}
+	message.CreatedAt = time.UnixMilli(createdAt).UTC()
+	message.UpdatedAt = time.UnixMilli(updatedAt).UTC()
+	if sentAt.Valid {
+		value := time.UnixMilli(sentAt.Int64).UTC()
+		message.SentAt = &value
+	}
+	return message, nil
+}
+
+func scanSMSWithTail(scanner smsScanner, tail ...any) (sms.Message, error) {
+	var message sms.Message
+	var createdAt, updatedAt int64
+	var sentAt sql.NullInt64
+	targets := []any{
+		&message.ID, &message.OperationID, &message.Direction, &message.LineID, &message.RemoteAddress, &message.Body, &message.Status,
+		&message.ProviderMessageID, &message.ErrorCode, &createdAt, &updatedAt, &sentAt,
+	}
+	targets = append(targets, tail...)
+	if err := scanner.Scan(targets...); err != nil {
 		return sms.Message{}, err
 	}
 	message.CreatedAt = time.UnixMilli(createdAt).UTC()

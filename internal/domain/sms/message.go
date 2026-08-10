@@ -17,10 +17,11 @@ const (
 )
 
 var (
-	ErrOperationConflict = errors.New("SMS operation id belongs to different parameters")
-	ErrMessageNotFound   = errors.New("SMS message was not found")
-	ErrSourceConflict    = errors.New("inbound SMS source id belongs to different content")
-	ErrStateConflict     = errors.New("SMS message state conflicts with the requested transition")
+	ErrOperationConflict   = errors.New("SMS operation id belongs to different parameters")
+	ErrMessageNotFound     = errors.New("SMS message was not found")
+	ErrSourceConflict      = errors.New("inbound SMS source id belongs to different content")
+	ErrStateConflict       = errors.New("SMS message state conflicts with the requested transition")
+	ErrReadBoundaryInvalid = errors.New("SMS conversation read boundary is invalid")
 )
 
 // Message is the durable, transport-neutral SMS representation used by the
@@ -39,4 +40,20 @@ type Message struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	SentAt            *time.Time
+}
+
+// UnreadBoundary is a monotonic, database-owned snapshot boundary. It is
+// encoded into an opaque public token by the application service.
+type UnreadBoundary struct {
+	UnreadID  int64
+	MessageID string
+}
+
+// ConversationSummary is the durable projection used by the conversation
+// list. Contact and current Line names remain browser-side joins.
+type ConversationSummary struct {
+	RemoteAddress      string
+	LastMessage        Message
+	UnreadCount        int64
+	LastOutboundLineID string
 }
