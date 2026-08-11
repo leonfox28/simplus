@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/08-11-feishu-channel-binding/research/repository-evidence.md","reason":"Review the delivered behavior against every approved product decision and the verified external-platform constraints."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check success/failure/concurrency/privacy/restart coverage with synthetic external I/O and the targeted-to-broad validation ladder."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify generated contract drift, auth/CSRF/no-store boundaries, stable errors, response bounds, and absence of credentials/identities."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Verify fresh/upgrade/Down/reopen behavior, legacy Webhook preservation, conditional persistence invariants, and encrypted fields."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Verify focused Vitest, strict typecheck, production build, synthetic desktop/mobile Playwright, responsive parity, and security audit."}
+{"file":".trellis/spec/web/frontend/state-management.md","reason":"Ensure background completion still converges through authoritative HTTP and transient state is neither persisted in the browser nor duplicated."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Verify ADR, architecture, plan, handoff, troubleshooting and privacy-safe public documentation are consistent and mechanically checked."}

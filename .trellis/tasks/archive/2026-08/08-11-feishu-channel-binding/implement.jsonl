@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-11-feishu-channel-binding/research/repository-evidence.md","reason":"Carries the approved product decisions, current notification anchors, official Feishu device-flow facts, Hermes comparison, and privacy conclusions."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Defines narrow consumer-owned ports, context/cancellation, external side-effect ordering, stable errors, and fail-closed application behavior."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Requires OpenAPI-first HTTP, administrator/CSRF enforcement, bounded clients and responses, stable errors, and sensitive-field exclusion."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Owns core SQLite migration/Down/reopen rules and the encrypted notification-secret persistence contract."}
+{"file":".trellis/spec/web/frontend/component-guidelines.md","reason":"Owns responsive table/card parity, typed forms, destructive confirmations, external actions, and sensitive rendering rules."}
+{"file":".trellis/spec/web/frontend/hook-guidelines.md","reason":"Requires generated TanStack Query operations, no mutation retries, scoped invalidation, and bounded transient polling cleanup."}
+{"file":".trellis/spec/web/frontend/state-management.md","reason":"Keeps HTTP/SQLite authoritative and transient binding state page/server-owned without browser persistence."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Requires generated OpenAPI/Zod contracts and forbids duplicated or cast network payloads."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Routes the durable product, architecture, ADR, active-plan, handoff, and troubleshooting updates to their canonical owners."}
