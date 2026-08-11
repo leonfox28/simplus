@@ -103,3 +103,25 @@ Initialized Trellis and Codex integration, corrected core/web package resolution
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: 优化短信页布局并更新本地容器
+
+**Date**: 2026-08-11
+**Task**: 优化短信页布局并更新本地容器
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+让短信工作区填满主内容区并补充桌面布局边界回归；Web 类型检查、单元测试、生产构建和 Chromium E2E 通过，并将本地 Compose 服务更新到 c4c4dd5。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c4c4dd5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
