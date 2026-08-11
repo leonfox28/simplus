@@ -47,7 +47,6 @@ import {
   updateContactMutation,
 } from '@/api/generated/@tanstack/react-query.gen'
 import type { Contact, ManagedLine } from '@/api/generated/types.gen'
-import { PageHeader } from '@/components/Page'
 import { smsMessagesForDisplay } from '@/messages/order'
 import { smsStatusPresentation } from '@/messages/status'
 
@@ -302,7 +301,6 @@ export default function Messages() {
   const firstConversationPage = conversationsQuery.data?.pages[0]
 
   return <main className="page-content messages-page">
-    <PageHeader title="短信" subtitle="按收件人集中查看跨线路短信会话" />
     {Boolean(operationError) && <Alert className="page-alert" type="error" showIcon title={displayApiError(operationError)} />}
     {firstConversationPage?.nearCapacity && <Alert className="page-alert" type="warning" showIcon title="短信历史接近容量上限，请按需清理旧记录。" />}
 
