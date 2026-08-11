@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-08-11
+- **Total Sessions**: 6
+- **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~127 | Active |
+| `journal-1.md` | ~150 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-08-12 | Feishu private-message channel binding | `6fbef74`, `fa20c82` | `main` |
 | 5 | 2026-08-11 | 优化短信页布局并更新本地容器 | `c4c4dd5` | `main` |
 | 4 | 2026-08-11 | 修复短信会话时间乱序 | `f20cd83`, `d36c2d6`, `b815a7b`, `06cab9d` | `main` |
 | 3 | 2026-08-10 | 重做短信会话页面 | `f8391ad`, `2dc4241`, `107b1de` | `main` |

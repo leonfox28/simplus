@@ -125,3 +125,26 @@ Initialized Trellis and Codex integration, corrected core/web package resolution
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: Feishu private-message channel binding
+
+**Date**: 2026-08-12
+**Task**: Feishu private-message channel binding
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Implemented and independently verified zero-form Feishu private-message binding with create-only minimal permissions, test-before-persist encrypted app credentials, local-only unbind, Web/API/storage/UI coverage, ADR/docs, and synthetic-only validation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6fbef74` | (see git log) |
+| `fa20c82` | (see git log) |
+
+### Status
+
+[OK] **Completed**
