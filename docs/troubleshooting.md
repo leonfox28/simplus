@@ -72,6 +72,23 @@
 - 切换订阅只在自检成功后改变 selected；是否重启必须由显式生命周期操作决定；
 - controller 和 External UI 使用独立 secret，不在 Web 错误、URL 或日志中回显。
 
+## 飞书私聊绑定错误
+
+| 错误码 | 含义 | 建议 |
+| --- | --- | --- |
+| `FEISHU_BINDING_ACTIVE` | 已有等待或测试中的绑定 | 完成或取消当前等待，不要重复创建应用 |
+| `FEISHU_BINDING_NOT_CANCELLABLE` | 已进入测试与持久化阶段 | 等待确定终态，避免产生不明确的半绑定 |
+| `FEISHU_BINDING_DENIED` | 管理员拒绝授权 | 确认意图后重新生成短期链接 |
+| `FEISHU_BINDING_EXPIRED` | 验证链接已过期 | 重新发起绑定，不复用旧链接 |
+| `FEISHU_BINDING_LARK_UNSUPPORTED` | 授权结果来自当前不支持的 Lark 租户 | 使用飞书中国版租户或保留 Webhook 渠道 |
+| `FEISHU_BINDING_RESULT_INVALID` | 授权结果缺少必需字段或不符合边界 | 重新发起；持续出现时检查版本与供应商状态 |
+| `FEISHU_BINDING_PROVIDER_FAILED` | 注册或供应商网络失败 | 稍后重试；既有通知渠道不受影响 |
+| `FEISHU_BINDING_TEST_FAILED` | 应用已授权但测试私聊失败 | 检查飞书侧应用状态；应用可能已保留，本地没有成功渠道 |
+| `FEISHU_BINDING_PERSIST_FAILED` | 测试已发送但本地保存失败 | 检查 core 数据库；不要自动重发测试，飞书侧应用可能已保留 |
+
+排查只使用状态和上述稳定码。不要复制验证 URL、App ID/App Secret、access token、
+`open_id`、供应商响应正文或页面截图。删除本地渠道不会停用或删除飞书侧应用。
+
 ## 服务恢复
 
 - `simplusd` 保存用户意图，不伪造网络运行事实；

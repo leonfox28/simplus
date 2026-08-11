@@ -174,6 +174,117 @@ ORDER BY record_sequence DESC
 nextCursor, err := pagination.EncodeSMS(boundary)
 ```
 
+## Scenario: Ephemeral External-App Binding
+
+### 1. Scope / Trigger
+
+Use this contract when an administrator authorizes a third-party application
+through a short-lived browser URL and the result becomes an outbound
+notification channel. Feishu private-message binding is the current concrete
+implementation. The authorization workflow is transient; the resulting
+channel is durable, credentialless at the public boundary, and outbound-only.
+
+### 2. Signatures
+
+- `GET /api/v1/notification-channel-bindings/feishu` reads the current
+  transient attempt.
+- `POST /api/v1/notification-channel-bindings/feishu` starts one attempt;
+  `DELETE` cancels a waiting attempt.
+- `Service.ConfigureFeishuBinding(processCtx, registrar, messenger, onChange)`
+  injects process lifetime and the two fixed-purpose provider ports.
+- `Service.StartFeishuBinding(context.Context)`,
+  `Service.FeishuBindingStatus()`, and `Service.CancelFeishuBinding()` own the
+  state machine. HTTP handlers do not poll providers or persist credentials.
+- `feishu_app_notification_channels` owns encrypted `app_id`, `app_secret`,
+  and recipient `open_id` ciphertexts separately from the legacy Webhook
+  table. Its schema version is core v23.
+
+### 3. Contracts
+
+- Public states are `idle`, `waiting`, `testing`, `succeeded`, `failed`,
+  `expired`, and `cancelled`. Only `waiting` may expose `verificationUrl` and
+  `expiresAt`; ordinary channel responses never expose provider credentials,
+  device codes, tokens, or recipient IDs.
+- Binding endpoints require an administrator session. `POST` and `DELETE`
+  require CSRF, and every binding response carries `Cache-Control: no-store`.
+- One process permits at most one `waiting` or `testing` attempt. A generation
+  fence prevents stale or cancelled work from testing or persisting.
+- The registrar is fixed to approved HTTPS hosts/paths, create-only behavior,
+  a minimal preset, and exactly `im:message:send_as_bot`. Redirects, Lark
+  results, absent explicit provider success codes, oversized responses, and
+  polls after the advertised expiry fail closed.
+- Authorization must return a valid Feishu App ID, App Secret, and the
+  authorizing user's `open_id`. The messenger sends one bounded text test to
+  that `open_id`; only an explicit provider success response permits
+  encryption and persistence.
+- App ID, App Secret, and recipient `open_id` use independent, versioned AEAD
+  labels containing the channel ID. A successful row defaults to display name
+  `飞书私聊`, enabled, all five notification event kinds, and successful last
+  delivery status.
+- Public `NotificationChannel` discriminates `deliveryMode` as `webhook` or
+  `feishu_app` and `targetType` as `webhook` or `authorized_user`. App-channel
+  settings updates may change name, enabled state, and events but reject
+  non-empty Webhook/signing-secret replacement fields.
+- Legacy Webhook rows keep their existing table and credential semantics.
+  Deleting an app channel removes only local use; it does not claim to revoke
+  or delete the provider-side application.
+
+### 4. Validation & Error Matrix
+
+| Condition | HTTP/application result |
+| --- | --- |
+| no configured registrar or messenger | `503 FEISHU_BINDING_UNAVAILABLE` |
+| start while `waiting` or `testing` | `409 FEISHU_BINDING_ACTIVE` |
+| cancel while `waiting` | `cancelled`; child context released |
+| cancel while `testing` | `409 FEISHU_BINDING_NOT_CANCELLABLE` |
+| authorization denied | terminal `failed / FEISHU_BINDING_DENIED`; no row |
+| authorization expires or next poll would exceed expiry | terminal `expired / FEISHU_BINDING_EXPIRED`; no row |
+| Lark tenant or malformed/implicit-success provider result | terminal stable failure; no row |
+| test message lacks explicit success or delivery fails | `failed / FEISHU_BINDING_TEST_FAILED`; no row |
+| encryption or persistence fails | `failed / FEISHU_BINDING_PERSIST_FAILED`; no usable row |
+| process exits during a pending attempt | context cancellation; next process starts at `idle` |
+| successful test and persistence | `succeeded` with `channelId`; publish notification invalidation |
+
+### 5. Good / Base / Bad Cases
+
+- Good: the administrator opens the transient URL, authorizes, receives one
+  private test message, and then sees one enabled credentialless channel.
+- Base: denial, expiry, cancellation, restart, or provider failure leaves no
+  local channel and exposes only a stable bounded error code.
+- Bad: persisting before the test, treating a missing provider code as zero
+  success, storing the verification URL, or reusing Webhook ciphertext fields
+  creates an ambiguous or falsely successful channel.
+
+### 6. Tests Required
+
+- Synthetic registrar/messenger tests for success, denial, expiry fencing,
+  slow-down, cancellation, stale generations, process cancellation, Lark,
+  malformed results, explicit success codes, bounded responses, test failure,
+  persistence failure, and terminal context release.
+- SQLite fresh/upgrade/Down/reopen tests for strict channel IDs, JSON-array
+  events, encrypted field bounds, legacy Webhook preservation, deletion, and
+  cross-table ID collisions.
+- Real-router tests for administrator auth, CSRF, no-store, stable errors,
+  response privacy, and background-success visibility.
+- Web unit and synthetic desktop/mobile E2E tests for bounded polling, URL
+  visibility only while waiting, invalidation on success, editing, responsive
+  target display, and local-only deletion warnings.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: creates a durable channel before delivery is proven.
+store.UpsertNotificationChannel(ctx, channel)
+_ = messenger.SendText(ctx, credentials, testMessage)
+
+// Correct: explicit provider success precedes independent encryption and row creation.
+if err := s.FeishuMessenger.SendText(ctx, result, testMessage); err != nil {
+    s.finishBindingFailure(generation, err, BindingErrorTestFailed)
+    return
+}
+// Encrypt each field with its own label, then call Store.UpsertNotificationChannel.
+```
+
 ## Bounded Internal Unix Protocols
 
 The Agent protocol is code-owned rather than OpenAPI-owned, but it follows the

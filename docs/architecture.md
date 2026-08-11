@@ -294,10 +294,27 @@ Web -> emergency/number validation -> modem worker
   `sms_message_unread` 继续以独立 `AUTOINCREMENT` 到达序号记录首次入站，计数从 marker
   派生，message 删除级联 marker，旧 v6 历史升级时 ledger 为空；
 - core 数据库保存 Host VoWiFi `desired_active`，但不保存网络运行事实或鉴权材料；
+- core v23 以独立 `feishu_app_notification_channels` 表保存飞书应用私聊渠道；App ID、
+  App Secret 与授权用户 `open_id` 使用字段独立的实例密钥标签加密。旧 Webhook 渠道
+  继续留在 v12 表，两个变体通过应用层 `deliveryMode` 合并读取；
 - 新表放到语义最接近的现有库；
 - 不新增 dataset identity、备份协议或跨库事务框架；
 - MVP 后再评估是否合并为一个 SQLite 数据库；
 - 目录与数据库保持普通 `0700/0600` 权限即可，不继续扩展 inode/mount 身份策略。
+
+### 飞书通知绑定
+
+```text
+Web POST -> 内存中的单实例绑定状态 -> 固定 accounts.feishu.cn 设备授权轮询
+         -> 授权结果校验 -> 固定 open.feishu.cn 私聊测试
+         -> 三字段独立加密 -> core v23 应用渠道行 -> notifications 失效提示
+```
+
+验证 URL、device code 和等待状态不进入 SQLite、SSE 或日志；普通渠道列表只返回
+`deliveryMode=feishu_app`、`targetType=authorized_user` 和固定 endpoint hint。测试成功
+是持久化前置条件。删除只停止本地 credential 使用并删除本地行，不调用飞书应用管理
+接口。该边界不引入公网 callback、入站消息、群聊或通用飞书 API，详见
+[`0025`](decisions/0025-feishu-private-message-binding.md)。
 
 ## 7. 必须保持的机械不变量
 

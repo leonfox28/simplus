@@ -14,6 +14,8 @@
 - React、Vite、React Router、直接 Ant Design 与 TanStack Query 后台；
 - OpenAPI 生成 Fetch/TypeScript/Zod/Query 契约，鉴权 HTTP 承载权威读写，同源 SSE 只做有界失效和新短信/来电提示；
 - 概览、模组、线路、短信、语音、Mihomo、通知和系统设置页面；
+- 通知页保留企业微信/飞书手工 Webhook，并已增加飞书中国版最小权限应用的一键绑定：
+  短期 URL 等待授权，只向授权用户私聊，测试成功后才加密持久化；解绑只删除本地绑定；
 - production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / bootstrap` 编排全新实例；原生 Debian bundle 和三个 systemd 服务在 clean-VM 生命周期验收前保留为回退，二者不共享数据也不能同时运行；
 - Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布；netd 镜像安装该包和 Debian runtime，不要求用户或普通开发者提供 strongSwan 源码树；
 - 全新容器实例由 bootstrap 生成随机管理员密码；原生安装器保持相同语义，升级不覆盖凭据。

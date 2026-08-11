@@ -38,6 +38,20 @@
 | 27：显式前端运行时与后端权威通信 | Vite/React Router/直接 Ant Design/TanStack Query、生成客户端、游标分页与有界 SSE 失效流 |
 | 28：收件人短信会话 | 跨 Line 收件人会话、持久未读水位、桌面双栏与手机主从工作区 |
 | 29：短信首次持久化顺序 | messages v8 record sequence、SMS v2 cursor、历史修复和服务端顺序消费 |
+| 30：飞书私聊一键绑定 | 最小权限一键创建应用、授权用户私聊、测试后加密持久化和仅本地解绑 |
+
+## Milestone 30：飞书私聊一键绑定（已完成）
+
+- [x] 接受 [`0025`](../../decisions/0025-feishu-private-message-binding.md)，限定飞书中国版、
+  授权用户私聊、单向出站、最小发送权限和仅本地解绑；
+- [x] core v23 增加独立应用渠道表，三个敏感字段使用独立密文标签，旧 Webhook 表不
+  重建；Down 只删除本地应用渠道；
+- [x] 固定主机与路径的注册/消息客户端实现有界设备授权轮询、slow-down、拒绝、过期、
+  Lark 拒绝、无重定向、响应上限和 test-before-persist；
+- [x] OpenAPI、鉴权/CSRF/no-store HTTP 和 Vite/TanStack Query 页面完成 waiting/testing/
+  terminal 状态、响应式目标显示、编辑与模式化删除确认；
+- [x] Go、SQLite、HTTP、Vitest 与 Playwright 只使用合成 provider/transport；未创建真实
+  飞书应用或发送真实消息。
 
 ## Milestone 29：短信首次持久化顺序（已完成）
 
