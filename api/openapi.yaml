@@ -379,6 +379,29 @@ paths:
       responses:
         "201": { description: Created channel, content: { application/json: { schema: { $ref: "#/components/schemas/NotificationChannel" } } } }
         "400": { description: Invalid channel, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+  /api/v1/notification-channel-bindings/feishu:
+    get:
+      operationId: getFeishuNotificationBinding
+      tags: [notifications]
+      summary: Read the current transient Feishu private-message binding attempt
+      responses:
+        "200": { description: Current binding state, headers: { Cache-Control: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/FeishuNotificationBinding" } } } }
+        "503": { description: Binding service unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    post:
+      operationId: startFeishuNotificationBinding
+      tags: [notifications]
+      summary: Start one create-only least-privilege Feishu application binding attempt
+      responses:
+        "201": { description: Waiting for administrator authorization, headers: { Cache-Control: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/FeishuNotificationBinding" } } } }
+        "409": { description: Another binding is active, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+        "502": { description: Feishu registration could not be started, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
+    delete:
+      operationId: cancelFeishuNotificationBinding
+      tags: [notifications]
+      summary: Cancel a waiting Feishu binding attempt
+      responses:
+        "200": { description: Current binding state, headers: { Cache-Control: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/FeishuNotificationBinding" } } } }
+        "409": { description: The attempt is already testing and cannot be cancelled, content: { application/json: { schema: { $ref: "#/components/schemas/ApiError" } } } }
   /api/v1/notification-channels/{channelId}:
     parameters:
       - { name: channelId, in: path, required: true, schema: { type: string, pattern: "^channel_[A-Za-z0-9_-]{22}$" } }
@@ -2923,10 +2946,12 @@ components:
     NotificationChannel:
       type: object
       additionalProperties: false
-      required: [id, provider, displayName, webhookHint, signingSecretConfigured, enabled, eventKinds, lastDeliveryAt, lastDeliveryStatus, lastErrorCode]
+      required: [id, provider, deliveryMode, targetType, displayName, webhookHint, signingSecretConfigured, enabled, eventKinds, lastDeliveryAt, lastDeliveryStatus, lastErrorCode]
       properties:
         id: { type: string, pattern: "^channel_[A-Za-z0-9_-]{22}$" }
         provider: { type: string, enum: [wecom, feishu] }
+        deliveryMode: { type: string, enum: [webhook, feishu_app] }
+        targetType: { type: string, enum: [webhook, authorized_user] }
         displayName: { type: string, minLength: 1, maxLength: 80 }
         webhookHint: { type: string, enum: [qyapi.weixin.qq.com, open.feishu.cn] }
         signingSecretConfigured: { type: boolean }
@@ -2952,6 +2977,16 @@ components:
       required: [channels]
       properties:
         channels: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/NotificationChannel" } }
+    FeishuNotificationBinding:
+      type: object
+      additionalProperties: false
+      required: [state, verificationUrl, expiresAt, channelId, errorCode]
+      properties:
+        state: { type: string, enum: [idle, waiting, testing, succeeded, failed, expired, cancelled] }
+        verificationUrl: { type: string, maxLength: 4096, description: Present only while waiting; never persisted }
+        expiresAt: { type: string, maxLength: 64 }
+        channelId: { type: string, pattern: "^$|^channel_[A-Za-z0-9_-]{22}$" }
+        errorCode: { type: string, maxLength: 64, pattern: "^$|^[A-Z0-9_]+$" }
     AuthSessionResponse:
       type: object
       additionalProperties: false

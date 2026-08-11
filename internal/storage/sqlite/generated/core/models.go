@@ -24,6 +24,21 @@ type DatasetMetadatum struct {
 	SchemaVersion int64  `json:"schema_version"`
 }
 
+type FeishuAppNotificationChannel struct {
+	ID                        string         `json:"id"`
+	DisplayName               string         `json:"display_name"`
+	AppIDCiphertext           []byte         `json:"app_id_ciphertext"`
+	AppSecretCiphertext       []byte         `json:"app_secret_ciphertext"`
+	RecipientOpenIDCiphertext []byte         `json:"recipient_open_id_ciphertext"`
+	Enabled                   int64          `json:"enabled"`
+	EventKinds                string         `json:"event_kinds"`
+	LastDeliveryAtUtc         sql.NullString `json:"last_delivery_at_utc"`
+	LastDeliveryStatus        string         `json:"last_delivery_status"`
+	LastErrorCode             string         `json:"last_error_code"`
+	CreatedAtUtc              string         `json:"created_at_utc"`
+	UpdatedAtUtc              string         `json:"updated_at_utc"`
+}
+
 type InstallationState struct {
 	Singleton             int64          `json:"singleton"`
 	State                 string         `json:"state"`

@@ -27,6 +27,7 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	messageapp "github.com/leonfox28/simplus/internal/application/messaging"
+	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	"github.com/leonfox28/simplus/internal/application/realtime"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
 	"github.com/leonfox28/simplus/internal/domain/hardware"
@@ -47,6 +48,38 @@ type fixedStateStore string
 
 func (store fixedStateStore) InstallationState(context.Context) (string, error) {
 	return string(store), nil
+}
+
+type testNotificationManager struct {
+	state                   notificationapp.BindingView
+	startCalls, cancelCalls int
+	startErr, cancelErr     error
+}
+
+func (manager *testNotificationManager) List(context.Context) ([]notificationapp.ChannelView, error) {
+	return []notificationapp.ChannelView{{ID: "channel_AAAAAAAAAAAAAAAAAAAAAA", Provider: "feishu", DeliveryMode: "feishu_app", TargetType: "authorized_user", DisplayName: "飞书私聊", WebhookHint: "open.feishu.cn", Enabled: true, EventKinds: []string{"sms.received"}, LastDeliveryStatus: "success"}}, nil
+}
+func (*testNotificationManager) Create(context.Context, string, string, string, string, bool, []string) (notificationapp.ChannelView, error) {
+	return notificationapp.ChannelView{}, nil
+}
+func (*testNotificationManager) Update(context.Context, string, string, string, string, string, bool, []string) (notificationapp.ChannelView, error) {
+	return notificationapp.ChannelView{}, nil
+}
+func (*testNotificationManager) Delete(context.Context, string) error { return nil }
+func (*testNotificationManager) Test(context.Context, string) (notificationapp.ChannelView, error) {
+	return notificationapp.ChannelView{}, nil
+}
+func (*testNotificationManager) Notify(context.Context, string, string) error { return nil }
+func (manager *testNotificationManager) FeishuBindingStatus() notificationapp.BindingView {
+	return manager.state
+}
+func (manager *testNotificationManager) StartFeishuBinding(context.Context) (notificationapp.BindingView, error) {
+	manager.startCalls++
+	return manager.state, manager.startErr
+}
+func (manager *testNotificationManager) CancelFeishuBinding() (notificationapp.BindingView, error) {
+	manager.cancelCalls++
+	return manager.state, manager.cancelErr
 }
 
 type testLineEgressManager struct {
@@ -1675,5 +1708,84 @@ func TestRequestManagementURLUsesValidatedRequestAuthority(t *testing.T) {
 	request.TLS = &tls.ConnectionState{}
 	if actual := requestManagementURL(request); actual != "https://192.168.50.10:8080" {
 		t.Fatalf("TLS management URL = %q", actual)
+	}
+}
+
+func TestFeishuBindingRouterRequiresAuthAndCSRFUsesNoStoreAndHidesCredentials(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := &testNotificationManager{state: notificationapp.BindingView{
+		State:           notificationapp.BindingStateWaiting,
+		VerificationURL: "https://accounts.feishu.cn/synthetic-verification",
+		ExpiresAt:       time.Date(2026, 8, 11, 5, 0, 0, 0, time.UTC),
+	}}
+	server := WithNotifications(New(health.New(fixedStateStore(setupapp.InstallationReady), "simulator"), setupapp.New(fixedStateStore(setupapp.InstallationReady), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil), manager)
+	raw := Router(server)
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/api/v1/notification-channel-bindings/feishu", nil)
+	unauthorized.Host = "127.0.0.1:8080"
+	unauthorizedResponse := httptest.NewRecorder()
+	raw.ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorizedResponse.Code)
+	}
+
+	missingCSRF := httptest.NewRequest(http.MethodPost, "/api/v1/notification-channel-bindings/feishu", nil)
+	missingCSRF.Host = "127.0.0.1:8080"
+	missingCSRF.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: strings.Repeat("a", 43)})
+	missingCSRFResponse := httptest.NewRecorder()
+	raw.ServeHTTP(missingCSRFResponse, missingCSRF)
+	if missingCSRFResponse.Code != http.StatusForbidden || manager.startCalls != 0 {
+		t.Fatalf("missing CSRF status=%d calls=%d", missingCSRFResponse.Code, manager.startCalls)
+	}
+
+	handler := withTestAdministratorSession(raw)
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		request := httptest.NewRequest(method, "/api/v1/notification-channel-bindings/feishu", nil)
+		request.Host = "127.0.0.1:8080"
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		want := http.StatusOK
+		if method == http.MethodPost {
+			want = http.StatusCreated
+		}
+		if response.Code != want || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s status=%d cache=%q body=%s", method, response.Code, response.Header().Get("Cache-Control"), response.Body.String())
+		}
+		body := response.Body.String()
+		for _, forbidden := range []string{"client_id", "app_secret", "open_id", "device_code"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s response exposed %s: %s", method, forbidden, body)
+			}
+		}
+	}
+	if manager.startCalls != 1 || manager.cancelCalls != 1 {
+		t.Fatalf("calls start=%d cancel=%d", manager.startCalls, manager.cancelCalls)
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/notification-channels", nil)
+	listRequest.Host = "127.0.0.1:8080"
+	listResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	if strings.Contains(listResponse.Body.String(), "open_id") || !strings.Contains(listResponse.Body.String(), `"deliveryMode":"feishu_app"`) || !strings.Contains(listResponse.Body.String(), `"targetType":"authorized_user"`) {
+		t.Fatalf("list privacy/discriminants = %s", listResponse.Body.String())
+	}
+	manager.startErr = notificationapp.ErrBindingActive
+	conflictRequest := httptest.NewRequest(http.MethodPost, "/api/v1/notification-channel-bindings/feishu", nil)
+	conflictRequest.Host = "127.0.0.1:8080"
+	conflictResponse := httptest.NewRecorder()
+	handler.ServeHTTP(conflictResponse, conflictRequest)
+	if conflictResponse.Code != http.StatusConflict || !strings.Contains(conflictResponse.Body.String(), `"code":"FEISHU_BINDING_ACTIVE"`) {
+		t.Fatalf("start conflict status=%d body=%s", conflictResponse.Code, conflictResponse.Body.String())
+	}
+	manager.cancelErr = notificationapp.ErrBindingNotCancelable
+	cancelConflictRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/notification-channel-bindings/feishu", nil)
+	cancelConflictRequest.Host = "127.0.0.1:8080"
+	cancelConflictResponse := httptest.NewRecorder()
+	handler.ServeHTTP(cancelConflictResponse, cancelConflictRequest)
+	if cancelConflictResponse.Code != http.StatusConflict || !strings.Contains(cancelConflictResponse.Body.String(), `"code":"FEISHU_BINDING_NOT_CANCELLABLE"`) {
+		t.Fatalf("cancel conflict status=%d body=%s", cancelConflictResponse.Code, cancelConflictResponse.Body.String())
 	}
 }

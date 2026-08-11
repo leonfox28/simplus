@@ -652,6 +652,8 @@ export type NotificationEventKind = 'sms.received' | 'sms.failed' | 'call.incomi
 export type NotificationChannel = {
     id: string;
     provider: 'wecom' | 'feishu';
+    deliveryMode: 'webhook' | 'feishu_app';
+    targetType: 'webhook' | 'authorized_user';
     displayName: string;
     webhookHint: 'qyapi.weixin.qq.com' | 'open.feishu.cn';
     signingSecretConfigured: boolean;
@@ -679,6 +681,17 @@ export type NotificationChannelMutation = {
 
 export type NotificationChannelList = {
     channels: Array<NotificationChannel>;
+};
+
+export type FeishuNotificationBinding = {
+    state: 'idle' | 'waiting' | 'testing' | 'succeeded' | 'failed' | 'expired' | 'cancelled';
+    /**
+     * Present only while waiting; never persisted
+     */
+    verificationUrl: string;
+    expiresAt: string;
+    channelId: string;
+    errorCode: string;
 };
 
 export type AuthSessionResponse = {
@@ -1532,6 +1545,85 @@ export type CreateNotificationChannelResponses = {
 };
 
 export type CreateNotificationChannelResponse = CreateNotificationChannelResponses[keyof CreateNotificationChannelResponses];
+
+export type CancelFeishuNotificationBindingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/notification-channel-bindings/feishu';
+};
+
+export type CancelFeishuNotificationBindingErrors = {
+    /**
+     * The attempt is already testing and cannot be cancelled
+     */
+    409: ApiError;
+};
+
+export type CancelFeishuNotificationBindingError = CancelFeishuNotificationBindingErrors[keyof CancelFeishuNotificationBindingErrors];
+
+export type CancelFeishuNotificationBindingResponses = {
+    /**
+     * Current binding state
+     */
+    200: FeishuNotificationBinding;
+};
+
+export type CancelFeishuNotificationBindingResponse = CancelFeishuNotificationBindingResponses[keyof CancelFeishuNotificationBindingResponses];
+
+export type GetFeishuNotificationBindingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/notification-channel-bindings/feishu';
+};
+
+export type GetFeishuNotificationBindingErrors = {
+    /**
+     * Binding service unavailable
+     */
+    503: ApiError;
+};
+
+export type GetFeishuNotificationBindingError = GetFeishuNotificationBindingErrors[keyof GetFeishuNotificationBindingErrors];
+
+export type GetFeishuNotificationBindingResponses = {
+    /**
+     * Current binding state
+     */
+    200: FeishuNotificationBinding;
+};
+
+export type GetFeishuNotificationBindingResponse = GetFeishuNotificationBindingResponses[keyof GetFeishuNotificationBindingResponses];
+
+export type StartFeishuNotificationBindingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/notification-channel-bindings/feishu';
+};
+
+export type StartFeishuNotificationBindingErrors = {
+    /**
+     * Another binding is active
+     */
+    409: ApiError;
+    /**
+     * Feishu registration could not be started
+     */
+    502: ApiError;
+};
+
+export type StartFeishuNotificationBindingError = StartFeishuNotificationBindingErrors[keyof StartFeishuNotificationBindingErrors];
+
+export type StartFeishuNotificationBindingResponses = {
+    /**
+     * Waiting for administrator authorization
+     */
+    201: FeishuNotificationBinding;
+};
+
+export type StartFeishuNotificationBindingResponse = StartFeishuNotificationBindingResponses[keyof StartFeishuNotificationBindingResponses];
 
 export type DeleteNotificationChannelData = {
     body?: never;

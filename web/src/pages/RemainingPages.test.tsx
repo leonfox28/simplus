@@ -60,8 +60,10 @@ describe('remaining page boundaries', () => {
   it('does not render server-held notification credentials', async () => {
     vi.stubGlobal('fetch', vi.fn(async (request: Request) => {
       const path = new URL(request.url).pathname
+      if (path === '/api/v1/notification-channel-bindings/feishu') return json({ state: 'idle', verificationUrl: '', expiresAt: '', channelId: '', errorCode: '' })
       if (path === '/api/v1/notification-channels') return json({ channels: [{
         id: 'channel_AAAAAAAAAAAAAAAAAAAAAA', provider: 'wecom', displayName: 'Synthetic Channel',
+        deliveryMode: 'webhook', targetType: 'webhook',
         webhookHint: 'qyapi.weixin.qq.com', signingSecretConfigured: true, enabled: true,
         eventKinds: ['sms.received'], lastDeliveryAt: '', lastDeliveryStatus: 'never', lastErrorCode: '',
       }] })

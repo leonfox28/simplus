@@ -767,6 +767,8 @@ export const zNotificationEventKind = z.enum([
 export const zNotificationChannel = z.object({
     id: z.string().regex(/^channel_[A-Za-z0-9_-]{22}$/),
     provider: z.enum(['wecom', 'feishu']),
+    deliveryMode: z.enum(['webhook', 'feishu_app']),
+    targetType: z.enum(['webhook', 'authorized_user']),
     displayName: z.string().min(1).max(80),
     webhookHint: z.enum(['qyapi.weixin.qq.com', 'open.feishu.cn']),
     signingSecretConfigured: z.boolean(),
@@ -792,6 +794,22 @@ export const zNotificationChannelMutation = z.object({
 
 export const zNotificationChannelList = z.object({
     channels: z.array(zNotificationChannel).max(20)
+});
+
+export const zFeishuNotificationBinding = z.object({
+    state: z.enum([
+        'idle',
+        'waiting',
+        'testing',
+        'succeeded',
+        'failed',
+        'expired',
+        'cancelled'
+    ]),
+    verificationUrl: z.string().max(4096),
+    expiresAt: z.string().max(64),
+    channelId: z.string().regex(/^$|^channel_[A-Za-z0-9_-]{22}$/),
+    errorCode: z.string().max(64).regex(/^$|^[A-Z0-9_]+$/)
 });
 
 export const zAuthSessionResponse = z.object({
@@ -1004,6 +1022,21 @@ export const zCreateNotificationChannelBody = zNotificationChannelMutation;
  * Created channel
  */
 export const zCreateNotificationChannelResponse = zNotificationChannel;
+
+/**
+ * Current binding state
+ */
+export const zCancelFeishuNotificationBindingResponse = zFeishuNotificationBinding;
+
+/**
+ * Current binding state
+ */
+export const zGetFeishuNotificationBindingResponse = zFeishuNotificationBinding;
+
+/**
+ * Waiting for administrator authorization
+ */
+export const zStartFeishuNotificationBindingResponse = zFeishuNotificationBinding;
 
 export const zDeleteNotificationChannelPath = z.object({
     channelId: z.string().regex(/^channel_[A-Za-z0-9_-]{22}$/)

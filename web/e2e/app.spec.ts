@@ -86,6 +86,7 @@ async function installApi(page: Page, authenticated = false) {
   let messageRequests = 0
   let readStateRequests = 0
   let lastSendBody: unknown
+  let feishuBindingStarted = false
   await page.exposeFunction('__messageRequestCount', () => messageRequests)
   await page.exposeFunction('__readStateRequestCount', () => readStateRequests)
   await page.exposeFunction('__lastSendBody', () => lastSendBody)
@@ -126,6 +127,19 @@ async function installApi(page: Page, authenticated = false) {
     }] })
     if (path === '/api/v1/mihomo/subscriptions') return json(route, { subscriptions: [] })
     if (path === '/api/v1/contacts') return json(route, { contacts: [] })
+    if (path === '/api/v1/notification-channel-bindings/feishu') {
+      if (request.method() === 'POST') feishuBindingStarted = true
+      return json(route, feishuBindingStarted ? {
+        state: 'waiting', verificationUrl: 'https://accounts.feishu.cn/synthetic-verification',
+        expiresAt: '2099-01-01T00:00:00Z', channelId: '', errorCode: '',
+      } : { state: 'idle', verificationUrl: '', expiresAt: '', channelId: '', errorCode: '' }, request.method() === 'POST' ? 201 : 200)
+    }
+    if (path === '/api/v1/notification-channels') return json(route, { channels: [{
+      id: 'channel_AAAAAAAAAAAAAAAAAAAAAA', provider: 'feishu', deliveryMode: 'feishu_app', targetType: 'authorized_user',
+      displayName: 'Synthetic Feishu DM', webhookHint: 'open.feishu.cn', signingSecretConfigured: false, enabled: true,
+      eventKinds: ['sms.received', 'sms.failed', 'call.incoming', 'call.missed', 'system.degraded'],
+      lastDeliveryAt: '2026-08-11T00:00:00Z', lastDeliveryStatus: 'success', lastErrorCode: '',
+    }] })
     if (path === '/api/v1/message-conversations') return json(route, {
       conversations: [{
         remoteAddress: '+12025550123',
@@ -278,6 +292,11 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
   await page.evaluate(() => (window as unknown as { __emitSimplusEvent: (name: string, payload: unknown) => void }).__emitSimplusEvent('update', { topics: ['messages'] }))
   await expect.poll(() => page.evaluate(() => (window as unknown as { __messageRequestCount: () => Promise<number> }).__messageRequestCount())).toBeGreaterThan(before)
   await expect.poll(() => page.evaluate(() => (window as unknown as { __readStateRequestCount: () => Promise<number> }).__readStateRequestCount())).toBeGreaterThan(readsBefore)
+  await page.getByText('通知渠道', { exact: true }).click()
+  await expect(page.getByText('Synthetic Feishu DM', { exact: true })).toBeVisible()
+  await expect(page.getByText('授权用户私聊', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '绑定飞书私聊' }).click()
+  await expect(page.getByLabel('飞书验证链接')).toHaveValue('https://accounts.feishu.cn/synthetic-verification')
   await expectNoGlobalOverflow(page)
 })
 
@@ -309,5 +328,12 @@ test('@mobile Drawer navigation has no overflow or unintended autofocus', async 
   expect(mobileRecordBodies.at(-1)).toContain('First page')
   await page.getByRole('button', { name: '返回会话列表' }).click()
   await expect(page.getByRole('button', { name: /\+12025550123/ })).toBeVisible()
+  await page.getByRole('button', { name: '打开导航' }).click()
+  const notificationDrawer = page.getByRole('dialog')
+  await notificationDrawer.getByText('通知渠道', { exact: true }).click()
+  await expect(page.locator('.mobile-record-card').getByText('Synthetic Feishu DM', { exact: true })).toBeVisible()
+  await expect(page.locator('.mobile-record-card').getByText('授权用户私聊', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '绑定飞书私聊' }).click()
+  await expect(page.getByLabel('飞书验证链接')).toHaveValue('https://accounts.feishu.cn/synthetic-verification')
   await expectNoGlobalOverflow(page)
 })

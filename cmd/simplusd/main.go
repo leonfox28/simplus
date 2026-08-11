@@ -194,8 +194,12 @@ func run() int {
 			return 1
 		}
 	}
-	notificationService := notificationapp.New(stores, secretKeyring)
 	realtimeHub := realtime.NewHub()
+	notificationService := notificationapp.New(stores, secretKeyring)
+	feishuClient := notificationapp.NewFeishuClient()
+	notificationService.ConfigureFeishuBinding(ctx, feishuClient, feishuClient, func() {
+		realtimeHub.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
+	})
 	mihomoRoot := filepath.Join(cfg.Storage.DataRoot, "mihomo")
 	mihomoCoreManager := mihomoapp.NewCoreManager(mihomoRoot)
 	mihomoConfigManager := mihomoapp.NewConfigManager(mihomoRoot, stores, mihomoCoreManager)

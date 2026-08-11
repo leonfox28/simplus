@@ -101,6 +101,9 @@ type NotificationManager interface {
 	Delete(context.Context, string) error
 	Test(context.Context, string) (notificationapp.ChannelView, error)
 	Notify(context.Context, string, string) error
+	FeishuBindingStatus() notificationapp.BindingView
+	StartFeishuBinding(context.Context) (notificationapp.BindingView, error)
+	CancelFeishuBinding() (notificationapp.BindingView, error)
 }
 
 type Messenger interface {
@@ -1791,6 +1794,64 @@ func (server *Server) CreateNotificationChannel(w http.ResponseWriter, r *http.R
 	server.publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	writeJSON(w, http.StatusCreated, notificationChannelResponse(item))
 }
+func (server *Server) GetFeishuNotificationBinding(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireAdministrator(w, r, false); !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if server.notifications == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "FEISHU_BINDING_UNAVAILABLE", Retryable: true})
+		return
+	}
+	writeJSON(w, http.StatusOK, feishuBindingResponse(server.notifications.FeishuBindingStatus()))
+}
+func (server *Server) StartFeishuNotificationBinding(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireAdministrator(w, r, true); !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if server.notifications == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "FEISHU_BINDING_UNAVAILABLE", Retryable: true})
+		return
+	}
+	state, err := server.notifications.StartFeishuBinding(r.Context())
+	if err != nil {
+		server.writeFeishuBindingError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, feishuBindingResponse(state))
+}
+func (server *Server) CancelFeishuNotificationBinding(w http.ResponseWriter, r *http.Request) {
+	if _, ok := server.requireAdministrator(w, r, true); !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if server.notifications == nil {
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "FEISHU_BINDING_UNAVAILABLE", Retryable: true})
+		return
+	}
+	state, err := server.notifications.CancelFeishuBinding()
+	if err != nil {
+		server.writeFeishuBindingError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, feishuBindingResponse(state))
+}
+func (server *Server) writeFeishuBindingError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, notificationapp.ErrBindingActive):
+		writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "FEISHU_BINDING_ACTIVE", Retryable: false})
+	case errors.Is(err, notificationapp.ErrBindingNotCancelable):
+		writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "FEISHU_BINDING_NOT_CANCELLABLE", Retryable: false})
+	case errors.Is(err, notificationapp.ErrBindingUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "FEISHU_BINDING_UNAVAILABLE", Retryable: true})
+	case errors.Is(err, notificationapp.ErrFeishuProviderResultInvalid):
+		writeJSON(w, http.StatusBadGateway, openapi.ApiError{Code: notificationapp.BindingErrorResultInvalid, Retryable: false})
+	default:
+		server.logger.WarnContext(r.Context(), "Feishu binding start failed")
+		writeJSON(w, http.StatusBadGateway, openapi.ApiError{Code: notificationapp.BindingErrorProviderFailed, Retryable: true})
+	}
+}
 func (server *Server) UpdateNotificationChannel(w http.ResponseWriter, r *http.Request, channelID string) {
 	if _, ok := server.requireAdministrator(w, r, true); !ok {
 		return
@@ -1870,7 +1931,15 @@ func notificationChannelResponse(item notificationapp.ChannelView) openapi.Notif
 	for _, event := range item.EventKinds {
 		events = append(events, openapi.NotificationEventKind(event))
 	}
-	return openapi.NotificationChannel{Id: item.ID, Provider: openapi.NotificationChannelProvider(item.Provider), DisplayName: item.DisplayName, WebhookHint: openapi.NotificationChannelWebhookHint(item.WebhookHint), SigningSecretConfigured: item.SigningSecretConfigured, Enabled: item.Enabled, EventKinds: events, LastDeliveryAt: lastAt, LastDeliveryStatus: openapi.NotificationChannelLastDeliveryStatus(item.LastDeliveryStatus), LastErrorCode: item.LastErrorCode}
+	return openapi.NotificationChannel{Id: item.ID, Provider: openapi.NotificationChannelProvider(item.Provider), DeliveryMode: openapi.NotificationChannelDeliveryMode(item.DeliveryMode), TargetType: openapi.NotificationChannelTargetType(item.TargetType), DisplayName: item.DisplayName, WebhookHint: openapi.NotificationChannelWebhookHint(item.WebhookHint), SigningSecretConfigured: item.SigningSecretConfigured, Enabled: item.Enabled, EventKinds: events, LastDeliveryAt: lastAt, LastDeliveryStatus: openapi.NotificationChannelLastDeliveryStatus(item.LastDeliveryStatus), LastErrorCode: item.LastErrorCode}
+}
+
+func feishuBindingResponse(state notificationapp.BindingView) openapi.FeishuNotificationBinding {
+	expiresAt := ""
+	if !state.ExpiresAt.IsZero() {
+		expiresAt = state.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return openapi.FeishuNotificationBinding{State: openapi.FeishuNotificationBindingState(state.State), VerificationUrl: state.VerificationURL, ExpiresAt: expiresAt, ChannelId: state.ChannelID, ErrorCode: state.ErrorCode}
 }
 
 func (server *Server) ListMessages(w http.ResponseWriter, r *http.Request, params openapi.ListMessagesParams) {
