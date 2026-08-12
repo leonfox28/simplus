@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify one-hour current expiry works while 24-hour/local bounds and all existing Feishu security contracts remain fail closed."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check current-shape fixture accuracy, duration overflow/boundaries, privacy, race tests, and full validation gates."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Confirm no scope drift into HTTP/Web/storage and no change to test-before-persist or stable public errors."}
+{"file":".trellis/tasks/08-12-fix-feishu-binding-result-recurrence/research/root-cause.md","reason":"Review the code against the precise sanitized recurrence evidence and why the previous fix was incomplete."}

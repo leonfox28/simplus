@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Preserve the ephemeral Feishu binding contract while correcting provider-owned expiry normalization and bounds."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Apply realistic external-provider fixture, privacy-safe structure evidence, race, and targeted-to-broad validation rules."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Keep the fix inside the narrow registrar without changing state, persistence ordering, or public error boundaries."}
+{"file":".trellis/tasks/08-12-fix-feishu-binding-result-recurrence/research/root-cause.md","reason":"Inject the exact recurrence stage, sanitized expires_in=3600 evidence, pending Poll evidence, and minimal root fix."}
