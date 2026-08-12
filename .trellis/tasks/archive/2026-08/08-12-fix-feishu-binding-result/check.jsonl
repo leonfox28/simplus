@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify registration-only non-2xx JSON handling does not weaken token/message HTTP success, public privacy, or binding state contracts."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check regression fixture realism, failure coverage, race safety, full test gates, and absence of real provider side effects."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Check dependency direction, stable error mapping, transient credential lifetime, and persistence ordering."}
+{"file":".trellis/tasks/08-12-fix-feishu-binding-result/research/root-cause.md","reason":"Review the patch against the exact sanitized mismatch and ensure it fixes every serial failure without broad trust relaxation."}

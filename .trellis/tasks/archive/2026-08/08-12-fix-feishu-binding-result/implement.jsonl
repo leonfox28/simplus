@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Preserve narrow provider ports, stable errors, side-effect ordering, and test-before-persist behavior while fixing protocol parsing."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Apply the ephemeral external-app binding contract, bounded external responses, privacy, auth, and strict provider success semantics."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Follow targeted-to-broad Go testing, race coverage, synthetic external-provider fixtures, and privacy assertions."}
+{"file":".trellis/tasks/08-12-fix-feishu-binding-result/research/root-cause.md","reason":"Inject the sanitized live response structure, official SDK comparison, exact root cause, and minimal safe fix boundary."}
