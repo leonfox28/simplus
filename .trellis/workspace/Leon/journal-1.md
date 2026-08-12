@@ -171,3 +171,26 @@ Diagnosed the live Begin shape without retaining temporary values, fixed Feishu 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Fix recurring Feishu binding expiry rejection
+
+**Date**: 2026-08-12
+**Task**: Fix recurring Feishu binding expiry rejection
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Closed the recurring Feishu Begin rejection by accepting the observed one-hour expiry through an overflow-safe 24-hour local bound, added cross-architecture and full regression coverage, strengthened provider-probe guidance, deployed healthy local dev containers, and recorded user-confirmed successful private-chat binding without retaining sensitive evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9579ea0` | (see git log) |
+| `57f9f1e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
