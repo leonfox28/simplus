@@ -220,8 +220,12 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   `url.Values` when polling. Do not trim, log, persist, or expose it publicly.
 - Begin prefers positive `expires_in`, accepts legacy positive `expire_in`,
   rejects conflicting positive values, and uses the SDK-compatible 600-second
-  default only when neither is positive. Interval/expiry bounds and the total
-  response-body limit still apply.
+  default only when neither is positive. Normalize seconds before converting
+  to `time.Duration`: the lifetime must be at least the poll interval and at
+  most the explicit 24-hour local process-state limit. The current Feishu
+  one-hour response and exactly 24 hours are valid; 24 hours plus one second,
+  integer overflow candidates, and conflicting current/legacy values fail
+  closed. The total response-body limit still applies.
 - Only the fixed registration endpoint may decode bounded non-2xx JSON so Poll
   can interpret `authorization_pending`, `slow_down`, `access_denied`, and
   `expired_token`. Tenant-token and message-create calls still require HTTP
@@ -253,6 +257,8 @@ channel is durable, credentialless at the public boundary, and outbound-only.
 | cancel while `testing` | `409 FEISHU_BINDING_NOT_CANCELLABLE` |
 | authorization denied | terminal `failed / FEISHU_BINDING_DENIED`; no row |
 | authorization expires or next poll would exceed expiry | terminal `expired / FEISHU_BINDING_EXPIRED`; no row |
+| begin expiry is one hour or exactly the 24-hour local maximum | waiting with the exact normalized lifetime |
+| begin expiry exceeds 24 hours, is shorter than poll interval, overflows, or conflicts across current/legacy fields | terminal `failed / FEISHU_BINDING_RESULT_INVALID`; no URL or row |
 | begin device code empty/over 4096 bytes, conflicting expiry fields, or verification authority not exact | terminal `failed / FEISHU_BINDING_RESULT_INVALID`; no URL or row |
 | registration Poll returns HTTP 400 with pending/slow-down/denied/expired JSON | retry with bounded interval, or the matching terminal stable state |
 | token/message response is non-2xx or omits/nonzeroes numeric `code` | provider/test failure; no row |
@@ -278,12 +284,15 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   slow-down, cancellation, stale generations, process cancellation, Lark,
   malformed results, explicit success codes, bounded responses, test failure,
   persistence failure, and terminal context release.
-- Begin/Poll fixtures must include the current `expires_in` +
+- Begin/Poll fixtures must include the current `expires_in=3600` +
   `open.feishu.cn` shape with a synthetic 512-plus-byte special-character
-  device code, legacy `expire_in` + `accounts.feishu.cn`, expiry conflicts,
-  empty/oversized device codes, exact-authority failures, and HTTP 400
-  pending/slow-down/denied/expired/unknown responses. Assert the opaque code is
-  unchanged in the encoded Poll form and never appears in public state/logs.
+  device code, legacy `expire_in` + `accounts.feishu.cn`, default/matching/
+  conflicting fields, the exact 24-hour lifetime boundary and one-second
+  overflow, lifetime shorter than interval, architecture-sized maximum
+  integers, empty/oversized device codes, exact-authority failures, and HTTP
+  400 pending/slow-down/denied/expired/unknown responses. Assert the opaque
+  code is unchanged in the encoded Poll form and never appears in public
+  state/logs.
 - Token/message tests must separately reject non-2xx, missing `code`, and
   nonzero `code`, even when the JSON body otherwise looks successful.
 - SQLite fresh/upgrade/Down/reopen tests for strict channel IDs, JSON-array

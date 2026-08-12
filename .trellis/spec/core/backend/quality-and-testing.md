@@ -37,6 +37,13 @@ Tests live beside the package and prove the owning contract:
   only field names, types, lengths, status classes, and approved authorities;
   never copy opaque codes, complete authorization URLs, credentials,
   identities, or raw provider bodies into tests or research.
+- Before declaring such a probe complete, inventory every non-sensitive
+  response property that participates in production validation and report its
+  type plus normalized value or boundary class. A selective report such as
+  “legacy field absent” is insufficient when the current replacement field's
+  numeric value drives a limit check. Turn each observed boundary into a
+  synthetic fixture and include exact-limit, limit-plus-one, default,
+  conflict, and architecture/overflow cases where numeric conversion occurs.
 
 Use deterministic clocks/readers or small fakes already exposed by the service
 when exact IDs/timestamps matter. Keep fixture identities synthetic and within
@@ -61,6 +68,10 @@ Choose cases from the actual risk boundary:
   byte-for-byte, and exercise realistic punctuation/length/status behavior.
   Do not reuse an App credential, identifier, or token alphabet unless the
   provider contract explicitly assigns that grammar to the opaque field.
+- provider-owned durations: normalize units before conversion, compare against
+  an explicit local resource-lifetime constant, and test on the narrowest
+  supported integer architecture. Do not retain a small magic maximum merely
+  because an earlier synthetic fixture happened to fit it.
 
 A test that merely reimplements the production branch in its expected value is
 not evidence. Assert observable state, recorded typed calls, persisted rows,
