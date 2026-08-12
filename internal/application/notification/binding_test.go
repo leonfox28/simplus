@@ -289,7 +289,7 @@ func TestFeishuBindingAcceptsCurrentOpaqueBeginResponse(t *testing.T) {
 	deviceCode := strings.Repeat("synthetic +/%", 43)
 	beginBody, err := json.Marshal(map[string]any{
 		"device_code": deviceCode, "verification_uri_complete": "https://open.feishu.cn/verify?user_code=synthetic",
-		"interval": 5, "expires_in": 60,
+		"interval": 5, "expires_in": 3600,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func TestFeishuBindingAcceptsCurrentOpaqueBeginResponse(t *testing.T) {
 		t.Fatalf("waiting = %#v, err = %v", waiting, err)
 	}
 	verification, err := url.Parse(waiting.VerificationURL)
-	if err != nil || verification.Hostname() != "open.feishu.cn" || !waiting.ExpiresAt.Equal(now.Add(time.Minute)) {
+	if err != nil || verification.Hostname() != "open.feishu.cn" || !waiting.ExpiresAt.Equal(now.Add(time.Hour)) {
 		t.Fatalf("waiting = %#v, verification parse err = %v", waiting, err)
 	}
 	pollCode := <-pollDeviceCode
@@ -429,28 +429,37 @@ func TestFeishuClientUsesMinimalCreateOnlyFlowAndPrivateOpenIDDelivery(t *testin
 	}
 }
 
-func TestFeishuClientNormalizesCurrentLegacyAndDefaultExpiry(t *testing.T) {
-	now := time.Unix(1000, 0).UTC()
+func TestNormalizeFeishuRegistrationLifetime(t *testing.T) {
+	limitSeconds := int(feishuRegistrationLifetimeLimit / time.Second)
+	maxInt := int(^uint(0) >> 1)
 	for _, test := range []struct {
-		name       string
-		expiryJSON string
-		want       time.Duration
+		name            string
+		currentSeconds  int
+		legacySeconds   int
+		intervalSeconds int
+		want            time.Duration
+		wantError       bool
 	}{
-		{name: "current", expiryJSON: `"expires_in":90`, want: 90 * time.Second},
-		{name: "legacy", expiryJSON: `"expire_in":60`, want: 60 * time.Second},
-		{name: "matching", expiryJSON: `"expires_in":75,"expire_in":75`, want: 75 * time.Second},
-		{name: "default", expiryJSON: `"expires_in":0,"expire_in":-1`, want: 600 * time.Second},
+		{name: "current", currentSeconds: 3600, intervalSeconds: 5, want: time.Hour},
+		{name: "legacy", legacySeconds: 60, intervalSeconds: 5, want: time.Minute},
+		{name: "matching", currentSeconds: 75, legacySeconds: 75, intervalSeconds: 5, want: 75 * time.Second},
+		{name: "default", legacySeconds: -1, intervalSeconds: 5, want: 600 * time.Second},
+		{name: "limit", currentSeconds: limitSeconds, intervalSeconds: 5, want: feishuRegistrationLifetimeLimit},
+		{name: "over limit", currentSeconds: limitSeconds + 1, intervalSeconds: 5, wantError: true},
+		{name: "conflict", currentSeconds: 60, legacySeconds: 61, intervalSeconds: 5, wantError: true},
+		{name: "shorter than interval", currentSeconds: 4, intervalSeconds: 5, wantError: true},
+		{name: "extreme integer", currentSeconds: maxInt, intervalSeconds: 5, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			response := `{"device_code":"device_synthetic","verification_uri_complete":"https://accounts.feishu.cn/verify","interval":5,` + test.expiryJSON + `}`
-			client := NewFeishuClient()
-			client.Now = func() time.Time { return now }
-			client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
-			})}
-			registration, err := client.Begin(context.Background())
-			if err != nil || !registration.ExpiresAt.Equal(now.Add(test.want)) {
-				t.Fatalf("registration = %#v, err = %v", registration, err)
+			got, err := normalizeFeishuRegistrationLifetime(test.currentSeconds, test.legacySeconds, test.intervalSeconds)
+			if test.wantError {
+				if !errors.Is(err, ErrFeishuProviderResultInvalid) {
+					t.Fatalf("error = %v, want %v", err, ErrFeishuProviderResultInvalid)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("lifetime = %s, err = %v, want %s", got, err, test.want)
 			}
 		})
 	}

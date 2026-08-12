@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	feishuAccountsOrigin   = "https://accounts.feishu.cn"
-	feishuOpenAPIOrigin    = "https://open.feishu.cn"
-	feishuRegistrationPath = "/oauth/v1/app/registration"
-	feishuTenantTokenPath  = "/open-apis/auth/v3/tenant_access_token/internal"
-	feishuMessagePath      = "/open-apis/im/v1/messages"
-	providerResponseLimit  = 64 << 10
-	feishuDeviceCodeLimit  = 4096
+	feishuAccountsOrigin            = "https://accounts.feishu.cn"
+	feishuOpenAPIOrigin             = "https://open.feishu.cn"
+	feishuRegistrationPath          = "/oauth/v1/app/registration"
+	feishuTenantTokenPath           = "/open-apis/auth/v3/tenant_access_token/internal"
+	feishuMessagePath               = "/open-apis/im/v1/messages"
+	providerResponseLimit           = 64 << 10
+	feishuDeviceCodeLimit           = 4096
+	feishuRegistrationLifetimeLimit = 24 * time.Hour
 )
 
 var providerCredentialPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,512}$`)
@@ -110,18 +111,12 @@ func (client *FeishuClient) Begin(ctx context.Context) (FeishuRegistration, erro
 	if interval <= 0 {
 		interval = 5
 	}
-	expiresIn := response.ExpiresIn
-	if response.ExpiresIn > 0 && response.ExpireIn > 0 && response.ExpiresIn != response.ExpireIn {
+	if interval > 60 {
 		return FeishuRegistration{}, ErrFeishuProviderResultInvalid
 	}
-	if expiresIn <= 0 {
-		expiresIn = response.ExpireIn
-	}
-	if expiresIn <= 0 {
-		expiresIn = 600
-	}
-	if interval > 60 || expiresIn > 900 || expiresIn < interval {
-		return FeishuRegistration{}, ErrFeishuProviderResultInvalid
+	lifetime, err := normalizeFeishuRegistrationLifetime(response.ExpiresIn, response.ExpireIn, interval)
+	if err != nil {
+		return FeishuRegistration{}, err
 	}
 	verificationURL, err := buildFeishuVerificationURL(response.VerificationURIComplete)
 	if err != nil {
@@ -129,9 +124,26 @@ func (client *FeishuClient) Begin(ctx context.Context) (FeishuRegistration, erro
 	}
 	return FeishuRegistration{
 		DeviceCode: response.DeviceCode, VerificationURL: verificationURL,
-		ExpiresAt:    client.Now().UTC().Add(time.Duration(expiresIn) * time.Second),
+		ExpiresAt:    client.Now().UTC().Add(lifetime),
 		PollInterval: time.Duration(interval) * time.Second,
 	}, nil
+}
+
+func normalizeFeishuRegistrationLifetime(currentSeconds, legacySeconds, intervalSeconds int) (time.Duration, error) {
+	if currentSeconds > 0 && legacySeconds > 0 && currentSeconds != legacySeconds {
+		return 0, ErrFeishuProviderResultInvalid
+	}
+	seconds := currentSeconds
+	if seconds <= 0 {
+		seconds = legacySeconds
+	}
+	if seconds <= 0 {
+		seconds = 600
+	}
+	if seconds > int(feishuRegistrationLifetimeLimit/time.Second) || seconds < intervalSeconds {
+		return 0, ErrFeishuProviderResultInvalid
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func buildFeishuVerificationURL(raw string) (string, error) {
