@@ -209,10 +209,24 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   require CSRF, and every binding response carries `Cache-Control: no-store`.
 - One process permits at most one `waiting` or `testing` attempt. A generation
   fence prevents stale or cancelled work from testing or persisting.
-- The registrar is fixed to approved HTTPS hosts/paths, create-only behavior,
-  a minimal preset, and exactly `im:message:send_as_bot`. Redirects, Lark
-  results, absent explicit provider success codes, oversized responses, and
-  polls after the advertised expiry fail closed.
+- The registration request is fixed to the Feishu China endpoint. Returned
+  verification URLs require HTTPS and the exact authority `open.feishu.cn` or
+  `accounts.feishu.cn`; userinfo, any port delimiter, fragments, redirects,
+  other hosts, and oversized URLs fail closed. Creation remains create-only
+  with a minimal preset and exactly `im:message:send_as_bot`.
+- A registration `device_code` is opaque provider state, not an App
+  credential: accept only a non-empty JSON string of at most 4096 bytes, keep
+  it in the current process attempt, and return it byte-for-byte through
+  `url.Values` when polling. Do not trim, log, persist, or expose it publicly.
+- Begin prefers positive `expires_in`, accepts legacy positive `expire_in`,
+  rejects conflicting positive values, and uses the SDK-compatible 600-second
+  default only when neither is positive. Interval/expiry bounds and the total
+  response-body limit still apply.
+- Only the fixed registration endpoint may decode bounded non-2xx JSON so Poll
+  can interpret `authorization_pending`, `slow_down`, `access_denied`, and
+  `expired_token`. Tenant-token and message-create calls still require HTTP
+  2xx plus an explicit numeric `code=0`; Lark, malformed/implicit success,
+  unknown registration errors, and polls after expiry fail closed.
 - Authorization must return a valid Feishu App ID, App Secret, and the
   authorizing user's `open_id`. The messenger sends one bounded text test to
   that `open_id`; only an explicit provider success response permits
@@ -239,6 +253,9 @@ channel is durable, credentialless at the public boundary, and outbound-only.
 | cancel while `testing` | `409 FEISHU_BINDING_NOT_CANCELLABLE` |
 | authorization denied | terminal `failed / FEISHU_BINDING_DENIED`; no row |
 | authorization expires or next poll would exceed expiry | terminal `expired / FEISHU_BINDING_EXPIRED`; no row |
+| begin device code empty/over 4096 bytes, conflicting expiry fields, or verification authority not exact | terminal `failed / FEISHU_BINDING_RESULT_INVALID`; no URL or row |
+| registration Poll returns HTTP 400 with pending/slow-down/denied/expired JSON | retry with bounded interval, or the matching terminal stable state |
+| token/message response is non-2xx or omits/nonzeroes numeric `code` | provider/test failure; no row |
 | Lark tenant or malformed/implicit-success provider result | terminal stable failure; no row |
 | test message lacks explicit success or delivery fails | `failed / FEISHU_BINDING_TEST_FAILED`; no row |
 | encryption or persistence fails | `failed / FEISHU_BINDING_PERSIST_FAILED`; no usable row |
@@ -261,6 +278,14 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   slow-down, cancellation, stale generations, process cancellation, Lark,
   malformed results, explicit success codes, bounded responses, test failure,
   persistence failure, and terminal context release.
+- Begin/Poll fixtures must include the current `expires_in` +
+  `open.feishu.cn` shape with a synthetic 512-plus-byte special-character
+  device code, legacy `expire_in` + `accounts.feishu.cn`, expiry conflicts,
+  empty/oversized device codes, exact-authority failures, and HTTP 400
+  pending/slow-down/denied/expired/unknown responses. Assert the opaque code is
+  unchanged in the encoded Poll form and never appears in public state/logs.
+- Token/message tests must separately reject non-2xx, missing `code`, and
+  nonzero `code`, even when the JSON body otherwise looks successful.
 - SQLite fresh/upgrade/Down/reopen tests for strict channel IDs, JSON-array
   events, encrypted field bounds, legacy Webhook preservation, deletion, and
   cross-table ID collisions.
@@ -283,6 +308,15 @@ if err := s.FeishuMessenger.SendText(ctx, result, testMessage); err != nil {
     return
 }
 // Encrypt each field with its own label, then call Store.UpsertNotificationChannel.
+
+// Wrong: a provider-owned polling token is not an App credential.
+providerCredentialPattern.MatchString(begin.DeviceCode)
+
+// Correct: bound the opaque bytes, then round-trip the logical string unchanged.
+if begin.DeviceCode == "" || len(begin.DeviceCode) > feishuDeviceCodeLimit {
+    return ErrFeishuProviderResultInvalid
+}
+pollForm.Set("device_code", begin.DeviceCode)
 ```
 
 ## Bounded Internal Unix Protocols

@@ -31,6 +31,12 @@ Tests live beside the package and prove the owning contract:
 - Deployment shape is executable Go contract, not only YAML review:
   `internal/containercontract/contract_test.go` parses `compose.yaml` with
   known fields and checks privilege/mount/image invariants.
+- External-provider protocol fixtures must be anchored to a primary contract
+  or official SDK implementation, then include the currently observed
+  provider shape when a privacy-safe structure probe is available. Record
+  only field names, types, lengths, status classes, and approved authorities;
+  never copy opaque codes, complete authorization URLs, credentials,
+  identities, or raw provider bodies into tests or research.
 
 Use deterministic clocks/readers or small fakes already exposed by the service
 when exact IDs/timestamps matter. Keep fixture identities synthetic and within
@@ -51,6 +57,10 @@ Choose cases from the actual risk boundary:
 - privacy: raw secrets/identities/paths are absent from responses and ordinary
   logs;
 - concurrency: serialization/cancellation for resources that have one owner.
+- provider-owned opaque state: bound the total bytes and lifetime, preserve it
+  byte-for-byte, and exercise realistic punctuation/length/status behavior.
+  Do not reuse an App credential, identifier, or token alphabet unless the
+  provider contract explicitly assigns that grammar to the opaque field.
 
 A test that merely reimplements the production branch in its expected value is
 not evidence. Assert observable state, recorded typed calls, persisted rows,
