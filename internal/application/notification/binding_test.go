@@ -284,6 +284,69 @@ func waitBindingState(t *testing.T, service *Service, wanted string) BindingView
 	return BindingView{}
 }
 
+func TestFeishuBindingAcceptsCurrentOpaqueBeginResponse(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	deviceCode := strings.Repeat("synthetic +/%", 43)
+	beginBody, err := json.Marshal(map[string]any{
+		"device_code": deviceCode, "verification_uri_complete": "https://open.feishu.cn/verify?user_code=synthetic",
+		"interval": 5, "expires_in": 60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewFeishuClient()
+	client.Now = func() time.Time { return now }
+	waited := false
+	client.Wait = func(ctx context.Context, _ time.Duration) error {
+		if !waited {
+			waited = true
+			return nil
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	pollDeviceCode := make(chan string, 1)
+	client.Client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != feishuRegistrationPath {
+			return nil, errors.New("unexpected synthetic request path")
+		}
+		requestBody, err := io.ReadAll(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		form, err := url.ParseQuery(string(requestBody))
+		if err != nil {
+			return nil, err
+		}
+		if form.Get("action") == "poll" {
+			pollDeviceCode <- form.Get("device_code")
+			return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"authorization_pending"}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(beginBody))}, nil
+	})}
+
+	service := New(&memoryStore{}, testCipher{})
+	service.ConfigureFeishuBinding(context.Background(), client, messengerFunc(func(context.Context, FeishuRegistrationResult, string) error {
+		t.Fatal("messenger called before authorization")
+		return nil
+	}), nil)
+	waiting, err := service.StartFeishuBinding(context.Background())
+	if err != nil || waiting.State != BindingStateWaiting {
+		t.Fatalf("waiting = %#v, err = %v", waiting, err)
+	}
+	verification, err := url.Parse(waiting.VerificationURL)
+	if err != nil || verification.Hostname() != "open.feishu.cn" || !waiting.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("waiting = %#v, verification parse err = %v", waiting, err)
+	}
+	pollCode := <-pollDeviceCode
+	if pollCode != deviceCode || len(pollCode) <= 512 {
+		t.Fatalf("opaque device code was not preserved: length = %d", len(pollCode))
+	}
+	if _, err := service.CancelFeishuBinding(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFeishuClientUsesMinimalCreateOnlyFlowAndPrivateOpenIDDelivery(t *testing.T) {
 	var requests []*http.Request
 	var bodies [][]byte
@@ -296,12 +359,17 @@ func TestFeishuClientUsesMinimalCreateOnlyFlowAndPrivateOpenIDDelivery(t *testin
 		requests = append(requests, request.Clone(context.Background()))
 		bodies = append(bodies, body)
 		response := `{}`
+		status := http.StatusOK
 		switch {
 		case request.URL.Hostname() == "accounts.feishu.cn" && strings.Contains(string(body), "action=begin"):
 			response = `{"device_code":"device_synthetic","verification_uri_complete":"https://accounts.feishu.cn/verify?user_code=synthetic","interval":1,"expire_in":60}`
 		case request.URL.Hostname() == "accounts.feishu.cn":
 			pollCount++
 			if pollCount == 1 {
+				status = http.StatusBadRequest
+				response = `{"error":"authorization_pending"}`
+			} else if pollCount == 2 {
+				status = http.StatusBadRequest
 				response = `{"error":"slow_down"}`
 			} else {
 				response = `{"client_id":"cli_synthetic","client_secret":"secret_synthetic","user_info":{"open_id":"ou_synthetic","tenant_brand":"feishu"}}`
@@ -311,7 +379,7 @@ func TestFeishuClientUsesMinimalCreateOnlyFlowAndPrivateOpenIDDelivery(t *testin
 		case request.URL.Path == feishuMessagePath:
 			response = `{"code":0}`
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
+		return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
 	})}
 	registration, err := client.Begin(context.Background())
 	if err != nil {
@@ -353,33 +421,118 @@ func TestFeishuClientUsesMinimalCreateOnlyFlowAndPrivateOpenIDDelivery(t *testin
 	if err := client.SendText(context.Background(), result, "synthetic binding test"); err != nil {
 		t.Fatal(err)
 	}
-	if pollCount != 2 || len(requests) != 5 {
+	if pollCount != 3 || len(requests) != 6 {
 		t.Fatalf("requests = %d, polls = %d", len(requests), pollCount)
 	}
-	if !strings.Contains(string(bodies[4]), `"receive_id":"ou_synthetic"`) || requests[4].URL.Query().Get("receive_id_type") != "open_id" {
-		t.Fatalf("message request = %s %s", requests[4].URL, bodies[4])
+	if !strings.Contains(string(bodies[5]), `"receive_id":"ou_synthetic"`) || requests[5].URL.Query().Get("receive_id_type") != "open_id" {
+		t.Fatalf("message request = %s %s", requests[5].URL, bodies[5])
 	}
 }
 
-func TestFeishuClientRejectsUntrustedVerificationURLAndOversizeResponse(t *testing.T) {
-	for _, response := range []string{
-		`{"device_code":"device","verification_uri_complete":"https://example.invalid/verify","interval":1,"expire_in":60}`,
-		strings.Repeat("x", providerResponseLimit+1),
+func TestFeishuClientNormalizesCurrentLegacyAndDefaultExpiry(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	for _, test := range []struct {
+		name       string
+		expiryJSON string
+		want       time.Duration
+	}{
+		{name: "current", expiryJSON: `"expires_in":90`, want: 90 * time.Second},
+		{name: "legacy", expiryJSON: `"expire_in":60`, want: 60 * time.Second},
+		{name: "matching", expiryJSON: `"expires_in":75,"expire_in":75`, want: 75 * time.Second},
+		{name: "default", expiryJSON: `"expires_in":0,"expire_in":-1`, want: 600 * time.Second},
 	} {
-		client := NewFeishuClient()
-		client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
-		})}
-		if _, err := client.Begin(context.Background()); err == nil {
-			t.Fatalf("response accepted: %.40s", response)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			response := `{"device_code":"device_synthetic","verification_uri_complete":"https://accounts.feishu.cn/verify","interval":5,` + test.expiryJSON + `}`
+			client := NewFeishuClient()
+			client.Now = func() time.Time { return now }
+			client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}, nil
+			})}
+			registration, err := client.Begin(context.Background())
+			if err != nil || !registration.ExpiresAt.Equal(now.Add(test.want)) {
+				t.Fatalf("registration = %#v, err = %v", registration, err)
+			}
+		})
 	}
+}
+
+func TestFeishuClientRejectsInvalidBeginResponses(t *testing.T) {
+	oversizeDeviceCode, err := json.Marshal(map[string]any{
+		"device_code": strings.Repeat("x", feishuDeviceCodeLimit+1), "verification_uri_complete": "https://open.feishu.cn/verify",
+		"interval": 1, "expires_in": 60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		status    int
+		response  string
+		wantError error
+	}{
+		{name: "conflicting expiry", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn/verify","interval":1,"expires_in":60,"expire_in":61}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "empty device code", status: http.StatusOK, response: `{"device_code":"","verification_uri_complete":"https://open.feishu.cn/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "oversize device code", status: http.StatusOK, response: string(oversizeDeviceCode), wantError: ErrFeishuProviderResultInvalid},
+		{name: "empty verification URL", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "non-https", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"http://open.feishu.cn/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "untrusted host", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://example.invalid/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "host suffix", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn.example.invalid/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "userinfo", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://user@open.feishu.cn/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "port", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn:443/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "empty port", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn:/verify","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "fragment", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn/verify#fragment","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "oversize verification URL", status: http.StatusOK, response: `{"device_code":"device","verification_uri_complete":"https://open.feishu.cn/verify?value=` + strings.Repeat("x", 2048) + `","interval":1,"expires_in":60}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "provider error", status: http.StatusBadRequest, response: `{"error":"invalid_request"}`, wantError: ErrFeishuProviderUnavailable},
+		{name: "non-2xx without error", status: http.StatusInternalServerError, response: `{}`, wantError: ErrFeishuProviderResultInvalid},
+		{name: "oversize response", status: http.StatusOK, response: strings.Repeat("x", providerResponseLimit+1), wantError: ErrFeishuProviderUnavailable},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewFeishuClient()
+			client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: test.status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(test.response))}, nil
+			})}
+			if _, err := client.Begin(context.Background()); !errors.Is(err, test.wantError) {
+				t.Fatalf("Begin error = %v, want %v", err, test.wantError)
+			}
+		})
+	}
+
 	client := NewFeishuClient()
 	client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("synthetic network failure")
 	})}
 	if _, err := client.Begin(context.Background()); !errors.Is(err, ErrFeishuProviderUnavailable) {
 		t.Fatalf("network error = %v", err)
+	}
+}
+
+func TestFeishuClientMapsRegistrationErrorsFromHTTP400(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	for _, test := range []struct {
+		name      string
+		response  string
+		wantError error
+	}{
+		{name: "denied", response: `{"error":"access_denied"}`, wantError: ErrFeishuAuthorizationDenied},
+		{name: "expired", response: `{"error":"expired_token"}`, wantError: ErrFeishuAuthorizationExpired},
+		{name: "unknown", response: `{"error":"synthetic_unknown"}`, wantError: ErrFeishuProviderUnavailable},
+		{name: "missing error", response: `{}`, wantError: ErrFeishuProviderUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewFeishuClient()
+			client.Now = func() time.Time { return now }
+			client.Wait = func(context.Context, time.Duration) error { return nil }
+			client.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(test.response))}, nil
+			})}
+			_, err := client.Poll(context.Background(), FeishuRegistration{
+				DeviceCode: "device_synthetic", ExpiresAt: now.Add(time.Minute), PollInterval: time.Second,
+			})
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("Poll error = %v, want %v", err, test.wantError)
+			}
+		})
 	}
 }
 
@@ -412,19 +565,27 @@ func TestFeishuClientRequiresExplicitProviderSuccessCodes(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		tokenResponse string
+		tokenStatus   int
 		messageBody   string
+		messageStatus int
 	}{
-		{name: "token", tokenResponse: `{"tenant_access_token":"token_synthetic"}`, messageBody: `{"code":0}`},
-		{name: "message", tokenResponse: `{"code":0,"tenant_access_token":"token_synthetic"}`, messageBody: `{}`},
+		{name: "token missing code", tokenResponse: `{"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusOK, messageBody: `{"code":0}`, messageStatus: http.StatusOK},
+		{name: "token nonzero code", tokenResponse: `{"code":1,"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusOK, messageBody: `{"code":0}`, messageStatus: http.StatusOK},
+		{name: "token non-2xx", tokenResponse: `{"code":0,"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusBadRequest, messageBody: `{"code":0}`, messageStatus: http.StatusOK},
+		{name: "message missing code", tokenResponse: `{"code":0,"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusOK, messageBody: `{}`, messageStatus: http.StatusOK},
+		{name: "message nonzero code", tokenResponse: `{"code":0,"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusOK, messageBody: `{"code":1}`, messageStatus: http.StatusOK},
+		{name: "message non-2xx", tokenResponse: `{"code":0,"tenant_access_token":"token_synthetic"}`, tokenStatus: http.StatusOK, messageBody: `{"code":0}`, messageStatus: http.StatusBadRequest},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := NewFeishuClient()
 			client.Client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 				body := test.messageBody
+				status := test.messageStatus
 				if request.URL.Path == feishuTenantTokenPath {
 					body = test.tokenResponse
+					status = test.tokenStatus
 				}
-				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}
 			if err := client.SendText(context.Background(), credentials, "synthetic message"); !errors.Is(err, ErrFeishuProviderUnavailable) {
 				t.Fatalf("SendText error = %v", err)

@@ -23,6 +23,7 @@ const (
 	feishuTenantTokenPath  = "/open-apis/auth/v3/tenant_access_token/internal"
 	feishuMessagePath      = "/open-apis/im/v1/messages"
 	providerResponseLimit  = 64 << 10
+	feishuDeviceCodeLimit  = 4096
 )
 
 var providerCredentialPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,512}$`)
@@ -44,6 +45,15 @@ type FeishuRegistration struct {
 
 type FeishuRegistrationResult struct {
 	AppID, AppSecret, OpenID, TenantBrand string
+}
+
+type feishuBeginResponse struct {
+	DeviceCode              string `json:"device_code"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	Interval                int    `json:"interval"`
+	ExpiresIn               int    `json:"expires_in"`
+	ExpireIn                int    `json:"expire_in"`
+	Error                   string `json:"error"`
 }
 
 type FeishuRegistrar interface {
@@ -85,27 +95,32 @@ func (client *FeishuClient) Begin(ctx context.Context) (FeishuRegistration, erro
 		"action": {"begin"}, "archetype": {"PersonalAgent"},
 		"auth_method": {"client_secret"}, "request_user_info": {"open_id"},
 	}
-	var response struct {
-		DeviceCode              string `json:"device_code"`
-		VerificationURIComplete string `json:"verification_uri_complete"`
-		Interval                int    `json:"interval"`
-		ExpireIn                int    `json:"expire_in"`
-	}
-	if err := client.registrationRequest(ctx, form, &response); err != nil {
+	var response feishuBeginResponse
+	status, err := client.registrationRequest(ctx, form, &response)
+	if err != nil {
 		return FeishuRegistration{}, err
 	}
-	if !providerCredentialPattern.MatchString(response.DeviceCode) {
+	if response.Error != "" {
+		return FeishuRegistration{}, ErrFeishuProviderUnavailable
+	}
+	if status < 200 || status >= 300 || response.DeviceCode == "" || len(response.DeviceCode) > feishuDeviceCodeLimit {
 		return FeishuRegistration{}, ErrFeishuProviderResultInvalid
 	}
 	interval := response.Interval
 	if interval <= 0 {
 		interval = 5
 	}
-	expireIn := response.ExpireIn
-	if expireIn <= 0 {
-		expireIn = 600
+	expiresIn := response.ExpiresIn
+	if response.ExpiresIn > 0 && response.ExpireIn > 0 && response.ExpiresIn != response.ExpireIn {
+		return FeishuRegistration{}, ErrFeishuProviderResultInvalid
 	}
-	if interval > 60 || expireIn > 900 || expireIn < interval {
+	if expiresIn <= 0 {
+		expiresIn = response.ExpireIn
+	}
+	if expiresIn <= 0 {
+		expiresIn = 600
+	}
+	if interval > 60 || expiresIn > 900 || expiresIn < interval {
 		return FeishuRegistration{}, ErrFeishuProviderResultInvalid
 	}
 	verificationURL, err := buildFeishuVerificationURL(response.VerificationURIComplete)
@@ -114,14 +129,17 @@ func (client *FeishuClient) Begin(ctx context.Context) (FeishuRegistration, erro
 	}
 	return FeishuRegistration{
 		DeviceCode: response.DeviceCode, VerificationURL: verificationURL,
-		ExpiresAt:    client.Now().UTC().Add(time.Duration(expireIn) * time.Second),
+		ExpiresAt:    client.Now().UTC().Add(time.Duration(expiresIn) * time.Second),
 		PollInterval: time.Duration(interval) * time.Second,
 	}, nil
 }
 
 func buildFeishuVerificationURL(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() != "accounts.feishu.cn" || parsed.Port() != "" || parsed.User != nil || parsed.Fragment != "" || len(raw) > 2048 {
+	if err != nil || len(raw) > 2048 {
+		return "", ErrFeishuProviderResultInvalid
+	}
+	if parsed.Scheme != "https" || (parsed.Host != "open.feishu.cn" && parsed.Host != "accounts.feishu.cn") || parsed.User != nil || parsed.Fragment != "" {
 		return "", ErrFeishuProviderResultInvalid
 	}
 	addons, err := encodeFeishuAddons()
@@ -192,8 +210,30 @@ func (client *FeishuClient) Poll(ctx context.Context, registration FeishuRegistr
 			} `json:"user_info"`
 			Error string `json:"error"`
 		}
-		if err := client.registrationRequest(ctx, url.Values{"action": {"poll"}, "device_code": {registration.DeviceCode}}, &response); err != nil {
+		status, err := client.registrationRequest(ctx, url.Values{"action": {"poll"}, "device_code": {registration.DeviceCode}}, &response)
+		if err != nil {
 			return FeishuRegistrationResult{}, err
+		}
+		if response.Error != "" {
+			switch response.Error {
+			case "authorization_pending":
+				continue
+			case "slow_down":
+				interval += 5 * time.Second
+				if interval > 60*time.Second {
+					return FeishuRegistrationResult{}, ErrFeishuProviderResultInvalid
+				}
+				continue
+			case "access_denied":
+				return FeishuRegistrationResult{}, ErrFeishuAuthorizationDenied
+			case "expired_token":
+				return FeishuRegistrationResult{}, ErrFeishuAuthorizationExpired
+			default:
+				return FeishuRegistrationResult{}, ErrFeishuProviderUnavailable
+			}
+		}
+		if status < 200 || status >= 300 {
+			return FeishuRegistrationResult{}, ErrFeishuProviderUnavailable
 		}
 		if response.UserInfo != nil && strings.EqualFold(response.UserInfo.TenantBrand, "lark") {
 			return FeishuRegistrationResult{}, ErrFeishuLarkUnsupported
@@ -208,20 +248,6 @@ func (client *FeishuClient) Poll(ctx context.Context, registration FeishuRegistr
 			}
 			return result, nil
 		}
-		switch response.Error {
-		case "authorization_pending", "":
-		case "slow_down":
-			interval += 5 * time.Second
-			if interval > 60*time.Second {
-				return FeishuRegistrationResult{}, ErrFeishuProviderResultInvalid
-			}
-		case "access_denied":
-			return FeishuRegistrationResult{}, ErrFeishuAuthorizationDenied
-		case "expired_token":
-			return FeishuRegistrationResult{}, ErrFeishuAuthorizationExpired
-		default:
-			return FeishuRegistrationResult{}, ErrFeishuProviderUnavailable
-		}
 	}
 }
 
@@ -235,13 +261,20 @@ func validateFeishuResult(result FeishuRegistrationResult) error {
 	return nil
 }
 
-func (client *FeishuClient) registrationRequest(ctx context.Context, form url.Values, target any) error {
+func (client *FeishuClient) registrationRequest(ctx context.Context, form url.Values, target any) (int, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, feishuAccountsOrigin+feishuRegistrationPath, strings.NewReader(form.Encode()))
 	if err != nil {
-		return ErrFeishuProviderUnavailable
+		return 0, ErrFeishuProviderUnavailable
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return client.doJSON(request, target)
+	status, body, err := client.readBoundedResponse(request)
+	if err != nil {
+		return 0, err
+	}
+	if err := decodeFeishuJSON(body, target); err != nil {
+		return status, err
+	}
+	return status, nil
 }
 
 func (client *FeishuClient) SendText(ctx context.Context, credentials FeishuRegistrationResult, message string) error {
@@ -294,17 +327,32 @@ func (client *FeishuClient) SendText(ctx context.Context, credentials FeishuRegi
 }
 
 func (client *FeishuClient) doJSON(request *http.Request, target any) error {
+	status, body, err := client.readBoundedResponse(request)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return ErrFeishuProviderUnavailable
+	}
+	return decodeFeishuJSON(body, target)
+}
+
+func (client *FeishuClient) readBoundedResponse(request *http.Request) (int, []byte, error) {
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "Simplus")
 	response, err := client.Client.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w", ErrFeishuProviderUnavailable)
+		return 0, nil, fmt.Errorf("%w", ErrFeishuProviderUnavailable)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, providerResponseLimit+1))
-	if err != nil || len(body) > providerResponseLimit || response.StatusCode < 200 || response.StatusCode >= 300 || len(bytes.TrimSpace(body)) == 0 {
-		return ErrFeishuProviderUnavailable
+	if err != nil || len(body) > providerResponseLimit || len(bytes.TrimSpace(body)) == 0 {
+		return 0, nil, ErrFeishuProviderUnavailable
 	}
+	return response.StatusCode, body, nil
+}
+
+func decodeFeishuJSON(body []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(target); err != nil {
 		return ErrFeishuProviderResultInvalid
