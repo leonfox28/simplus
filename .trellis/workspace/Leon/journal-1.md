@@ -148,3 +148,26 @@ Implemented and independently verified zero-form Feishu private-message binding 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Fix Feishu binding result compatibility
+
+**Date**: 2026-08-12
+**Task**: Fix Feishu binding result compatibility
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Diagnosed the live Begin shape without retaining temporary values, fixed Feishu opaque device-code, expires_in, exact verification-authority, and registration-only non-2xx JSON compatibility, added synthetic/race regressions, independently reviewed and codified prevention rules, and updated healthy local dev containers without real authorization or delivery.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `60e4066` | (see git log) |
+| `9f9ac73` | (see git log) |
+
+### Status
+
+[OK] **Completed**
