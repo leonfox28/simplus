@@ -1,0 +1,28 @@
+{
+  "id": "dji-4g-cellular",
+  "name": "dji-4g-cellular",
+  "title": "大疆 4G 模块蜂窝接入",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "core,web,infra,docs",
+  "package": "core",
+  "priority": "P2",
+  "creator": "Leon",
+  "assignee": "Leon",
+  "createdAt": "2026-08-12",
+  "completedAt": "2026-08-13",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "dev_type": "feature"
+  }
+}

@@ -1,0 +1,11 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Verify layer ownership, typed boundaries, generated sources and stable error behavior."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Audit stable identity, no model/path leakage, persist-before-side-effect and fail-closed routing."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Audit OpenAPI and Agent client/server validation, correlation, timeouts and private fields."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Run the targeted-to-broad validation ladder and inspect hardware/privacy/concurrency cases."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Ensure ordinary checks have no hardware side effects and HIL/production evidence gates remain exact."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Verify Agent private state without capability/network/device-boundary expansion."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Check ADR, architecture, active plan, compatibility, development and troubleshooting owners."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Review diff/docs/tests/logs for phone, SIM, device, PDU, path, raw HIL or topology leakage."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Verify Modems/Messages Vitest, typecheck, build, desktop/mobile E2E and generated drift."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Check generated union usage and absence of duplicated/cast network response types."}
+{"file":".trellis/tasks/08-12-dji-4g-cellular/research/repository-evidence.md","reason":"Cross-check implementation against the researched gaps, state namespace and no-fallback design."}

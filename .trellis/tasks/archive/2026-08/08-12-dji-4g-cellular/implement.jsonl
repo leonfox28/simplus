@@ -1,0 +1,13 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Core Go dependency direction, typed Agent/API boundaries, generated ownership and pre-development checklist."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Stable ManagedModem/Line identity, narrow ports, side-effect ordering, fail-closed hardware and no fallback."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"OpenAPI-first public API plus bounded Agent Unix protocol, timeouts, response correlation and stable errors."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Durable SQLite/idempotency/privacy rules needed for the Agent-private SMS recovery store."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Fixture, protocol, persistence, concurrency and generated-drift test requirements."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Typed modem boundary, evidence levels, exact approval gate and fail-closed HIL rules."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Production Agent no-network/fixed-UID/private-state boundary and container contract."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Telecom identity, SMS/HIL evidence, logs and public compatibility redaction boundary."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"OpenAPI-generated React/TanStack Query boundary and required frontend checks."}
+{"file":".trellis/spec/web/frontend/component-guidelines.md","reason":"Responsive Modems UI, unavailable-state and accessibility conventions."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Generated types/Zod contract and exhaustive status presentation rules."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the QDC status and SMS contracts across Agent, application, API, persistence and Web."}
+{"file":".trellis/tasks/08-12-dji-4g-cellular/research/repository-evidence.md","reason":"Task-specific current-code evidence, technical unknowns and production evidence-promotion decisions."}
