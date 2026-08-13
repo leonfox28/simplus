@@ -216,3 +216,25 @@ Closed the recurring Feishu Begin rejection by accepting the observed one-hour e
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: 清理 QDC507 HIL 并接入模块序列号
+
+**Date**: 2026-08-13
+**Task**: 清理 QDC507 HIL 并接入模块序列号
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+移除全部一次性 QDC507 HIL 源码及孤立支撑，保留生产原生蜂窝短信；按实测固定 CGSN 协议接入模块序列号并贯通 Agent、Managed Modem/API/Web；重建三条未推送本地历史并 prune 旧对象；重建 dev 三镜像、原地更新 Compose，服务与 HTTP health 全部通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5cc4214` | (see git log) |
+
+### Status
+
+[OK] **Completed**
