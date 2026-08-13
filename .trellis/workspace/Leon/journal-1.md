@@ -194,3 +194,25 @@ Closed the recurring Feishu Begin rejection by accepting the observed one-hour e
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: QDC507 原生蜂窝短信
+
+**Date**: 2026-08-13
+**Task**: QDC507 原生蜂窝短信
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+完成 QDC507 中国联通原生蜂窝短信纵切、统一 typed capability/Line transport、durable recovery 与生产容器装配；受控入站和出站 HIL 通过，完整质量门禁通过，并更新本地 dev Compose。后续清理一次性 HIL 源码时重建了该未推送提交。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5cc4214` | (see git log) |
+
+### Status
+
+[OK] **Completed**
