@@ -1,0 +1,10 @@
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Own the consumer-defined Line port, typed hardware boundary, best-effort semantics, and dependency direction."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Change Agent and OpenAPI contracts atomically with bounded validation and privacy-safe fields."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Apply protocol, hardware failure, cross-layer, privacy, and generated-drift test requirements."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Keep CNUM fixed/read-only inside the model adapter and preserve the approved HIL/privacy boundary."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Prevent the observed phone number and raw transcript from entering repository artifacts or logs."}
+{"file":".trellis/spec/web/frontend/component-guidelines.md","reason":"Render sourced number observations consistently in desktop tables and compact cards."}
+{"file":".trellis/spec/web/frontend/state-management.md","reason":"Keep ManagedLine HTTP authoritative and avoid reconstructing Line identity from the VoWiFi query."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Use the OpenAPI-generated phone observation model without handwritten duplicate types."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Cover focused component, typecheck, generated, build, and responsive E2E behavior."}
+{"file":".trellis/tasks/08-13-line-phone-number-observation/research/qdc507-cnum.md","reason":"Use the primary CNUM contract and sanitized current-device evidence without private values."}

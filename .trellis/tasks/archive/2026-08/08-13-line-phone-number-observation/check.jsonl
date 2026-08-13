@@ -1,0 +1,10 @@
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Audit that Line owns aggregation and no model/AT/VoWiFi implementation leaks upward."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Audit Agent/OpenAPI validation, compatibility, bounded lists, and public field removal."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Run the required focused-to-broad, protocol, privacy, and generated consistency checks."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Confirm ordinary checks have no hardware side effects and production exposes no arbitrary command seam."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Audit repository, logs, errors, SSE, fixtures, and docs for real-number leakage."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Audit generated API ownership, HTTP authority, responsive UI, and required frontend gates."}
+{"file":".trellis/spec/web/frontend/component-guidelines.md","reason":"Audit desktop/mobile display of zero, deduplicated, and differing sourced numbers."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Ensure generated types/Zod drive the Web boundary with no casts or duplicate interfaces."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Run focused Vitest, typecheck, build, E2E, security, and generated drift verification."}
+{"file":".trellis/tasks/08-13-line-phone-number-observation/research/qdc507-cnum.md","reason":"Check implementation against the fixed CNUM evidence and privacy constraints."}
