@@ -1,0 +1,8 @@
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Audit that module SN remains adapter-owned display metadata and production SMS identity/fencing is unchanged."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Verify deleted HIL surface, synthetic serial failure matrix and complete non-hardware gates."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Audit fixed read-only probe, owner restoration, no side effects and repository privacy."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Verify rebuilt local Agent/control/netd composition, state preservation and health."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Check obsolete command removal and correct ownership of architecture/compatibility/development statements."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Scan final tree and rewritten history for identifiers, transcripts, paths and deleted HIL source."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Verify generated drift, Modems display, typecheck, build and desktop/mobile E2E."}
+{"file":".trellis/tasks/08-13-qdc507-hil-cleanup-serial/research/eg25g-serial.md","reason":"Cross-check accepted command grammar and ensure observed private values were not turned into fixtures."}

@@ -1,0 +1,8 @@
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Typed model adapter ownership, stable identity and no model/AT leakage above the hardware boundary."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Production regression, protocol, privacy and targeted-to-broad validation requirements after deleting fixture-only surfaces."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Exact read-only hardware authorization, endpoint ownership, private evidence and fail-closed command boundary."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Make target removal, generated ownership and reproducible container/build checks."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Canonical owners for removing obsolete HIL runner instructions while preserving accepted compatibility evidence."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Repository/history exclusion for identifiers, raw HIL material and private runtime artifacts."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Existing OpenAPI-generated serial field and Web unavailable/display behavior."}
+{"file":".trellis/tasks/08-13-qdc507-hil-cleanup-serial/research/eg25g-serial.md","reason":"Official EG25-G command evidence, current repository serial flow and fixed private probe allowlist."}
