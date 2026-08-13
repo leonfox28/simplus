@@ -172,6 +172,9 @@ func run() int {
 		_ = stores.Close()
 		return 1
 	}
+	if voWiFiSupervisor != nil {
+		managedLineService.UsePhoneNumberSource(lineapp.NewVoWiFiPhoneNumberSource(voWiFiSupervisor))
+	}
 	messageService, err := messaging.NewService(ctx, stores, managedLineService)
 	if err != nil {
 		logger.Error("messaging initialization failed", "error", err)

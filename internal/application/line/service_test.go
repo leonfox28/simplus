@@ -3,6 +3,7 @@ package line
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,19 @@ func (source *topologySource) Topology(context.Context) (inventory.Topology, err
 	return source.topology, nil
 }
 
+type fixedPhoneNumberSource struct {
+	numbers map[string]string
+	err     error
+	calls   *int
+}
+
+func (source fixedPhoneNumberSource) CurrentPhoneNumbers(context.Context) (map[string]string, error) {
+	if source.calls != nil {
+		*source.calls++
+	}
+	return source.numbers, source.err
+}
+
 func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testing.T) {
 	modemIdentity := strings.Repeat("a", 64)
 	simIdentity := strings.Repeat("b", 64)
@@ -76,7 +90,8 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.ID != "line_AQEBAQEBAQEBAQEBAQEBAQ" || created.State != domain.StateReady || created.ManagedModemID != modem.ID {
+	if created.ID != "line_AQEBAQEBAQEBAQEBAQEBAQ" || created.State != domain.StateReady || created.ManagedModemID != modem.ID ||
+		len(created.PhoneNumbers) != 1 || created.PhoneNumbers[0].Number != "+12025550123" || created.PhoneNumbers[0].Sources[0] != domain.PhoneNumberSourceCellularSIM {
 		t.Fatalf("created=%#v", created)
 	}
 	if len(repository.lines) != 1 || repository.lines[0].SubscriptionIdentityFingerprint != simIdentity ||
@@ -86,15 +101,20 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 	if _, err := service.Add(t.Context(), candidates[0].CandidateID, "duplicate"); !errors.Is(err, ErrAlreadyManaged) {
 		t.Fatalf("duplicate add error=%v", err)
 	}
+	phoneSourceCalls := 0
+	service.UsePhoneNumberSource(fixedPhoneNumberSource{numbers: map[string]string{created.ID: "+447700900123"}, calls: &phoneSourceCalls})
 	candidates, err = service.Candidates(t.Context())
 	if err != nil || len(candidates) != 1 || candidates[0].Readiness != domain.CandidateAlreadyAdded || candidates[0].Addable {
 		t.Fatalf("remaining candidates=%#v error=%v", candidates, err)
 	}
 
 	topology, err := service.Topology(t.Context())
-	if err != nil || len(topology.Lines) != 1 || topology.Lines[0].ID != created.ID ||
+	if err != nil || len(topology.Lines) != 1 || topology.Lines[0].ID != created.ID || topology.Lines[0].CellularPhoneNumber != "+12025550123" ||
 		topology.Lines[0].RuntimeLineID != "agent-line-"+simIdentity[:32] || topology.Lines[0].ManagedModemID != modem.ID {
 		t.Fatalf("managed topology=%#v error=%v", topology.Lines, err)
+	}
+	if phoneSourceCalls != 0 {
+		t.Fatalf("business topology consulted display-only IMS source %d times", phoneSourceCalls)
 	}
 
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, simIdentity, capabilities)
@@ -111,7 +131,7 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, strings.Repeat("c", 64), capabilities)
 	views, err = service.List(t.Context())
-	if err != nil || views[0].State != domain.StateSIMUnavailable {
+	if err != nil || views[0].State != domain.StateSIMUnavailable || len(views[0].PhoneNumbers) != 0 {
 		t.Fatalf("changed-SIM views=%#v error=%v", views, err)
 	}
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, simIdentity, capabilities)
@@ -194,6 +214,7 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 			ID: profileID, SIMMediaID: deviceID + "-media", DisplayName: "Active SIM", State: hardware.ProfileActive,
 			IdentityFingerprint: simIdentity, DisplayIdentityHint: "ICCID •••• 1234",
 			HomeOperatorName: "VOXI", HomeOperatorCode: "234-15", Generation: 1,
+			CellularPhoneNumber: "+12025550123",
 		}}},
 		ResourceGroups: []hardware.ResourceGroup{{
 			ID: deviceID + "-resources", PhysicalDeviceID: deviceID, DisplayName: "resources",
@@ -203,8 +224,47 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 		Lines: []inventory.Line{{
 			ID: lineID, PhysicalDeviceID: deviceID, ModemFunctionID: deviceID + "-modem",
 			SubscriptionProfileID: profileID, ResourceGroupID: deviceID + "-resources", DisplayName: "Observed line",
-			Generation: 1, Capabilities: capabilities, State: inventory.LineReady,
+			Generation: 1, Capabilities: capabilities, CellularPhoneNumber: "+12025550123", State: inventory.LineReady,
 		}},
+	}
+}
+
+func TestManagedLineMergesCurrentCellularAndIMSObservations(t *testing.T) {
+	const lineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
+	modemIdentity, simIdentity := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	capabilities := hardware.Capabilities{SIMAccess: true, SIMAPDU: true, HostVoWiFiAuth: true}
+	modem := modemdomain.Record{ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", EquipmentIdentityFingerprint: modemIdentity, DisplayName: "Synthetic modem", Capabilities: capabilities}
+	record := domain.Record{ID: lineID, ManagedModemID: modem.ID, SIMSlotIndex: 0, SubscriptionIdentityFingerprint: simIdentity, SubscriptionDisplayHint: "ICCID •••• 1234", DisplayName: "Synthetic line", CreatedAt: time.Unix(1, 0)}
+	for _, test := range []struct {
+		name, cellular, ims string
+		failure             bool
+		want                []domain.PhoneNumberObservation
+	}{
+		{name: "empty", want: []domain.PhoneNumberObservation{}},
+		{name: "cellular only", cellular: "+12025550123", want: []domain.PhoneNumberObservation{{Number: "+12025550123", Sources: []string{domain.PhoneNumberSourceCellularSIM}}}},
+		{name: "IMS only", ims: "+447700900123", want: []domain.PhoneNumberObservation{{Number: "+447700900123", Sources: []string{domain.PhoneNumberSourceIMS}}}},
+		{name: "same value", cellular: "+12025550123", ims: "+12025550123", want: []domain.PhoneNumberObservation{{Number: "+12025550123", Sources: []string{domain.PhoneNumberSourceCellularSIM, domain.PhoneNumberSourceIMS}}}},
+		{name: "different sorted values", cellular: "+447700900123", ims: "+12025550123", want: []domain.PhoneNumberObservation{{Number: "+12025550123", Sources: []string{domain.PhoneNumberSourceIMS}}, {Number: "+447700900123", Sources: []string{domain.PhoneNumberSourceCellularSIM}}}},
+		{name: "IMS failure is best effort", cellular: "+12025550123", failure: true, want: []domain.PhoneNumberObservation{{Number: "+12025550123", Sources: []string{domain.PhoneNumberSourceCellularSIM}}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			topology := readyTopology("agent-usb-1-2", modemIdentity, simIdentity, capabilities)
+			topology.Lines[0].CellularPhoneNumber = test.cellular
+			topology.SubscriptionProfiles[0].CellularPhoneNumber = test.cellular
+			service, err := New(&memoryRepository{lines: []domain.Record{record}, modems: []modemdomain.Record{modem}}, &topologySource{topology: topology})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := fixedPhoneNumberSource{numbers: map[string]string{lineID: test.ims}}
+			if test.failure {
+				source.err = errors.New("supervisor unavailable")
+			}
+			service.UsePhoneNumberSource(source)
+			views, err := service.List(t.Context())
+			if err != nil || len(views) != 1 || !reflect.DeepEqual(views[0].PhoneNumbers, test.want) {
+				t.Fatalf("views=%#v error=%v", views, err)
+			}
+		})
 	}
 }
 

@@ -45,6 +45,91 @@ Consequences for new work:
 Do not add a fallback that converts a transient scan result into a business
 object or silently switches transports when the selected one is unavailable.
 
+## Line-Owned Phone Number Observations
+
+### 1. Scope / Trigger
+
+Apply this contract whenever a modem or IMS implementation contributes a
+current subscriber number, or whenever the authenticated Line response changes
+its number observations. Phone numbers are optional current Line observations,
+not persisted Line configuration, stable SIM identity, or VoWiFi-owned public
+state.
+
+### 2. Signatures
+
+- Model seam: `SubscriberNumberAdapter.ReadSubscriberNumber(context.Context,
+  attransport.Query) (string, error)`.
+- Agent wire observation: `SIMObservation.subscriberNumber?: string`.
+- Normalized hardware observation:
+  `SubscriptionProfile.CellularPhoneNumber string`.
+- Line-owned optional source: `PhoneNumberSource.CurrentPhoneNumbers(
+  context.Context) (map[lineID]e164, error)`.
+- Line domain/API: `View.PhoneNumbers []PhoneNumberObservation` and
+  `ManagedLine.phoneNumbers: Array<{number, sources}>`, with at most two items
+  and source enum `cellular-sim | ims`.
+
+### 3. Contracts
+
+A supported model adapter may add one strictly validated cellular subscriber
+number only to the same present, ready, identity-known SIM observation.
+`hardware.SubscriptionProfile` and inventory carry that value without changing
+the stable SIM fingerprint. The observation is cleared for absent, locked,
+inactive, changed, ambiguous, or identity-unknown SIMs.
+
+`internal/application/line` is the sole merger. It combines the current
+cellular value with the optional consumer-owned IMS source keyed by stable Line
+ID, deduplicates exact E.164 values, keeps source order `cellular-sim`, `ims`,
+and sorts observations by number. IMS lookup is best effort and is used only
+for `List` and mutation display views; `Topology` for SMS, calls, egress, and
+VoWiFi control never consults it. The authenticated
+`ManagedLine.phoneNumbers` response is the only public owner; persistence,
+ordinary logs, errors, SSE, hardware/setup responses, and public VoWiFi state
+exclude phone numbers.
+
+### 4. Validation & Error Matrix
+
+- Empty adapter or IMS result -> omit that source; the Line remains usable.
+- Unique explicit `+E.164` value (`^\\+[1-9][0-9]{2,14}$`) -> carry it.
+- QDC507 empty `AT+CNUM` result -> unavailable without failing the probe.
+- QDC507 duplicate/multiple, non-145, missing `+`, echo, URC, overflow,
+  malformed CSV, or non-`OK` transcript -> unavailable without guessing.
+- Agent number without ready state and SIM identity fingerprint, or malformed
+  number -> reject the probe payload.
+- Locked/inactive/missing/mismatched profile -> clear the cellular value.
+- IMS source failure, malformed value, duplicate Line ID, or offline worker ->
+  omit IMS for that view; do not change `Topology` availability.
+
+### 5. Good / Base / Bad Cases
+
+- Good: cellular and IMS return different valid values; return both, sorted by
+  number, each with its own source.
+- Base: only one source returns a value; return one observation. If both return
+  the same value, return one observation with both ordered sources.
+- Bad: persist a prior number, infer one from IMEI/IMSI/ICCID/operator data, or
+  expose a model command/source selector through Web/API.
+
+### 6. Tests Required
+
+- Adapter fixtures assert the exact fixed command and all accepted/rejected
+  transcript shapes without real identifiers.
+- Agent/hardware/inventory tests assert validation, round trip, revision
+  participation, and clearing on absent/locked/swapped/unknown identity.
+- Line tests assert empty/single/same/different merges, deterministic order,
+  IMS best effort, and zero IMS-source calls from `Topology`.
+- OpenAPI/HTTP/Web tests assert the bounded schema, removal from public VoWiFi
+  state, and rendering of all values on desktop and mobile.
+- Privacy/source scans assert no persistence field, real number, raw transcript,
+  model branch above the adapter, log/error/SSE exposure, or arbitrary AT seam.
+
+### 7. Wrong vs Correct
+
+Wrong: the Lines page reads `voWiFi.phoneNumber`, or a Line service branches on
+`QDC507` and executes `AT+CNUM` itself.
+
+Correct: the model adapter emits an optional typed cellular observation; Line
+merges it with optional IMS evidence; Web renders only
+`ManagedLine.phoneNumbers` and knows neither modem model nor AT/IMS protocol.
+
 ## Model Isolation and Capability Evidence
 
 The dependency direction in `docs/architecture.md` is enforced by current

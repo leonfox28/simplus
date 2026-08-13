@@ -2,7 +2,9 @@ package modemadapter
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
+	"io"
 	"regexp"
 	"sort"
 	"strings"
@@ -25,12 +27,14 @@ var (
 	qdc507ModuleSerialSupportPattern = regexp.MustCompile(`^\+CGSN: *"sn,imei" *\(0,1\)$`)
 	qdc507ModuleSerialPattern        = regexp.MustCompile(`^\+CGSN: *"([\x20-\x21\x23-\x7e]{1,128})" *$`)
 	qdc507ParameterizedIMEIPattern   = regexp.MustCompile(`^\+CGSN: *"([0-9]{15})" *$`)
+	qdc507SubscriberNumberPattern    = regexp.MustCompile(`^\+[1-9][0-9]{2,14}$`)
 )
 
 var (
 	_ ATProbeAdapter           = QDC507{}
 	_ SIMPresenceAdapter       = QDC507{}
 	_ SIMIdentityAdapter       = QDC507{}
+	_ SubscriberNumberAdapter  = QDC507{}
 	_ ModuleSerialAdapter      = QDC507{}
 	_ RFControlAdapter         = QDC507{}
 	_ EquipmentIdentityAdapter = QDC507{}
@@ -214,6 +218,59 @@ func readQDC507SIMIdentity(ctx context.Context, query attransport.Query, identit
 	identity.HomeOperatorName = operatorName
 	identity.HomeOperatorCode = operatorCode
 	return identity, nil
+}
+
+// ReadSubscriberNumber executes the fixed read-only 3GPP CNUM query. It
+// accepts only one unambiguous international E.164 record. An empty successful
+// result is ordinary unavailability; malformed or ambiguous transcripts fail
+// closed without exposing their contents in the returned error.
+func (QDC507) ReadSubscriberNumber(ctx context.Context, query attransport.Query) (string, error) {
+	if query == nil {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	lines, err := query(ctx, "AT+CNUM", 2*time.Second)
+	if err != nil {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	if len(lines) == 1 && lines[0] == "OK" {
+		return "", nil
+	}
+	if len(lines) != 2 || lines[1] != "OK" || len(lines[0]) > 256 || !strings.HasPrefix(lines[0], "+CNUM:") {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	payload := strings.TrimPrefix(lines[0], "+CNUM:")
+	if strings.HasPrefix(payload, " ") {
+		payload = strings.TrimPrefix(payload, " ")
+	}
+	if payload == "" || strings.TrimSpace(payload) != payload {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	reader := csv.NewReader(strings.NewReader(payload))
+	reader.FieldsPerRecord = 3
+	reader.ReuseRecord = true
+	record, err := reader.Read()
+	if err != nil {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	if _, err := reader.Read(); err != io.EOF {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	if !validCNUMAlpha(record[0]) || !qdc507SubscriberNumberPattern.MatchString(record[1]) || record[2] != "145" {
+		return "", errors.New("subscriber number is unavailable")
+	}
+	return record[1], nil
+}
+
+func validCNUMAlpha(value string) bool {
+	if len(value) > 128 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func (QDC507) SetRFState(ctx context.Context, query attransport.Query, enabled bool) (agentapi.RFObservation, error) {

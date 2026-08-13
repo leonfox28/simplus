@@ -106,6 +106,14 @@ type SIMIdentityAdapter interface {
 	ReadSIMIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (SIMProfileIdentity, error)
 }
 
+// SubscriberNumberAdapter owns one model-specific, fixed read-only query for
+// the current ready SIM/Profile's subscriber number. The optional observation
+// is display metadata only and never participates in stable SIM identity.
+type SubscriberNumberAdapter interface {
+	Adapter
+	ReadSubscriberNumber(context.Context, attransport.Query) (string, error)
+}
+
 // ModuleSerialAdapter owns a model-specific, fixed read-only serial-number
 // query. The result is bounded display metadata only: it does not replace the
 // equipment identity or USB descriptor serial used for fingerprints.

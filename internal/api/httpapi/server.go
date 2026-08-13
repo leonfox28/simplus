@@ -1618,7 +1618,7 @@ func voWiFiStateResponse(item vowifidomain.State) openapi.VoWiFiLineState {
 		State:         openapi.VoWiFiLineStateState(item.State), Stage: item.Stage, Online: item.Online,
 		EgressMode: openapi.VoWiFiLineStateEgressMode(item.EgressMode), CountryCode: item.CountryCode,
 		CountryName: item.CountryName, RegisteredAt: registeredAt, NextRefreshAt: nextRefresh,
-		PhoneNumber: item.PhoneNumber, Attempt: item.Attempt, LastErrorCode: item.LastErrorCode,
+		Attempt: item.Attempt, LastErrorCode: item.LastErrorCode,
 	}
 }
 
@@ -2668,11 +2668,20 @@ func (server *Server) writeManagedLineError(w http.ResponseWriter, r *http.Reque
 }
 
 func managedLineResponse(item linedomain.View) openapi.ManagedLine {
+	phoneNumbers := make([]openapi.PhoneNumberObservation, 0, len(item.PhoneNumbers))
+	for _, observation := range item.PhoneNumbers {
+		sources := make([]openapi.PhoneNumberSource, 0, len(observation.Sources))
+		for _, source := range observation.Sources {
+			sources = append(sources, openapi.PhoneNumberSource(source))
+		}
+		phoneNumbers = append(phoneNumbers, openapi.PhoneNumberObservation{Number: observation.Number, Sources: sources})
+	}
 	return openapi.ManagedLine{
 		Id: item.ID, DisplayName: item.DisplayName, ManagedModemId: item.ManagedModemID,
 		ManagedModemDisplayName: item.ManagedModemDisplayName,
 		ManagedModemModel:       item.ManagedModemModel, ManagedModemSerialNumber: item.ManagedModemSerialNumber,
 		SubscriptionDisplayHint: item.SubscriptionDisplayHint,
+		PhoneNumbers:            phoneNumbers,
 		State:                   openapi.ManagedLineState(item.State), Capabilities: hardwareCapabilitiesResponse(item.Capabilities),
 		CreatedAt: item.CreatedAt.UTC(),
 	}

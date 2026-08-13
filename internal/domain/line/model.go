@@ -20,7 +20,15 @@ const (
 	CandidateSIMUnavailable  = "SIM_UNAVAILABLE"
 	CandidateAlreadyAdded    = "ALREADY_ADDED"
 	CandidateBindingConflict = "BINDING_CONFLICT"
+
+	PhoneNumberSourceCellularSIM = "cellular-sim"
+	PhoneNumberSourceIMS         = "ims"
 )
+
+type PhoneNumberObservation struct {
+	Number  string
+	Sources []string
+}
 
 // Record is the administrator-owned Line configuration. It binds a stable
 // ManagedModem to one SIM/Profile identity without persisting any Agent,
@@ -46,6 +54,7 @@ type View struct {
 	SubscriptionDisplayHint  string
 	State                    string
 	Capabilities             hardware.Capabilities
+	PhoneNumbers             []PhoneNumberObservation
 	CreatedAt                time.Time
 }
 

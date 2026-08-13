@@ -205,6 +205,13 @@ export type ManagedModemList = {
 
 export type ManagedLineState = 'ready' | 'modem-offline' | 'sim-unavailable';
 
+export type PhoneNumberSource = 'cellular-sim' | 'ims';
+
+export type PhoneNumberObservation = {
+    number: string;
+    sources: Array<PhoneNumberSource>;
+};
+
 export type ManagedLine = {
     id: string;
     displayName: string;
@@ -219,6 +226,7 @@ export type ManagedLine = {
      */
     managedModemSerialNumber: string;
     subscriptionDisplayHint: string;
+    phoneNumbers: Array<PhoneNumberObservation>;
     state: ManagedLineState;
     capabilities: HardwareCapabilities;
     createdAt: string;
@@ -642,10 +650,6 @@ export type VoWiFiLineState = {
     countryName: string;
     registeredAt: string;
     nextRefreshAt: string;
-    /**
-     * E.164 phone number authorized by IMS registration; empty when unavailable
-     */
-    phoneNumber: string;
     attempt: number;
     lastErrorCode: string;
 };

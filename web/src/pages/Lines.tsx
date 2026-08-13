@@ -21,7 +21,7 @@ import {
   putLineEgressBindingMutation,
   updateManagedLineMutation,
 } from '@/api/generated/@tanstack/react-query.gen'
-import type { LineCandidate, LineEgressBinding, ManagedLine, VoWiFiLineState } from '@/api/generated/types.gen'
+import type { LineCandidate, LineEgressBinding, ManagedLine, PhoneNumberObservation, PhoneNumberSource, VoWiFiLineState } from '@/api/generated/types.gen'
 import { PageHeader, PageSection, ResponsiveDataView } from '@/components/Page'
 
 type CountryOption = { code: string; name: string }
@@ -48,6 +48,17 @@ const voWiFiReadinessLabels: Record<VoWiFiLineState['readinessCode'], string> = 
   LINE_HARDWARE_NOT_READY: '模组或 SIM / Profile 尚未就绪', SUBSCRIPTION_NOT_SELECTED: '尚未选择订阅',
   COUNTRY_NOT_FOUND: '当前订阅没有该国家', MIHOMO_NOT_RUNNING: 'Mihomo 未运行',
   MIHOMO_RESTART_REQUIRED: '需要先重启 Mihomo 应用订阅',
+}
+const phoneNumberSourceLabels: Record<PhoneNumberSource, string> = {
+  'cellular-sim': '蜂窝 SIM', ims: 'IMS',
+}
+
+function phoneNumbers(observations: PhoneNumberObservation[]) {
+  if (!observations.length) return <Typography.Text type="secondary">未获取</Typography.Text>
+  return <Flex vertical gap={4}>{observations.map((observation) => <Flex key={observation.number} align="center" gap={4} wrap>
+    <Typography.Text>{observation.number}</Typography.Text>
+    {observation.sources.map((source) => <Tag key={source}>{phoneNumberSourceLabels[source]}</Tag>)}
+  </Flex>)}</Flex>
 }
 
 function egressLabel(binding?: LineEgressBinding) {
@@ -162,7 +173,7 @@ export default function Lines() {
   const lineDetails = (line: LineRow) => <Descriptions column={1} size="small" items={[
     { key: 'modem', label: '模组', children: <><div>{line.managedModemModel || '读取失败'}</div><Typography.Text type="secondary">{line.managedModemSerialNumber || '读取失败'}</Typography.Text></> },
     { key: 'sim', label: 'SIM / Profile', children: line.subscriptionDisplayHint },
-    { key: 'phone', label: '手机号', children: line.voWiFi?.phoneNumber || '未获取' },
+    { key: 'phone', label: '手机号', children: phoneNumbers(line.phoneNumbers) },
     { key: 'state', label: '线路状态', children: <Tag color={line.state === 'ready' ? 'green' : 'orange'}>{lineStateLabels[line.state]}</Tag> },
     { key: 'vowifi', label: 'VoWiFi', children: line.capabilities.hostVoWifiAuth ? <Tag color={line.voWiFi?.online ? 'green' : line.voWiFi?.desiredActive ? 'orange' : 'default'}>{line.voWiFi ? voWiFiStateLabels[line.voWiFi.state] : '读取中'}</Tag> : '不支持' },
     { key: 'egress', label: '出口', children: egressLabel(line.binding) },
@@ -171,7 +182,7 @@ export default function Lines() {
     { title: '名称', dataIndex: 'displayName' },
     { title: '模组', render: (_, line) => <Flex vertical><Typography.Text>{line.managedModemModel || '读取失败'}</Typography.Text><Typography.Text type="secondary">{line.managedModemSerialNumber || '读取失败'}</Typography.Text></Flex> },
     { title: 'SIM / Profile', dataIndex: 'subscriptionDisplayHint' },
-    { title: '手机号', render: (_, line) => line.voWiFi?.phoneNumber || <Typography.Text type="secondary">未获取</Typography.Text> },
+    { title: '手机号', render: (_, line) => phoneNumbers(line.phoneNumbers) },
     { title: '线路状态', render: (_, line) => <Tag color={line.state === 'ready' ? 'green' : 'orange'}>{lineStateLabels[line.state]}</Tag> },
     { title: 'VoWiFi 状态', render: (_, line) => line.capabilities.hostVoWifiAuth ? <Tag color={line.voWiFi?.online ? 'green' : line.voWiFi?.desiredActive ? 'orange' : 'default'}>{line.voWiFi ? voWiFiStateLabels[line.voWiFi.state] : '读取中'}</Tag> : <Typography.Text type="secondary">不支持</Typography.Text> },
     { title: '出口', render: (_, line) => <Flex vertical><Typography.Text>{egressLabel(line.binding)}</Typography.Text>{line.binding && line.binding.readinessReason !== 'READY' && <Typography.Text type="secondary">{readinessLabels[line.binding.readinessReason]}</Typography.Text>}</Flex> },

@@ -43,6 +43,7 @@ type Line struct {
 	DisplayName           string
 	Generation            uint64
 	Capabilities          hardware.Capabilities
+	CellularPhoneNumber   string
 	State                 string
 }
 
@@ -166,7 +167,8 @@ func (service *Service) Topology(ctx context.Context) (Topology, error) {
 			ID: hardwareLine.ID, PhysicalDeviceID: hardwareLine.PhysicalDeviceID, ModemFunctionID: hardwareLine.ModemFunctionID,
 			SubscriptionProfileID: hardwareLine.SubscriptionProfileID, ResourceGroupID: hardwareLine.ResourceGroupID,
 			DisplayName: hardwareLine.DisplayName, Generation: hardwareLine.Generation, Capabilities: hardwareLine.Capabilities,
-			State: state,
+			CellularPhoneNumber: normalizedProfilePhoneNumber(normalized.SubscriptionProfiles, hardwareLine.SubscriptionProfileID),
+			State:               state,
 		})
 	}
 	revision, err := Revision(topology)
@@ -222,7 +224,8 @@ func (simulator simulatorSource) Snapshot(ctx context.Context) (hardware.Snapsho
 		})
 		snapshot.SubscriptionProfiles = append(snapshot.SubscriptionProfiles, hardware.SubscriptionProfile{
 			ID: profileID, SIMMediaID: mediaID, DisplayName: "Simulator profile " + suffix,
-			State: hardware.ProfileActive, IdentityFingerprint: identity, DisplayIdentityHint: "ICCID •••• " + hint, Generation: 1,
+			State: hardware.ProfileActive, IdentityFingerprint: identity, DisplayIdentityHint: "ICCID •••• " + hint,
+			CellularPhoneNumber: fmt.Sprintf("+120255501%02d", index), Generation: 1,
 		})
 		snapshot.ResourceGroups = append(snapshot.ResourceGroups, hardware.ResourceGroup{
 			ID: groupID, PhysicalDeviceID: deviceID, DisplayName: "Simulator modem resources " + suffix,
@@ -239,4 +242,13 @@ func (simulator simulatorSource) Snapshot(ctx context.Context) (hardware.Snapsho
 		})
 	}
 	return snapshot, nil
+}
+
+func normalizedProfilePhoneNumber(profiles []hardware.SubscriptionProfile, profileID string) string {
+	for _, profile := range profiles {
+		if profile.ID == profileID && profile.State == hardware.ProfileActive {
+			return profile.CellularPhoneNumber
+		}
+	}
+	return ""
 }

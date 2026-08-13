@@ -73,6 +73,11 @@ func executeATProbe(ctx context.Context, query attransport.Query, endpoint strin
 				result.SIM.DisplayIdentityHint = identity.DisplayHint
 				result.SIM.HomeOperatorName = identity.HomeOperatorName
 				result.SIM.HomeOperatorCode = identity.HomeOperatorCode
+				if numberAdapter, supported := adapter.(modemadapter.SubscriberNumberAdapter); supported {
+					if number, numberErr := numberAdapter.ReadSubscriberNumber(ctx, query); numberErr == nil {
+						result.SIM.SubscriberNumber = number
+					}
+				}
 			}
 		}
 	}

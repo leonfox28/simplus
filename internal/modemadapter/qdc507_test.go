@@ -203,6 +203,53 @@ func TestQDC507SIMIdentityKeepsStableIdentityWhenOperatorMetadataIsMalformed(t *
 	}
 }
 
+func TestQDC507SubscriberNumberAcceptsOnlyOneStrictInternationalRecord(t *testing.T) {
+	tests := []struct {
+		name     string
+		response []string
+		queryErr error
+		want     string
+	}{
+		{name: "international number", response: []string{`+CNUM: "Synthetic","+12025550123",145`, "OK"}, want: "+12025550123"},
+		{name: "empty alpha", response: []string{`+CNUM: "","+447700900123",145`, "OK"}, want: "+447700900123"},
+		{name: "empty result", response: []string{"OK"}},
+		{name: "query failure", queryErr: errors.New("unavailable")},
+		{name: "multiple records", response: []string{`+CNUM: "","+12025550123",145`, `+CNUM: "","+12025550124",145`, "OK"}},
+		{name: "duplicate record", response: []string{`+CNUM: "","+12025550123",145`, `+CNUM: "","+12025550123",145`, "OK"}},
+		{name: "national type", response: []string{`+CNUM: "","2025550123",129`, "OK"}},
+		{name: "missing plus", response: []string{`+CNUM: "","12025550123",145`, "OK"}},
+		{name: "zero country code", response: []string{`+CNUM: "","+02025550123",145`, "OK"}},
+		{name: "too short", response: []string{`+CNUM: "","+12",145`, "OK"}},
+		{name: "too long", response: []string{`+CNUM: "","+1234567890123456",145`, "OK"}},
+		{name: "extra field", response: []string{`+CNUM: "","+12025550123",145,"extra"`, "OK"}},
+		{name: "missing field", response: []string{`+CNUM: "+12025550123",145`, "OK"}},
+		{name: "invalid CSV", response: []string{`+CNUM: "unterminated,"+12025550123",145`, "OK"}},
+		{name: "control alpha", response: []string{"+CNUM: \"Synthetic\nLabel\",\"+12025550123\",145", "OK"}},
+		{name: "overflow alpha", response: []string{`+CNUM: "` + strings.Repeat("A", 129) + `","+12025550123",145`, "OK"}},
+		{name: "overflow record", response: []string{`+CNUM: "` + strings.Repeat("A", 240) + `","+12025550123",145`, "OK"}},
+		{name: "echo", response: []string{"AT+CNUM", `+CNUM: "","+12025550123",145`, "OK"}},
+		{name: "URC", response: []string{`+CNUM: "","+12025550123",145`, "+CEREG: 1", "OK"}},
+		{name: "error terminal", response: []string{`+CNUM: "","+12025550123",145`, "ERROR"}},
+		{name: "mixed terminal", response: []string{`+CNUM: "","+12025550123",145`, "OK", "ERROR"}},
+		{name: "trailing space", response: []string{`+CNUM: "","+12025550123",145 `, "OK"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			commands := []string{}
+			number, err := (QDC507{}).ReadSubscriberNumber(t.Context(), func(_ context.Context, command string, _ time.Duration) ([]string, error) {
+				commands = append(commands, command)
+				return test.response, test.queryErr
+			})
+			if strings.Join(commands, ",") != "AT+CNUM" || number != test.want || (err == nil) != (test.queryErr == nil && (test.want != "" || len(test.response) == 1 && test.response[0] == "OK")) {
+				t.Fatalf("number=%q error=%v commands=%q", number, err, commands)
+			}
+			if err != nil && err.Error() != "subscriber number is unavailable" {
+				t.Fatalf("unbounded subscriber-number error: %v", err)
+			}
+		})
+	}
+}
+
 func TestQDC507RFControlUsesFixedCommandsAndReadBack(t *testing.T) {
 	commands := []string{}
 	observed, err := (QDC507{}).SetRFState(t.Context(), func(_ context.Context, command string, _ time.Duration) ([]string, error) {
@@ -226,6 +273,7 @@ func TestQDC507ImplementsSharedBaseCapabilities(t *testing.T) {
 	for name, ok := range map[string]bool{
 		"equipment": func() bool { _, ok := adapter.(EquipmentIdentityAdapter); return ok }(),
 		"SIM":       func() bool { _, ok := adapter.(SIMIdentityAdapter); return ok }(),
+		"number":    func() bool { _, ok := adapter.(SubscriberNumberAdapter); return ok }(),
 		"serial":    func() bool { _, ok := adapter.(ModuleSerialAdapter); return ok }(),
 		"RF":        func() bool { _, ok := adapter.(RFControlAdapter); return ok }(),
 	} {

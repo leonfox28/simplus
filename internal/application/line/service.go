@@ -35,6 +35,7 @@ var (
 	lineIDPattern      = regexp.MustCompile(`^line_[A-Za-z0-9_-]{22}$`)
 	candidateIDPattern = regexp.MustCompile(`^line-candidate-[0-9a-f]{32}$`)
 	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	phoneNumberPattern = regexp.MustCompile(`^\+[1-9][0-9]{2,14}$`)
 )
 
 type Repository interface {
@@ -48,13 +49,26 @@ type Inventory interface {
 	Topology(context.Context) (inventory.Topology, error)
 }
 
+// PhoneNumberSource supplies optional current observations keyed by stable
+// business Line ID. It is display-only: Topology never consults this port.
+type PhoneNumberSource interface {
+	CurrentPhoneNumbers(context.Context) (map[string]string, error)
+}
+
 type Service struct {
-	repository Repository
-	inventory  Inventory
-	random     io.Reader
-	now        func() time.Time
+	repository   Repository
+	inventory    Inventory
+	random       io.Reader
+	now          func() time.Time
+	phoneNumbers PhoneNumberSource
 
 	mu sync.Mutex
+}
+
+func (service *Service) UsePhoneNumberSource(source PhoneNumberSource) {
+	if service != nil {
+		service.phoneNumbers = source
+	}
 }
 
 func New(repository Repository, inventoryService Inventory) (*Service, error) {
@@ -69,7 +83,7 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 	if err != nil {
 		return nil, err
 	}
-	return views(records, modems, topology), nil
+	return service.views(ctx, records, modems, topology), nil
 }
 
 func (service *Service) Candidates(ctx context.Context) ([]domain.Candidate, error) {
@@ -131,7 +145,7 @@ func (service *Service) Add(ctx context.Context, candidateID, displayName string
 	if err := service.repository.CreateManagedLine(ctx, record); err != nil {
 		return domain.View{}, fmt.Errorf("persist managed line: %w", err)
 	}
-	return viewFor(record, modems, topology), nil
+	return service.viewFor(ctx, record, modems, topology), nil
 }
 
 func (service *Service) Update(ctx context.Context, lineID, displayName string) (domain.View, error) {
@@ -159,7 +173,7 @@ func (service *Service) Update(ctx context.Context, lineID, displayName string) 
 	if err := service.repository.UpdateManagedLine(ctx, selected.ID, selected.DisplayName, selected.UpdatedAt); err != nil {
 		return domain.View{}, err
 	}
-	return viewFor(*selected, modems, topology), nil
+	return service.viewFor(ctx, *selected, modems, topology), nil
 }
 
 // Topology implements the business Line catalog. Hardware inventory remains
@@ -346,10 +360,11 @@ func profileObservations(topology inventory.Topology) map[string]profileObservat
 	return result
 }
 
-func views(records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) []domain.View {
+func (service *Service) views(ctx context.Context, records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) []domain.View {
+	imsNumbers := service.currentPhoneNumbers(ctx)
 	result := make([]domain.View, 0, len(records))
 	for _, record := range records {
-		result = append(result, viewFor(record, modems, topology))
+		result = append(result, viewFor(record, modems, topology, imsNumbers[record.ID]))
 	}
 	sort.Slice(result, func(left, right int) bool {
 		if result[left].CreatedAt.Equal(result[right].CreatedAt) {
@@ -360,7 +375,11 @@ func views(records []domain.Record, modems []modemdomain.Record, topology invent
 	return result
 }
 
-func viewFor(record domain.Record, modems []modemdomain.Record, topology inventory.Topology) domain.View {
+func (service *Service) viewFor(ctx context.Context, record domain.Record, modems []modemdomain.Record, topology inventory.Topology) domain.View {
+	return viewFor(record, modems, topology, service.currentPhoneNumbers(ctx)[record.ID])
+}
+
+func viewFor(record domain.Record, modems []modemdomain.Record, topology inventory.Topology, imsNumber string) domain.View {
 	modemByID := make(map[string]modemdomain.Record, len(modems))
 	for _, modem := range modems {
 		modemByID[modem.ID] = modem
@@ -370,6 +389,7 @@ func viewFor(record domain.Record, modems []modemdomain.Record, topology invento
 	physicalByModem := modemapp.ResolveManagedModemDevices(modems, topology)
 	physicalID := physicalByModem[record.ManagedModemID]
 	model, serialNumber := "", ""
+	cellularNumber := ""
 	if physicalID != "" {
 		state = domain.StateSIMUnavailable
 		for _, device := range topology.Devices {
@@ -381,14 +401,59 @@ func viewFor(record domain.Record, modems []modemdomain.Record, topology invento
 	}
 	if resolved, ok := resolveLine(record, physicalID, topology); ok {
 		state, capabilities = domain.StateReady, resolved.Capabilities
+		cellularNumber = resolved.CellularPhoneNumber
+	} else {
+		imsNumber = ""
 	}
 	return domain.View{
 		ID: record.ID, DisplayName: record.DisplayName, ManagedModemID: record.ManagedModemID,
 		ManagedModemDisplayName: modemByID[record.ManagedModemID].DisplayName,
 		ManagedModemModel:       model, ManagedModemSerialNumber: serialNumber,
 		SubscriptionDisplayHint: record.SubscriptionDisplayHint,
-		State:                   state, Capabilities: capabilities, CreatedAt: record.CreatedAt,
+		State:                   state, Capabilities: capabilities, PhoneNumbers: mergePhoneNumbers(cellularNumber, imsNumber), CreatedAt: record.CreatedAt,
 	}
+}
+
+func (service *Service) currentPhoneNumbers(ctx context.Context) map[string]string {
+	if service == nil || service.phoneNumbers == nil {
+		return nil
+	}
+	numbers, err := service.phoneNumbers.CurrentPhoneNumbers(ctx)
+	if err != nil {
+		return nil
+	}
+	return numbers
+}
+
+func mergePhoneNumbers(cellularNumber, imsNumber string) []domain.PhoneNumberObservation {
+	byNumber := make(map[string]map[string]struct{}, 2)
+	add := func(number, source string) {
+		if !phoneNumberPattern.MatchString(number) {
+			return
+		}
+		if byNumber[number] == nil {
+			byNumber[number] = make(map[string]struct{}, 2)
+		}
+		byNumber[number][source] = struct{}{}
+	}
+	add(cellularNumber, domain.PhoneNumberSourceCellularSIM)
+	add(imsNumber, domain.PhoneNumberSourceIMS)
+	numbers := make([]string, 0, len(byNumber))
+	for number := range byNumber {
+		numbers = append(numbers, number)
+	}
+	sort.Strings(numbers)
+	result := make([]domain.PhoneNumberObservation, 0, len(numbers))
+	for _, number := range numbers {
+		sources := make([]string, 0, 2)
+		for _, source := range []string{domain.PhoneNumberSourceCellularSIM, domain.PhoneNumberSourceIMS} {
+			if _, exists := byNumber[number][source]; exists {
+				sources = append(sources, source)
+			}
+		}
+		result = append(result, domain.PhoneNumberObservation{Number: number, Sources: sources})
+	}
+	return result
 }
 
 func resolvedLines(records []domain.Record, modems []modemdomain.Record, topology inventory.Topology) []inventory.Line {
@@ -411,6 +476,7 @@ func resolvedLines(records []domain.Record, modems []modemdomain.Record, topolog
 			line.ResourceGroupID = current.ResourceGroupID
 			line.Generation = current.Generation
 			line.Capabilities = current.Capabilities
+			line.CellularPhoneNumber = current.CellularPhoneNumber
 			line.State = inventory.LineReady
 		}
 		result = append(result, line)

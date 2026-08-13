@@ -122,6 +122,7 @@ type SubscriptionProfile struct {
 	DisplayIdentityHint string
 	HomeOperatorName    string
 	HomeOperatorCode    string
+	CellularPhoneNumber string
 	Generation          uint64
 }
 

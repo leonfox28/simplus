@@ -157,7 +157,8 @@ func (source *AgentSource) Snapshot(ctx context.Context) (hardware.Snapshot, err
 				State: hardware.ProfileActive, IdentityFingerprint: observation.SIM.IdentityFingerprint,
 				DisplayIdentityHint: observation.SIM.DisplayIdentityHint,
 				HomeOperatorName:    observation.SIM.HomeOperatorName, HomeOperatorCode: observation.SIM.HomeOperatorCode,
-				Generation: device.Generation,
+				CellularPhoneNumber: observation.SIM.SubscriberNumber,
+				Generation:          device.Generation,
 			})
 			snapshot.Lines = append(snapshot.Lines, hardware.Line{
 				ID: lineID, PhysicalDeviceID: deviceID, ModemFunctionID: functionID, SubscriptionProfileID: profileID,

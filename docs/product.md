@@ -115,6 +115,7 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 - production `simplus-agent` 只在容器 entrypoint 注册白名单 USB ID，随后以非 root UID
   运行且没有网络；Unix socket 以固定 UID 和 peer credential 限制调用者；
 - Web/API 只能调用固定类型的模组动作，不能传任意 AT/QMI 命令或设备路径；
+- 管理员 Line API 统一返回当前手机号观测：支持型号的只读 SIM 号码与在线 IMS 号码只按明确 E.164 汇入，既不持久化，也不进入公开 VoWiFi 状态、日志或 SSE；
 - 同一模组上的命令串行，超时后读取真实状态再决定结果；
 - 发送短信、拨号和可能改变 RF/模组持久状态的 HIL 操作需要明确测试授权；
 - 外呼在接触硬件前拒绝已知紧急号码和无法可靠判断的短号码；

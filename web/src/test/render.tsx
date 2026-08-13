@@ -23,6 +23,7 @@ export const testLine: ManagedLine = {
   managedModemModel: 'Simulator',
   managedModemSerialNumber: 'SYNTHETIC-001',
   subscriptionDisplayHint: 'SIM •••• 0001',
+  phoneNumbers: [{ number: '+12025550123', sources: ['cellular-sim', 'ims'] }],
   state: 'ready',
   capabilities: { ...noCapabilities, simAccess: true, sms: true, cellularVoice: true, hostVoWifiAuth: true, simApdu: true },
   createdAt: '2026-08-07T00:00:00Z',

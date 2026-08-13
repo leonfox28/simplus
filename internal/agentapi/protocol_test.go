@@ -61,6 +61,7 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 		{name: "complete without call count", mutate: func(response *ProbeResponse) { response.Devices[0].ActiveCallCount = nil }},
 		{name: "identity hint without fingerprint", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.DisplayIdentityHint = "ICCID •••• 2115" }},
 		{name: "operator without fingerprint", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.HomeOperatorCode = "234-15" }},
+		{name: "number without fingerprint", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.SubscriberNumber = "+12025550123" }},
 		{name: "invalid operator code", mutate: func(response *ProbeResponse) {
 			response.Devices[0].SIM = SIMObservation{State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
 				IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115", HomeOperatorCode: "23415"}
@@ -68,6 +69,10 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 		{name: "invalid operator name", mutate: func(response *ProbeResponse) {
 			response.Devices[0].SIM = SIMObservation{State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
 				IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115", HomeOperatorName: "VOXI\n"}
+		}},
+		{name: "invalid subscriber number", mutate: func(response *ProbeResponse) {
+			response.Devices[0].SIM = SIMObservation{State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
+				IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115", SubscriberNumber: "12025550123"}
 		}},
 		{name: "identity on absent SIM", mutate: func(response *ProbeResponse) {
 			response.Devices[0].SIM.IdentityFingerprint = strings.Repeat("b", 64)
@@ -96,7 +101,7 @@ func TestValidateProbeResponseAcceptsOnlyMaskedReadySIMIdentity(t *testing.T) {
 	response.Devices[0].SIM = SIMObservation{
 		State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
 		IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115",
-		HomeOperatorName: "VOXI", HomeOperatorCode: "234-15",
+		HomeOperatorName: "VOXI", HomeOperatorCode: "234-15", SubscriberNumber: "+12025550123",
 	}
 	if err := validateProbeResponse(response); err != nil {
 		t.Fatal(err)
@@ -111,6 +116,9 @@ func TestValidateProbeResponseAcceptsOnlyMaskedReadySIMIdentity(t *testing.T) {
 	}
 	if decoded.Devices[0].Identity.SerialNumber != response.Devices[0].Identity.SerialNumber {
 		t.Fatalf("module serial did not survive the Agent protocol: %#v", decoded.Devices[0].Identity)
+	}
+	if decoded.Devices[0].SIM.SubscriberNumber != response.Devices[0].SIM.SubscriberNumber {
+		t.Fatalf("subscriber number did not survive the Agent protocol: %#v", decoded.Devices[0].SIM)
 	}
 }
 

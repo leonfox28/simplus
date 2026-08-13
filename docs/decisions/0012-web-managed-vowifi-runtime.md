@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-05
 - 扩展：[`0011`](0011-ml307a-host-vowifi-hil.md) 的一次性 ML307A HIL
-- 后续修订：[`0017`](0017-managed-modems-and-capability-adapters.md) 与 [`0019`](0019-line-identity-and-communication-paths.md) 删除产品运行时的 RF 前置检查，并要求新 Line 显式配置出口
+- 后续修订：[`0017`](0017-managed-modems-and-capability-adapters.md) 与 [`0019`](0019-line-identity-and-communication-paths.md) 删除产品运行时的 RF 前置检查，并要求新 Line 显式配置出口；[`0027`](0027-line-phone-number-observations.md) 将公共手机号观测收口到 Line，并从公共 VoWiFi 状态删除该字段
 
 ## 背景
 

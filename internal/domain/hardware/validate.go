@@ -15,6 +15,7 @@ var (
 	ErrInvalidSnapshot = errors.New("hardware snapshot is invalid")
 	identifierPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	phoneNumberPattern = regexp.MustCompile(`^\+[1-9][0-9]{2,14}$`)
 	usbAddressPattern  = regexp.MustCompile(`^[0-9]+-[0-9]+(?:\.[0-9]+)*$`)
 	usbIdentifier      = regexp.MustCompile(`^[0-9a-f]{4}$`)
 )
@@ -33,6 +34,11 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 	}
 	snapshot := cloneSnapshot(input)
 	snapshot.ObservedAt = snapshot.ObservedAt.UTC()
+	for index := range snapshot.SubscriptionProfiles {
+		if snapshot.SubscriptionProfiles[index].State != ProfileActive {
+			snapshot.SubscriptionProfiles[index].CellularPhoneNumber = ""
+		}
+	}
 	sortSnapshot(&snapshot)
 
 	devices := make(map[string]PhysicalDevice, len(snapshot.Devices))
@@ -147,7 +153,8 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 	for _, profile := range snapshot.SubscriptionProfiles {
 		if !validID(profile.ID) || !validID(profile.SIMMediaID) || !validLabel(profile.DisplayName) || !validEntityGeneration(profile.Generation, snapshot.Generation) ||
 			!oneOf(profile.State, ProfileActive, ProfileInactive, ProfileLocked) || !validIdentity(MediaIdentityKnown, profile.IdentityFingerprint, profile.DisplayIdentityHint) ||
-			!validHomeOperator(profile.HomeOperatorName, profile.HomeOperatorCode) {
+			!validHomeOperator(profile.HomeOperatorName, profile.HomeOperatorCode) ||
+			(profile.CellularPhoneNumber != "" && !phoneNumberPattern.MatchString(profile.CellularPhoneNumber)) {
 			return Snapshot{}, ErrInvalidSnapshot
 		}
 		if _, present := media[profile.SIMMediaID]; !present {

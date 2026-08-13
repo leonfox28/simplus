@@ -24,7 +24,7 @@ func TestSimulatorSnapshotModelsDeviceProfileAndReadyLineSeparately(t *testing.T
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 	device, line := snapshot.Devices[0], snapshot.Lines[0]
-	if line.PhysicalDeviceID != device.ID || line.SubscriptionProfileID != "simulator-profile-1" || line.State != LineReady {
+	if line.PhysicalDeviceID != device.ID || line.SubscriptionProfileID != "simulator-profile-1" || line.State != LineReady || line.CellularPhoneNumber != "+12025550101" {
 		t.Fatalf("line identity = %#v, device = %#v", line, device)
 	}
 
@@ -51,6 +51,12 @@ func TestMultiSimulatorModelsTwoIndependentModems(t *testing.T) {
 		topology.Lines[0].ResourceGroupID == topology.Lines[1].ResourceGroupID {
 		t.Fatalf("Simulator lines share a modem boundary: %#v", topology.Lines)
 	}
+	before := topology.Revision
+	topology.SubscriptionProfiles[0].CellularPhoneNumber = "+12025550199"
+	after, err := Revision(topology)
+	if err != nil || before == after {
+		t.Fatalf("subscriber-number change did not affect topology revision: before=%q after=%q error=%v", before, after, err)
+	}
 }
 
 func TestTopologyKeepsUnavailableOrLockedLinesFailClosed(t *testing.T) {
@@ -75,6 +81,9 @@ func TestTopologyKeepsUnavailableOrLockedLinesFailClosed(t *testing.T) {
 			}
 			if topology.Lines[0].State != LineUnavailable {
 				t.Fatalf("line = %#v", topology.Lines[0])
+			}
+			if test.name == "profile locked" && (topology.SubscriptionProfiles[0].CellularPhoneNumber != "" || topology.Lines[0].CellularPhoneNumber != "") {
+				t.Fatalf("locked profile retained subscriber number: %#v", topology)
 			}
 		})
 	}

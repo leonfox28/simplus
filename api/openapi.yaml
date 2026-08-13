@@ -2212,10 +2212,25 @@ components:
     ManagedLineState:
       type: string
       enum: [ready, modem-offline, sim-unavailable]
+    PhoneNumberSource:
+      type: string
+      enum: [cellular-sim, ims]
+    PhoneNumberObservation:
+      type: object
+      additionalProperties: false
+      required: [number, sources]
+      properties:
+        number: { type: string, pattern: "^\\+[1-9][0-9]{2,14}$", maxLength: 16 }
+        sources:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items: { $ref: "#/components/schemas/PhoneNumberSource" }
     ManagedLine:
       type: object
       additionalProperties: false
-      required: [id, displayName, managedModemId, managedModemDisplayName, managedModemModel, managedModemSerialNumber, subscriptionDisplayHint, state, capabilities, createdAt]
+      required: [id, displayName, managedModemId, managedModemDisplayName, managedModemModel, managedModemSerialNumber, subscriptionDisplayHint, phoneNumbers, state, capabilities, createdAt]
       properties:
         id: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         displayName: { type: string, minLength: 1, maxLength: 120 }
@@ -2224,6 +2239,7 @@ components:
         managedModemModel: { type: string, maxLength: 128, description: Current bounded AT model result; empty when unavailable and displayed as read failure by the Web UI }
         managedModemSerialNumber: { type: string, maxLength: 128, description: "Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable" }
         subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
+        phoneNumbers: { type: array, maxItems: 2, items: { $ref: "#/components/schemas/PhoneNumberObservation" } }
         state: { $ref: "#/components/schemas/ManagedLineState" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
         createdAt: { type: string, format: date-time }
@@ -2924,7 +2940,7 @@ components:
     VoWiFiLineState:
       type: object
       additionalProperties: false
-      required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, phoneNumber, attempt, lastErrorCode]
+      required: [lineId, desiredActive, eligible, readinessCode, state, stage, online, egressMode, countryCode, countryName, registeredAt, nextRefreshAt, attempt, lastErrorCode]
       properties:
         lineId: { type: string, pattern: "^line_[A-Za-z0-9_-]{22}$" }
         desiredActive: { type: boolean }
@@ -2938,7 +2954,6 @@ components:
         countryName: { type: string, maxLength: 80 }
         registeredAt: { type: string, maxLength: 64 }
         nextRefreshAt: { type: string, maxLength: 64 }
-        phoneNumber: { type: string, pattern: "^$|^\\+[1-9][0-9]{2,14}$", maxLength: 16, description: E.164 phone number authorized by IMS registration; empty when unavailable }
         attempt: { type: integer, minimum: 0, maximum: 1000000 }
         lastErrorCode: { type: string, maxLength: 64 }
     VoWiFiLineStateList:

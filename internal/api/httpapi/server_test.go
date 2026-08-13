@@ -391,7 +391,9 @@ func TestManagedLineHTTPContractUsesStableIdentityAndOpaqueCandidates(t *testing
 			ID: testBusinessLineID, DisplayName: "VOXI primary", ManagedModemID: modemID,
 			ManagedModemDisplayName: "ML307A", ManagedModemModel: "ML307A-DSLN", ManagedModemSerialNumber: "ML307A-SERIAL-0001",
 			SubscriptionDisplayHint: "ICCID •••• 5553", State: linedomain.StateReady,
-			Capabilities: capabilities, CreatedAt: createdAt,
+			Capabilities: capabilities,
+			PhoneNumbers: []linedomain.PhoneNumberObservation{{Number: "+12025550123", Sources: []string{linedomain.PhoneNumberSourceCellularSIM, linedomain.PhoneNumberSourceIMS}}},
+			CreatedAt:    createdAt,
 		}},
 		candidates: []linedomain.Candidate{{
 			CandidateID: candidateID, ManagedModemID: modemID, ManagedModemDisplayName: "ML307A",
@@ -418,6 +420,7 @@ func TestManagedLineHTTPContractUsesStableIdentityAndOpaqueCandidates(t *testing
 
 	listed := request(http.MethodGet, "/api/v1/lines", "")
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"id":"`+testBusinessLineID+`"`) ||
+		!strings.Contains(listed.Body.String(), `"phoneNumbers":[{"number":"+12025550123","sources":["cellular-sim","ims"]}]`) ||
 		strings.Contains(listed.Body.String(), "runtimeLineId") || strings.Contains(listed.Body.String(), "physicalDeviceId") ||
 		strings.Contains(listed.Body.String(), "subscriptionIdentityFingerprint") || strings.Contains(listed.Body.String(), "agent-line-") ||
 		strings.Contains(listed.Body.String(), "/dev/") {
@@ -470,7 +473,7 @@ func TestVoWiFiHTTPContractListsAndMutatesOnlyTypedState(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"online"`) ||
-		!strings.Contains(response.Body.String(), `"phoneNumber":"+447700900123"`) ||
+		strings.Contains(response.Body.String(), "phoneNumber") ||
 		strings.Contains(response.Body.String(), "pid") || strings.Contains(response.Body.String(), "pcscf") || strings.Contains(response.Body.String(), "innerAddress") {
 		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
 	}

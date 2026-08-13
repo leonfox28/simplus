@@ -299,6 +299,13 @@ export const zManagedLineState = z.enum([
     'sim-unavailable'
 ]);
 
+export const zPhoneNumberSource = z.enum(['cellular-sim', 'ims']);
+
+export const zPhoneNumberObservation = z.object({
+    number: z.string().max(16).regex(/^\+[1-9][0-9]{2,14}$/),
+    sources: z.array(zPhoneNumberSource).min(1).max(2)
+});
+
 export const zManagedLine = z.object({
     id: z.string().regex(/^line_[A-Za-z0-9_-]{22}$/),
     displayName: z.string().min(1).max(120),
@@ -307,6 +314,7 @@ export const zManagedLine = z.object({
     managedModemModel: z.string().max(128),
     managedModemSerialNumber: z.string().max(128),
     subscriptionDisplayHint: z.string().min(1).max(64),
+    phoneNumbers: z.array(zPhoneNumberObservation).max(2),
     state: zManagedLineState,
     capabilities: zHardwareCapabilities,
     createdAt: z.iso.datetime()
@@ -784,7 +792,6 @@ export const zVoWiFiLineState = z.object({
     countryName: z.string().max(80),
     registeredAt: z.string().max(64),
     nextRefreshAt: z.string().max(64),
-    phoneNumber: z.string().max(16).regex(/^$|^\+[1-9][0-9]{2,14}$/),
     attempt: z.int().gte(0).lte(1000000),
     lastErrorCode: z.string().max(64)
 });

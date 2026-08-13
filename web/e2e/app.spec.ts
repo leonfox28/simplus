@@ -25,6 +25,10 @@ const line = {
   managedModemModel: 'Simulator',
   managedModemSerialNumber: 'SYNTHETIC-001',
   subscriptionDisplayHint: 'SIM •••• 0001',
+  phoneNumbers: [
+    { number: '+12025550123', sources: ['cellular-sim'] },
+    { number: '+447700900123', sources: ['ims'] },
+  ],
   state: 'ready',
   capabilities,
   createdAt: '2026-08-07T00:00:00Z',
@@ -128,7 +132,7 @@ async function installApi(page: Page, authenticated = false) {
     }] })
     if (path === '/api/v1/vowifi-lines') return json(route, { lines: [{
       lineId: line.id, desiredActive: false, eligible: true, readinessCode: 'READY', state: 'stopped', stage: '', online: false,
-      egressMode: 'direct', countryCode: '', countryName: '', registeredAt: '', nextRefreshAt: '', phoneNumber: '', attempt: 0, lastErrorCode: '',
+      egressMode: 'direct', countryCode: '', countryName: '', registeredAt: '', nextRefreshAt: '', attempt: 0, lastErrorCode: '',
     }] })
     if (path === '/api/v1/mihomo/subscriptions') return json(route, { subscriptions: [] })
     if (path === '/api/v1/contacts') return json(route, { contacts: [] })
@@ -254,6 +258,8 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
 
   await page.getByText('线路配置', { exact: true }).click()
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
+  await expect(page.getByText('+12025550123', { exact: true })).toBeVisible()
+  await expect(page.getByText('+447700900123', { exact: true })).toBeVisible()
   await expect(page.getByRole('table')).toBeVisible()
   await page.getByText('短信', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '短信', exact: true })).toHaveCount(0)
@@ -326,6 +332,8 @@ test('@mobile Drawer navigation has no overflow or unintended autofocus', async 
   await expect(page.getByRole('heading', { name: '线路配置' })).toBeVisible()
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
   await expect(page.locator('.mobile-record-card')).toBeVisible()
+  await expect(page.locator('.mobile-record-card').getByText('+12025550123', { exact: true })).toBeVisible()
+  await expect(page.locator('.mobile-record-card').getByText('+447700900123', { exact: true })).toBeVisible()
   await expect(page.locator('.ant-table')).toHaveCount(0)
   await page.getByRole('button', { name: '打开导航' }).click()
   const messagesDrawer = page.getByRole('dialog')

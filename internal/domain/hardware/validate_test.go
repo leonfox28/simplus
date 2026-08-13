@@ -8,6 +8,7 @@ import (
 
 func TestNormalizeAndValidateAcceptsDynamicTopologyAndReturnsIndependentCopy(t *testing.T) {
 	input := validSnapshot()
+	input.SubscriptionProfiles[0].CellularPhoneNumber = "+12025550123"
 	input.Devices = append(input.Devices, PhysicalDevice{ID: "device-2", DisplayName: "Second modem", Transport: TransportUSB, State: DeviceAvailable, Generation: 1})
 	inactive := input.SubscriptionProfiles[0]
 	inactive.ID = "profile-2"
@@ -23,6 +24,9 @@ func TestNormalizeAndValidateAcceptsDynamicTopologyAndReturnsIndependentCopy(t *
 	}
 	if normalized.Devices[0].ID != "device-1" || normalized.Devices[1].ID != "device-2" {
 		t.Fatalf("devices = %#v", normalized.Devices)
+	}
+	if normalized.SubscriptionProfiles[0].CellularPhoneNumber != "+12025550123" || normalized.SubscriptionProfiles[1].CellularPhoneNumber != "" {
+		t.Fatalf("current subscriber-number normalization = %#v", normalized.SubscriptionProfiles)
 	}
 	input.Devices[0].DisplayName = "mutated"
 	input.ResourceGroups[0].Resources[0] = "mutated"
@@ -55,6 +59,7 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 		{name: "full identity leaked into hint", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].DisplayIdentityHint = "\nsecret" }},
 		{name: "malformed home operator code", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].HomeOperatorCode = "23415" }},
 		{name: "malformed home operator name", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].HomeOperatorName = "VOXI\n" }},
+		{name: "malformed cellular phone number", mutate: func(snapshot *Snapshot) { snapshot.SubscriptionProfiles[0].CellularPhoneNumber = "12025550123" }},
 		{name: "entity generation ahead of snapshot", mutate: func(snapshot *Snapshot) { snapshot.ResourceGroups[0].Generation = 2 }},
 		{name: "resource group generation behind profile binding", mutate: func(snapshot *Snapshot) {
 			snapshot.Generation = 2

@@ -266,6 +266,7 @@ type SIMObservation struct {
 	DisplayIdentityHint string `json:"displayIdentityHint,omitempty"`
 	HomeOperatorName    string `json:"homeOperatorName,omitempty"`
 	HomeOperatorCode    string `json:"homeOperatorCode,omitempty"`
+	SubscriberNumber    string `json:"subscriberNumber,omitempty"`
 }
 
 type SignalObservation struct {

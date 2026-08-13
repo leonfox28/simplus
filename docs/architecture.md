@@ -73,9 +73,9 @@ simplusd typed SMS/Call/eUICC API
 
 动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。添加对话框可以为人工辨认显示本次扫描的相对 USB 拓扑地址、VID:PID 和 USB Serial 每实例 HMAC 的短标识；这些字段不参与业务分支、不成为持久绑定，也不包含原始 IMEI、`/dev` 节点或 sysfs 绝对路径。Agent 的当前序列号展示优先使用型号 adapter 严格验证的模块序列号，没有时回退经过长度与控制字符限制的 USB 描述符 Serial；两者都不落入 Managed Modem 记录、不参与绑定或业务控制，USB Serial 的每实例 HMAC 指纹仍只作辅助观察。普通 probe、inventory、模组列表和数据库只以 HMAC 处理 IMEI；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹。管理员在模组页点击显示按钮时，可以通过独立的鉴权 POST 实时读取当前在线模组的 IMEI：请求以 Managed Modem ID 进入，经过当前 Agent/快照/设备代际约束并再次核对持久 IMEI 指纹，响应固定为 `no-store`，原值不落库、不进入普通日志，隐藏或刷新后从页面状态清除。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
 
-Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。射频、Host VoWiFi 意图、`direct`/Mihomo 国家出口及短信/电话 transport 都不是 Line 身份的一部分，各自通过独立配置与类型化能力工作。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md) 与 [`0019`](decisions/0019-line-identity-and-communication-paths.md)。
+Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。射频、Host VoWiFi 意图、`direct`/Mihomo 国家出口及短信/电话 transport 都不是 Line 身份的一部分，各自通过独立配置与类型化能力工作。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录；当前手机号观测则由 Line 统一合并但不进入这些业务解析路径，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md)、[`0019`](decisions/0019-line-identity-and-communication-paths.md) 与 [`0027`](decisions/0027-line-phone-number-observations.md)。
 
-能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。`ATProbeAdapter`、`EquipmentIdentityAdapter`、`ModuleSerialAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter`、`RFControlAdapter`、SMS adapter 与 SMS call-safety seam 分别拥有只读综合探测、IMEI、模块序列号、主卡槽插入状态、ICCID 脱敏身份与归属元数据、SIM/IMS AKA、布尔 RF 动作、短信收发/恢复和发送前通话分类。模块序列号只是当前显示元数据，不替代 IMEI 稳定指纹或 USB descriptor Serial 语义。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务；QDC507 SMS 通过完整 production composite 接入统一 SMS 契约，端点路径与 AT/QMI 命令始终留在 Agent 内部。
+能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。`ATProbeAdapter`、`EquipmentIdentityAdapter`、`ModuleSerialAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SubscriberNumberAdapter`、`SIMAuthAdapter`、`RFControlAdapter`、SMS adapter 与 SMS call-safety seam 分别拥有只读综合探测、IMEI、模块序列号、主卡槽插入状态、ICCID 脱敏身份与归属元数据、当前 ready SIM 的严格只读本机号码、SIM/IMS AKA、布尔 RF 动作、短信收发/恢复和发送前通话分类。模块序列号只是当前显示元数据，不替代 IMEI 稳定指纹或 USB descriptor Serial 语义；本机号码也只是当前 Line 观测，不进入稳定 SIM 身份或持久配置。设备身份、SIM 插入状态、SIM 身份和可选号码分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商或号码读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务；QDC507 SMS 通过完整 production composite 接入统一 SMS 契约，端点路径与 AT/QMI 命令始终留在 Agent 内部。
 
 `USBSerialBindingAdapter` 不是业务能力；它只让容器 entrypoint 在扫描前取得经过型号
 审查的 option driver 动态 ID。Registry 会拒绝非法或跨型号重复 ID，Web、Compose
@@ -165,7 +165,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
   使用同一套直接 Ant Design 视觉语言；桌面以 Table/Sider 为主，手机以 Card/List 与
   Drawer 为主，宽表只在自身容器滚动，加载、空、错误、部分失败和不可用原因明确可见；
 - 模组页只展示管理员已添加的模组，主表固定为型号、当前模块序列号（不可用时回退 USB Serial）、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏 USB 序列标识、支持状态、类型化不可添加原因和能力；
-- 线路页只展示管理员创建的持久 Line；“添加线路”以单选表格展示所有已添加模组的当前 SIM/Profile 候选及类型化不可添加原因，创建只保存不可改绑的身份和名称；主表直接显示 IMS 注册明确返回的 E.164 手机号，无法确认时显示未获取；配置抽屉分别维护名称、显式 `direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，不出现 RF 控制；
+- 线路页只展示管理员创建的持久 Line；“添加线路”以单选表格展示所有已添加模组的当前 SIM/Profile 候选及类型化不可添加原因，创建只保存不可改绑的身份和名称；主表只读取 Line 当前手机号观测集合，蜂窝 SIM 与 IMS 同值时合并来源、不同值时全部显示，无法确认时显示未获取；配置抽屉分别维护名称、显式 `direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，不出现 RF 控制；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
 - 不把 Agent 协议、AT 指令或内部 fencing 模型泄漏到 UI。
 
@@ -177,7 +177,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
   创建在它自己的 network namespace，启动时由临时 netns/veth/nft/XFRM probe
   验证并清理，不能改用 host network 或 privileged 模式绕过失败；
 - Mihomo supervisor 只接受已安装 core 和每订阅不可变生成配置的固定路径形状，并把 listener bind error 视为启动失败；
-- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；REGISTER `P-Associated-URI` 中明确的 `tel:+...` 或 `sip:+...@...` 可以规范化为运行态手机号，其他 IMS 身份不得猜测转换，状态失效时号码随之清空；
+- 每条激活 Line 由一个长生命周期 worker 独占网络边界、strongSwan ePDG 会话、Gm XFRM 和 IMS 注册；国家出口通过已生成的固定 TPROXY listener fail closed，不回退 direct；Host VoWiFi 生命周期不读取或修改模组 RF 状态；REGISTER `P-Associated-URI` 中明确的 `tel:+...` 或 `sip:+...@...` 可以规范化为内部 IMS 号码观测，其他 IMS 身份不得猜测转换，状态失效时号码随之清空；公共 VoWiFi 状态不拥有或返回号码；
 - 同一 worker 还独占 SMS over IMS 的受保护 SIP socket、Service-Route、RP reference、异步出站提交事务与待确认入站消息；root-only worker socket 只提供固定的发送、入站 list/read/acknowledge、出站报告 list/acknowledge 操作，管理进程无法提交 SIP、RPDU、APDU、设备路径或网络参数；提交报告优先按 `In-Reply-To` 并始终按仍占用的 RP reference 关联原 SIP transaction；
 - Line 应用层先把稳定业务 Line 唯一解析到当前硬件目标；worker 再用该不透明目标检查具备 `sim-auth` 的就绪 SIM、identity fence、无活动呼叫与出口，并维持 IKEv2 DPD/rekey、IMS keepalive、提前刷新和有界重连。它不检查或修改 RF，停用、进程退出及服务重启都清理其临时网络对象；
 - core SQLite 只保存管理员的 `desired_active` 意图，实时 online 状态只来自 `simplus-netd`；`simplusd` 启动和每十秒协调二者；

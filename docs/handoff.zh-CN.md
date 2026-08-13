@@ -62,9 +62,9 @@
 - `ManagedModem` 以 ML307A IMEI 的每实例 HMAC 指纹稳定绑定，USB Serial 指纹只作辅助，USB 拓扑名与设备节点只作本次扫描定位；旧端口绑定在原设备仍可确认时一次性提升；
 - 线路页只展示管理员显式创建的持久 Line；添加时从已添加模组当前 SIM/Profile 候选建立 `ManagedModem + 身份 + 卡槽` 绑定，稳定业务 ID 不依赖 USB 位置或 Agent 临时 Line；
 - Line 只保存稳定身份与名称，不再保存互斥接入方式。候选页会同时说明模组离线、未插 SIM、SIM/Profile 不可用、已添加和身份冲突；提交时重新扫描，过期候选不会被猜测绑定。添加本身不修改 RF、不启动 Mihomo/VoWiFi，也不执行通信动作；
-- 线路主表在桌面使用 Ant Design Table、手机使用记录卡片，展示名称、实时模组型号/当前序列号、脱敏 SIM/Profile、运行态手机号、状态、VoWiFi 与出口，不重复罗列能力标签；响应式配置抽屉分别保存名称、出口和 VoWiFi 意图。新 Line 出口固定为 `unconfigured`，只有显式 `direct` 或 `mihomo-country` 可进入激活准入；
+- 线路主表在桌面使用 Ant Design Table、手机使用记录卡片，展示名称、实时模组型号/当前序列号、脱敏 SIM/Profile、Line 统一手机号观测、状态、VoWiFi 与出口，不重复罗列能力标签；蜂窝 SIM 与 IMS 同值时合并来源、不同值时全部显示。响应式配置抽屉分别保存名称、出口和 VoWiFi 意图。新 Line 出口固定为 `unconfigured`，只有显式 `direct` 或 `mihomo-country` 可进入激活准入；
 - 短信、通话、Mihomo 出口和 Host VoWiFi 已全部改用稳定 Line 目录，并且不读取旧 access-mode。模组离线、SIM/Profile 更换、卡槽不符或身份冲突时原 Line fail closed，不自动改绑；
-- 型号 adapter 只实现当前纵切需要的窄接口：ML307A 提供 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`，QDC507 另提供严格固定查询的 `ModuleSerialAdapter` 及已验收 SMS 能力；Linux AT transport 只处理 tty 生命周期和有界 I/O。`SIMIdentityAdapter` 还会以 best-effort 方式读取活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；API 仅返回运营商名称和代码，不返回或持久化原始 IMSI，读取失败也不阻止添加 Line。设备身份、SIM 插入状态和 SIM 身份相互独立，不再依赖 RF/通话综合探测成功。模组页显示主卡槽“已插入 / 未插入 / 未知”，并对不可添加候选给出类型化原因，但不会自动创建 Line。没有为未来电话或 eUICC 预建空接口；短信与电话继续属于 Line 业务；
+- 型号 adapter 只实现当前纵切需要的窄接口：ML307A 提供 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`，QDC507 另提供严格固定只读 `SubscriberNumberAdapter`、`ModuleSerialAdapter` 及已验收 SMS 能力；Linux AT transport 只处理 tty 生命周期和有界 I/O。`SIMIdentityAdapter` 还会以 best-effort 方式读取活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；号码能力只接受唯一显式国际 E.164 结果，并仅附着到同次 ready、identity-known SIM 观测。设备身份、SIM 插入状态、SIM 身份与可选号码相互独立，号码失败不阻止 Line。模组页显示主卡槽“已插入 / 未插入 / 未知”，并对不可添加候选给出类型化原因，但不会自动创建 Line。没有为未来电话或 eUICC 预建空接口；短信与电话继续属于 Line 业务；
 - production Agent 暴露类型化只读状态、root-only SIM 鉴权和带读回确认的 ML307A 运行时 RF 开关，不接受任意 AT/QMI 命令或设备路径；
 - QDC507 原生蜂窝短信复用同一个 Agent、Line 和消息业务接口；指定 SIM/批准 peer 已完成一条
   入站 persist→PDU revalidate/delete→pending-zero 和一条新出站 persist→modem-confirmed HIL。
@@ -74,7 +74,7 @@
 - ML307A 的 SIM/IMS 身份与 AKA challenge-response 只通过固定请求结构提供给受限消费者，身份和鉴权材料不持久化；IMS Home Domain 优先来自完整 ISIM，缺少 ISIM 时只依据 IMSI 与 EF_AD 明确的 MNC 长度动态派生，无法可靠判定时 fail closed；Host VoWiFi 的 SIP 层消费该动态身份，不检查或修改 RF；
 - `simplus-netd` 独占 Mihomo、namespace、路由、nftables、strongSwan 和 XFRM 生命周期；
 - Host VoWiFi 已完成真实 ePDG/IMS 注册、持续 keepalive、连续提前刷新、有界重连、停用清理和服务恢复验证；
-- Web/API 返回阶段、在线状态、出口、注册时间、下次刷新、稳定错误码，以及 IMS 明确授权时从 `P-Associated-URI` 提取的 E.164 手机号；无法确认时返回空值，重连或停用时清空，不返回原始 IMPU、内部地址、进程、SPI、P-CSCF 或鉴权材料。
+- VoWiFi Web/API 只返回阶段、在线状态、出口、注册时间、下次刷新和稳定错误码；IMS 明确授权时从 `P-Associated-URI` 提取的 E.164 只作为内部 Line 号码来源，重连或停用时清空。管理员 Line API 返回合并后的当前号码集合；两者都不返回原始 IMPU、内部地址、进程、SPI、P-CSCF 或鉴权材料。
 - Host VoWiFi worker 已实现条件 `+g.3gpp.smsip` 注册、binary SIP MESSAGE、RP-DATA/RP-ACK/RP-ERROR、REGISTER `P-Associated-URI` 身份选择、`In-Reply-To`/RP reference transaction 关联和类型化 `simplus-netd` 短信 API；收件人会话页直接复用同一 transport-neutral 消息记录；
 - multipart 入站使用 SQLite 分片 spool：每片落库后独立 RP-ACK，十分钟内唯一完整组才成为可见消息，并已用关闭/重开数据库的 fixture 验证恢复；后台新落库消息通过 SSE 失效提示令活跃短信查询重新读取 HTTP 权威快照，不要求用户轮询刷新浏览器；
 - 出站请求收齐各段 SIP 最终响应即返回，不等待 RP 报告；SIP 已接受时带 provider ID 持久化为 `unconfirmed`，后台取得关联 RP-ACK 后才异步提升为 `sent`，报告缺失、响应未知和 multipart 部分拒绝均不自动重发。入站只有业务数据库持久化后才发送 RP-ACK；普通成功 SMS-DELIVER-REPORT 使用带空 TP-PI 的两字节 TPDU，不虚构 PID/DCS/UD 可选字段。受控 HIL 已完成真实单段与 multipart 入站，以及一条单段 GSM7 服务请求的关联出站 RP-ACK 和新 multipart 业务回复；失败同步使用有界指数退避。
