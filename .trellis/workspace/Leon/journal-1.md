@@ -238,3 +238,25 @@ Closed the recurring Feishu Begin rejection by accepting the observed one-hour e
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Line phone number observations
+
+**Date**: 2026-08-14
+**Task**: Line phone number observations
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Added typed QDC507 subscriber-number observation, propagated it through Agent and inventory, made Line the unified cellular/IMS owner, rendered all distinct values in Web, verified the real local Line UI, and deployed healthy dev images for revision 97b06e5.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97b06e5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
