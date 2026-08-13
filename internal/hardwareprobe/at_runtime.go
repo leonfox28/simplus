@@ -32,7 +32,14 @@ func (runtime atRuntime) Probe(ctx context.Context, endpoint string, adapter mod
 		return probeOpenFailure(result, err)
 	}
 	defer session.Close()
-	query := attransport.Query(session.Query)
+	return executeATProbe(ctx, session.Query, endpoint, adapter, runtime.identities)
+}
+
+func executeATProbe(ctx context.Context, query attransport.Query, endpoint string, adapter modemadapter.Adapter, identities modemadapter.IdentityPseudonymizer) agentapi.DeviceProbe {
+	result := emptyProbe(endpoint)
+	if query == nil || adapter == nil {
+		return probeFailure(result, agentapi.ProbeStateUnavailable, agentapi.ErrorLayerPlatform, agentapi.ErrorPlatformUnsupported, false, "AT runtime is unavailable")
+	}
 	probeAdapter, ok := adapter.(modemadapter.ATProbeAdapter)
 	if !ok {
 		return probeFailure(result, agentapi.ProbeStateUnavailable, agentapi.ErrorLayerPlatform, agentapi.ErrorPlatformUnsupported, false, "adapter has no AT probe capability")
@@ -47,16 +54,21 @@ func (runtime atRuntime) Probe(ctx context.Context, endpoint string, adapter mod
 	}
 	result = standardat.ExecuteProbe(ctx, query, plan, presenceAdapter.ReadSIMPresence)
 	result.Endpoint = endpoint
+	if serialAdapter, supported := adapter.(modemadapter.ModuleSerialAdapter); supported {
+		if serial, serialErr := serialAdapter.ReadModuleSerial(ctx, query); serialErr == nil {
+			result.Identity.SerialNumber = serial
+		}
+	}
 	if identityAdapter, supported := adapter.(modemadapter.EquipmentIdentityAdapter); supported {
-		if imei, identityErr := identityAdapter.ReadEquipmentIdentity(ctx, query); identityErr == nil && runtime.identities != nil {
-			if fingerprint, fingerprintErr := runtime.identities.Pseudonym("modem-imei-v1", []byte(imei)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
+		if imei, identityErr := identityAdapter.ReadEquipmentIdentity(ctx, query); identityErr == nil && identities != nil {
+			if fingerprint, fingerprintErr := identities.Pseudonym("modem-imei-v1", []byte(imei)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
 				result.Identity.EquipmentIdentityFingerprint = fingerprint
 			}
 		}
 	}
 	if result.SIM.State == agentapi.SIMStatePresent && result.SIM.PrimaryLockState == agentapi.PrimaryLockReady {
 		if identityAdapter, supported := adapter.(modemadapter.SIMIdentityAdapter); supported {
-			if identity, identityErr := identityAdapter.ReadSIMIdentity(ctx, query, runtime.identities); identityErr == nil {
+			if identity, identityErr := identityAdapter.ReadSIMIdentity(ctx, query, identities); identityErr == nil {
 				result.SIM.IdentityFingerprint = identity.Fingerprint
 				result.SIM.DisplayIdentityHint = identity.DisplayHint
 				result.SIM.HomeOperatorName = identity.HomeOperatorName
@@ -85,6 +97,22 @@ func (runtime atRuntime) ReadEquipmentIdentity(ctx context.Context, endpoint str
 		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
 	}
 	return agentapi.EquipmentIdentityObservation{IMEI: imei, Fingerprint: fingerprint}, nil
+}
+
+func (runtime atRuntime) ReadSMSBlockingCallCount(
+	ctx context.Context,
+	endpoint string,
+	adapter modemadapter.SMSCallSafetyAdapter,
+) (int, bool) {
+	if runtime.opener == nil || adapter == nil {
+		return 0, false
+	}
+	session, err := runtime.opener.Open(endpoint)
+	if err != nil {
+		return 0, false
+	}
+	defer session.Close()
+	return adapter.ReadSMSBlockingCallCount(ctx, session.Query)
 }
 
 func (runtime atRuntime) ReadSIMAKAIdentity(ctx context.Context, endpoint string, adapter modemadapter.SIMAuthAdapter, identityFingerprint string) (string, error) {

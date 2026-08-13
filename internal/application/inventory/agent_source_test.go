@@ -76,7 +76,8 @@ func TestAgentSourceMapsObservedHardwareWithoutClaimingUnverifiedVoiceOrSIMIdent
 			ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: instanceID, SnapshotGeneration: 2, SnapshotRevision: revision,
 			Devices: []agentapi.DeviceProbe{{
 				DeviceID: "usb-1-1", State: agentapi.ProbeStateComplete,
-				Identity: agentapi.ModemIdentity{Model: "QDC507"}, SIM: agentapi.SIMObservation{State: agentapi.SIMStatePresent},
+				Identity: agentapi.ModemIdentity{Model: "QDC507", SerialNumber: "SYNTHETIC-MODULE-0001"},
+				SIM:      agentapi.SIMObservation{State: agentapi.SIMStatePresent},
 			}},
 		},
 	}
@@ -90,7 +91,8 @@ func TestAgentSourceMapsObservedHardwareWithoutClaimingUnverifiedVoiceOrSIMIdent
 	if len(first.Devices) != 1 || len(first.ModemFunctions) != 1 || len(first.SIMSlots) != 1 || len(first.ResourceGroups) != 1 {
 		t.Fatalf("topology = %#v", first)
 	}
-	if first.Devices[0].ModemModel != "QDC507" || first.Devices[0].USBAddress != "1-1" || first.Devices[0].USBVendorID != "2c7c" ||
+	if first.Devices[0].ModemModel != "QDC507" || first.Devices[0].ModemSerialNumber != "SYNTHETIC-MODULE-0001" ||
+		first.Devices[0].USBAddress != "1-1" || first.Devices[0].USBVendorID != "2c7c" ||
 		first.Devices[0].USBProductID != "0125" || first.Devices[0].USBSerialNumber != "QDC507-SERIAL-0001" ||
 		first.Devices[0].USBSerialFingerprint != strings.Repeat("9", 64) {
 		t.Fatalf("USB display metadata = %#v", first.Devices[0])

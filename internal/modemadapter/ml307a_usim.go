@@ -35,6 +35,10 @@ func deriveML307AIMSIdentity(ctx context.Context, query attransport.Query, imsi 
 }
 
 func readML307AMNCLength(ctx context.Context, query attransport.Query) (int, error) {
+	return readSIMMNCLength(ctx, query)
+}
+
+func readSIMMNCLength(ctx context.Context, query attransport.Query) (int, error) {
 	if query == nil {
 		return 0, agentapi.ErrSIMAKAUnavailable
 	}

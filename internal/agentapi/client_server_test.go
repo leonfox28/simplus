@@ -98,6 +98,46 @@ func TestManagedHardwareHandlerDisclosesEquipmentIdentityOnlyThroughNoStoreRoute
 	}
 }
 
+func TestManagedHardwareHandlerAdvertisesAndRoutesSMSOnlyWhenBackendIsComposed(t *testing.T) {
+	monitor := newMonitor(&monitorScanner{devices: []DeviceReport{{
+		ID: "usb-1-1", DisplayName: "QDC507", PhysicalPath: "1-1", Profile: ProfileQDC507,
+	}}}, "01234567-89ab-cdef-0123-456789abcdef", 1)
+	if _, err := monitor.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	withoutSMS := NewManagedHardwareHandler(monitor, nil, nil, nil)
+	helloResponse := httptest.NewRecorder()
+	withoutSMS.ServeHTTP(helloResponse, httptest.NewRequest(http.MethodGet, "/v1/hello", nil))
+	var hello Hello
+	if err := json.Unmarshal(helloResponse.Body.Bytes(), &hello); err != nil {
+		t.Fatal(err)
+	}
+	if containsString(hello.Features, FeatureSMS) {
+		t.Fatal("managed handler advertised SMS without a backend")
+	}
+	request := `{"agentInstanceId":"01234567-89ab-cdef-0123-456789abcdef","deviceId":"usb-1-1"}`
+	notFound := httptest.NewRecorder()
+	withoutSMS.ServeHTTP(notFound, httptest.NewRequest(http.MethodPost, "/v1/sms/list", strings.NewReader(request)))
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("uncomposed SMS route status=%d", notFound.Code)
+	}
+
+	withSMS := NewManagedHardwareHandler(monitor, nil, nil, nil, NewDefaultSimulatorSMSBackend())
+	helloResponse = httptest.NewRecorder()
+	withSMS.ServeHTTP(helloResponse, httptest.NewRequest(http.MethodGet, "/v1/hello", nil))
+	if err := json.Unmarshal(helloResponse.Body.Bytes(), &hello); err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(hello.Features, FeatureSMS) {
+		t.Fatal("managed handler omitted SMS after backend composition")
+	}
+	badRequest := httptest.NewRecorder()
+	withSMS.ServeHTTP(badRequest, httptest.NewRequest(http.MethodPost, "/v1/sms/list", strings.NewReader(request)))
+	if badRequest.Code == http.StatusNotFound {
+		t.Fatal("composed managed handler did not register typed SMS routes")
+	}
+}
+
 func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	scanner := &monitorScanner{
 		devices: []DeviceReport{{ID: "usb-1-1", DisplayName: "QDC507", PhysicalPath: "1-1", Profile: ProfileQDC507}},
@@ -188,7 +228,9 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 		t.Fatalf("replay conflict error = %#v", err)
 	}
 
-	listRequest := SMSListRequest{AgentInstanceID: hello.AgentInstanceID, DeviceID: "usb-1-1"}
+	fenceEquipment, fenceSIM := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	listRequest := SMSListRequest{AgentInstanceID: hello.AgentInstanceID, DeviceID: "usb-1-1", DeviceGeneration: 1,
+		ExpectedEquipmentFingerprint: fenceEquipment, ExpectedSubscriptionFingerprint: fenceSIM}
 	listed, err := client.ListSMS(ctx, listRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -198,6 +240,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	}
 	read, err := client.ReadSMS(ctx, SMSReadRequest{
 		AgentInstanceID: hello.AgentInstanceID, DeviceID: "usb-1-1", MessageID: listed.Messages[0].MessageID,
+		DeviceGeneration: 1, ExpectedEquipmentFingerprint: fenceEquipment, ExpectedSubscriptionFingerprint: fenceSIM,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +251,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	sendRequest := SMSSendRequest{
 		OperationID: "operation-sms-0123456789", AgentInstanceID: hello.AgentInstanceID,
 		DeviceID: "usb-1-1", Destination: "+8613800138000", Body: "一条经过 UCS-2 编码的 fake Agent 短信",
+		DeviceGeneration: 1, ExpectedEquipmentFingerprint: fenceEquipment, ExpectedSubscriptionFingerprint: fenceSIM,
 	}
 	sent, err := client.SendSMS(ctx, sendRequest)
 	if err != nil {
@@ -229,6 +273,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	ackRequest := SMSAcknowledgeRequest{
 		OperationID: "operation-ack-012345678", AgentInstanceID: hello.AgentInstanceID,
 		DeviceID: "usb-1-1", MessageID: "agent-inbound-1",
+		DeviceGeneration: 1, ExpectedEquipmentFingerprint: fenceEquipment, ExpectedSubscriptionFingerprint: fenceSIM,
 	}
 	acknowledged, err := client.AcknowledgeSMS(ctx, ackRequest)
 	if err != nil {

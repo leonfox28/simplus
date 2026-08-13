@@ -309,7 +309,11 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 			ID: "modem_AQEBAQEBAQEBAQEBAQEBAQ", DisplayName: "ML307A", Model: "ML307A",
 			SerialNumber: "ML307A-SERIAL-0001",
 			Transport:    hardware.TransportUSB, State: modemdomain.StateOnline, Capabilities: capabilities,
-			RFState: modemdomain.RFStateOff, SIMPresence: modemdomain.SIMPresencePresent, AddedAt: addedAt,
+			RFState: modemdomain.RFStateOff, SIMPresence: modemdomain.SIMPresencePresent,
+			Cellular: modemdomain.CellularStatus{State: modemdomain.CellularSearching, ErrorCode: "CELLULAR_NOT_REGISTERED",
+				Registrations: []modemdomain.CellularRegistration{{Domain: "cs", State: "searching"}, {Domain: "packet", State: "not-registered"}, {Domain: "eps", State: "searching"}},
+				OperatorName:  "Synthetic Carrier", OperatorCode: "001-01", RAT: "lte", SignalState: "measured", SignalRSSIDBm: -73, ObservedAt: addedAt},
+			AddedAt: addedAt,
 		}},
 		candidates: []modemdomain.Candidate{{
 			CandidateID: "agent-usb-1-1", USBAddress: "1-1", USBVendorID: "2c7c", USBProductID: "0125",
@@ -329,7 +333,8 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"id":"modem_AQEBAQEBAQEBAQEBAQEBAQ"`) ||
 		!strings.Contains(listResponse.Body.String(), `"serialNumber":"ML307A-SERIAL-0001"`) ||
 		!strings.Contains(listResponse.Body.String(), `"simPresence":"present"`) ||
-		strings.Contains(listResponse.Body.String(), "hardwareDeviceId") {
+		!strings.Contains(listResponse.Body.String(), `"state":"searching"`) || !strings.Contains(listResponse.Body.String(), `"operatorCode":"001-01"`) ||
+		strings.Contains(listResponse.Body.String(), "hardwareDeviceId") || strings.Contains(listResponse.Body.String(), "identityFingerprint") || strings.Contains(listResponse.Body.String(), "endpoint") {
 		t.Fatalf("list status=%d body=%s", listResponse.Code, listResponse.Body.String())
 	}
 
@@ -962,7 +967,8 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	messagingService, err := messageapp.NewService(ctx, stores, testBusinessLineSource{source: inventoryService}, simulatorGateway, simulatorGateway)
+	messagingService, err := messageapp.NewService(ctx, stores, testBusinessLineSource{source: inventoryService},
+		messageapp.AgentNativeSMSTransport(simulatorGateway, simulatorGateway))
 	if err != nil {
 		t.Fatal(err)
 	}

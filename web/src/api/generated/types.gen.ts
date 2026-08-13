@@ -143,6 +143,37 @@ export type ManagedModemRfState = 'on' | 'off' | 'unknown';
 
 export type ManagedModemSimPresence = 'present' | 'absent' | 'unknown';
 
+export type CellularState = 'registered-home' | 'registered-roaming' | 'searching' | 'denied' | 'not-registered' | 'rf-off' | 'sim-not-ready' | 'unavailable' | 'unknown';
+
+export type CellularErrorCode = '' | 'CELLULAR_STATUS_UNAVAILABLE' | 'CELLULAR_SIM_NOT_READY' | 'CELLULAR_RF_OFF' | 'CELLULAR_REGISTRATION_DENIED' | 'CELLULAR_NOT_REGISTERED';
+
+export type CellularRegistrationDomain = 'cs' | 'packet' | 'eps';
+
+export type CellularRegistrationState = 'not-registered' | 'searching' | 'denied' | 'registered-home' | 'registered-roaming' | 'registered-sms-home' | 'registered-sms-roaming' | 'emergency-only' | 'registered-home-csfb-not-preferred' | 'registered-roaming-csfb-not-preferred' | 'unknown';
+
+export type CellularRegistration = {
+    domain: CellularRegistrationDomain;
+    state: CellularRegistrationState;
+};
+
+export type CellularSignalState = 'measured' | 'unavailable' | 'unknown';
+
+export type ManagedModemCellularStatus = {
+    state: CellularState;
+    errorCode: CellularErrorCode;
+    registrations: [
+        CellularRegistration,
+        CellularRegistration,
+        CellularRegistration
+    ];
+    operatorName: string;
+    operatorCode: string;
+    rat: string;
+    signalState: CellularSignalState;
+    signalRssiDbm: number;
+    observedAt: string;
+};
+
 export type ModemSupportStatus = 'supported' | 'not-ready';
 
 export type ModemCandidateReadinessReason = 'READY' | 'CONTROL_UNAVAILABLE' | 'SIM_ACCESS_UNAVAILABLE' | 'EQUIPMENT_IDENTITY_UNAVAILABLE' | 'IDENTITY_CONFLICT';
@@ -151,12 +182,16 @@ export type ManagedModem = {
     id: string;
     displayName: string;
     model: string;
+    /**
+     * Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable
+     */
     serialNumber: string;
     transport: DeviceTransport;
     state: ManagedModemState;
     capabilities: HardwareCapabilities;
     rfState: ManagedModemRfState;
     simPresence: ManagedModemSimPresence;
+    cellular: ManagedModemCellularStatus;
     addedAt: string;
 };
 
@@ -180,7 +215,7 @@ export type ManagedLine = {
      */
     managedModemModel: string;
     /**
-     * Current bounded USB Serial; empty when unavailable and displayed as read failure by the Web UI
+     * Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable
      */
     managedModemSerialNumber: string;
     subscriptionDisplayHint: string;
@@ -201,6 +236,9 @@ export type LineCandidate = {
     managedModemId: string;
     managedModemDisplayName: string;
     managedModemModel: string;
+    /**
+     * Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable
+     */
     managedModemSerialNumber: string;
     subscriptionDisplayHint: string;
     /**

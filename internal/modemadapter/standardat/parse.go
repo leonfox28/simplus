@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/attransport"
 )
 
 var (
@@ -313,6 +314,40 @@ func ActiveCallCount(lines []string) int {
 		}
 	}
 	return count
+}
+
+// ActiveNonDataCallCount reports CLCC entries that are not transparent data
+// bearer sessions (mode 1). SMS can coexist with an already-active data
+// bearer, while voice, alternate voice/fax, and malformed/unknown entries
+// remain blockers. The parser returns known=false unless the transcript has
+// one final OK and every CLCC row has a bounded, documented mode field.
+func ActiveNonDataCallCount(lines []string) (count int, known bool) {
+	if !attransport.HasTerminalOK(lines) {
+		return 0, false
+	}
+	terminal := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "OK" {
+			terminal++
+			continue
+		}
+		if !strings.HasPrefix(line, "+CLCC:") {
+			return 0, false
+		}
+		fields := csvPayload(line)
+		if len(fields) < 5 {
+			return 0, false
+		}
+		mode, err := strconv.Atoi(strings.TrimSpace(fields[3]))
+		if err != nil || mode < 0 || mode > 2 {
+			return 0, false
+		}
+		if mode != 1 {
+			count++
+		}
+	}
+	return count, terminal == 1
 }
 
 func intPointer(value int) *int {

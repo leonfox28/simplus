@@ -39,6 +39,22 @@
 | 28：收件人短信会话 | 跨 Line 收件人会话、持久未读水位、桌面双栏与手机主从工作区 |
 | 29：短信首次持久化顺序 | messages v8 record sequence、SMS v2 cursor、历史修复和服务端顺序消费 |
 | 30：飞书私聊一键绑定 | 最小权限一键创建应用、授权用户私聊、测试后加密持久化和仅本地解绑 |
+| 31：QDC507 原生蜂窝短信 | 统一 typed adapter、fenced SIM/设备、`SM` persist-before-delete、受控入站/出站 HIL 与 production per-Line 装配 |
+
+## Milestone 31：QDC507 原生蜂窝短信（已完成）
+
+- [x] 接受 [`0026`](../../decisions/0026-qdc507-native-cellular-sms.md)，明确不使用 VoWiFi、
+  不开放电话或通用蜂窝数据，并让型号差异只停留在 typed adapter/driver；
+- [x] QDC507 稳定设备/SIM 身份、蜂窝状态、显式 RF、PDU-mode GSM7/UCS-2、共享 device gate、
+  Agent fence、SIM `SM` 暂存、v2 SQLite recovery 和 per-Line transport/no-fallback 已实现；
+- [x] 受控 HIL 已完成指定 SIM/批准 peer 的新入站 persist→PDU revalidate/delete→pending-zero，
+  以及新出站 persist→modem-confirmed；历史 outcome-unknown operation 保持不变且未重发；
+- [x] production Agent 必需 private state root，构造完整 store/adapter/router 后才声明 `sms-v1`；
+  `simplusd` hardware 同时支持 Agent native 与可选 Host VoWiFi bundle，并按 Line 唯一选择；
+- [x] `CLCC mode=1` 既存 data bearer 不再误判为语音阻断；语音/传真/未知仍 fail closed，SMS
+  不创建、挂断或暴露数据 bearer，RF mutation 继续拒绝任何活动 bearer；
+- [ ] 其他 SIM/运营商/收件人、长时间稳定性、真实电话、数字音频、
+  RF 写入 HIL、通用蜂窝数据和 eUICC mutation 仍需独立设计与授权。
 
 ## Milestone 30：飞书私聊一键绑定（已完成）
 
@@ -123,7 +139,7 @@
 - [x] 持久化 `ManagedModem`，将动态发现候选和管理员配置分成两个真相源；
 - [x] 提供只读候选扫描、已添加模组列表和显式添加 API；
 - [x] 重做模组页，只展示已添加模组，并以“添加模组”单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、系统支持状态和能力；
-- [x] 将已添加模组主表收敛为 `AT+CGMM` 实时型号、直接显示的 USB Serial 序列号、按需显示的 IMEI、在线状态、SIM 插入状态和射频开关；型号读取失败不回退 Adapter 名称，序列号仅作在线展示，IMEI 只实时读取并核对稳定指纹，不进入列表或持久存储；
+- [x] 将已添加模组主表收敛为 `AT+CGMM` 实时型号、优先模块序列号并回退 USB Serial 的当前序列号、按需显示的 IMEI、在线状态、SIM 插入状态和射频开关；型号读取失败不回退 Adapter 名称，序列号仅作在线展示，IMEI 只实时读取并核对稳定指纹，不进入列表或持久存储；
 - [x] 以 ML307A IMEI 的每实例 HMAC 指纹稳定绑定 `ManagedModem`，USB Serial 指纹作为辅助，sysfs 拓扑仅作运行时定位，并兼容一次性提升旧端口绑定；
 - [x] 将 Host VoWiFi 的产品就绪条件与 RF 状态解耦，同时保留“真实证据仅覆盖 RF Off”的兼容性说明；
 - [x] 只建立 ML307A `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`；设备身份、SIM 插入状态和 Line 绑定身份独立探测，插卡状态保持只读，上电 RF 策略在命令语义、读回和获准 HIL 前保持不可操作；

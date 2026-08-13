@@ -99,14 +99,17 @@ func TestPartialSMSSyncProgressStillPublishesDurableState(t *testing.T) {
 }
 
 func TestHardwareRuntimeRequiresTypedRFControlAndRejectsUnapprovedMutationFeatures(t *testing.T) {
-	if err := requireTypedHardwareAgent(agentapi.Hello{Features: []string{agentapi.FeatureRFControl}}); err != nil {
-		t.Fatalf("typed RF Agent rejected: %v", err)
+	required := []string{agentapi.FeatureRFControl, agentapi.FeatureEquipmentIdentityRead, agentapi.FeatureSMS}
+	if err := requireTypedHardwareAgent(agentapi.Hello{Features: required}); err != nil {
+		t.Fatalf("typed hardware Agent rejected: %v", err)
 	}
 	for _, features := range [][]string{
 		{},
-		{agentapi.FeatureSMS, agentapi.FeatureRFControl},
-		{agentapi.CommandRadioEnsureOff, agentapi.FeatureRFControl},
-		{"durable-command-outcomes", agentapi.FeatureRFControl},
+		{agentapi.FeatureRFControl, agentapi.FeatureEquipmentIdentityRead},
+		{agentapi.FeatureRFControl, agentapi.FeatureSMS},
+		{agentapi.FeatureEquipmentIdentityRead, agentapi.FeatureSMS},
+		append(append([]string(nil), required...), agentapi.CommandRadioEnsureOff),
+		append(append([]string(nil), required...), "durable-command-outcomes"),
 	} {
 		if err := requireTypedHardwareAgent(agentapi.Hello{Features: features}); err == nil {
 			t.Fatalf("unsafe Agent features accepted: %#v", features)

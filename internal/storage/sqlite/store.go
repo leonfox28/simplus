@@ -309,7 +309,6 @@ func openDataset(ctx context.Context, root, name string) (*sql.DB, error) {
 	}
 	return db, nil
 }
-
 func prepareDatabaseFile(path, name string) (fileIdentity, bool, error) {
 	if info, err := os.Lstat(path); err == nil {
 		identity, err := validateOwnedRegularFile(path, info, 0o600)

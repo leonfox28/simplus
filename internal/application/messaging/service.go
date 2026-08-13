@@ -26,6 +26,14 @@ const (
 	ErrorAcceptedAwaitingReport     = "IMS_SMS_ACCEPTED_AWAITING_REPORT"
 	ErrorCancelledBeforeDispatch    = "SEND_CANCELLED_BEFORE_DISPATCH"
 	ErrorTransportFailed            = "SMS_TRANSPORT_FAILED"
+	ErrorSIMNotReady                = "SMS_SIM_NOT_READY"
+	ErrorSIMIdentityChanged         = "SMS_SIM_IDENTITY_CHANGED"
+	ErrorEquipmentIdentityChanged   = "SMS_EQUIPMENT_IDENTITY_CHANGED"
+	ErrorRFOff                      = "SMS_RF_OFF"
+	ErrorRegistrationDenied         = "SMS_REGISTRATION_DENIED"
+	ErrorNotRegistered              = "SMS_NOT_REGISTERED"
+	ErrorStatusUnavailable          = "SMS_STATUS_UNAVAILABLE"
+	ErrorDeviceStale                = "SMS_DEVICE_STALE"
 	HistoryCapacity                 = 10000
 	InboundFragmentRetention        = 7 * 24 * time.Hour
 	readTokenVersion                = byte(1)
@@ -38,6 +46,7 @@ var (
 	ErrLineNotFound         = errors.New("SMS line was not found")
 	ErrLineUnavailable      = errors.New("SMS line is unavailable")
 	ErrLineUnsupported      = errors.New("SMS is unsupported on this line")
+	ErrTransportAmbiguous   = errors.New("multiple SMS transports are eligible for this line")
 	ErrTransportUnavailable = errors.New("SMS transport is unavailable")
 	ErrInventoryUnavailable = errors.New("SMS line inventory is unavailable")
 	ErrPersistence          = errors.New("SMS persistence failed")
@@ -76,18 +85,58 @@ type TransportAvailability interface {
 	Available(context.Context, string) bool
 }
 
+type SMSTransport struct {
+	Name         string
+	Eligible     func(inventory.Line) bool
+	Availability TransportAvailability
+	Sender       Sender
+	Inbox        Inbox
+	resolveLine  func(inventory.Topology, inventory.Line) (runtimeLine, error)
+	hostVoWiFi   bool
+}
+
+// AgentNativeSMSTransport is the application-owned native cellular bundle.
+// Its private resolver turns an already resolved business Line into the
+// equipment/SIM fence required by the typed Agent protocol. Other transports
+// never receive those private identity values.
+func AgentNativeSMSTransport(sender Sender, inbox Inbox) SMSTransport {
+	return SMSTransport{
+		Name: "agent-native", Eligible: func(line inventory.Line) bool { return line.Capabilities.SMS },
+		Sender: sender, Inbox: inbox, resolveLine: resolveRuntimeLine,
+	}
+}
+
+func HostVoWiFiSMSTransport(availability TransportAvailability, sender Sender, inbox Inbox) SMSTransport {
+	return SMSTransport{
+		Name: "host-vowifi", Eligible: func(line inventory.Line) bool { return line.Capabilities.HostVoWiFiAuth },
+		Availability: availability, Sender: sender, Inbox: inbox, hostVoWiFi: true,
+	}
+}
+
+// UseHostVoWiFiAvailability completes only the bundle created by
+// HostVoWiFiSMSTransport. Callers never branch on a transport name or model.
+func (transport SMSTransport) UseHostVoWiFiAvailability(availability TransportAvailability) SMSTransport {
+	if transport.hostVoWiFi {
+		transport.Availability = availability
+	}
+	return transport
+}
+
 // SendSMSCommand is the narrow typed boundary between the application and a
 // modem-specific transport. It deliberately contains no AT/QMI text or device
 // paths.
 type SendSMSCommand struct {
-	OperationID      string
-	MessageID        string
-	LineID           string
-	PhysicalDeviceID string
-	ModemFunctionID  string
-	Destination      string
-	Body             string
-	Segments         []smscodec.Segment
+	OperationID                     string
+	MessageID                       string
+	LineID                          string
+	PhysicalDeviceID                string
+	ModemFunctionID                 string
+	Destination                     string
+	Body                            string
+	Segments                        []smscodec.Segment
+	DeviceGeneration                uint64
+	ExpectedEquipmentFingerprint    string
+	ExpectedSubscriptionFingerprint string
 }
 
 type SendSMSResult struct {
@@ -121,8 +170,11 @@ type InboxMessage struct {
 }
 
 type InboxTarget struct {
-	LineID           string
-	PhysicalDeviceID string
+	LineID                          string
+	PhysicalDeviceID                string
+	DeviceGeneration                uint64
+	ExpectedEquipmentFingerprint    string
+	ExpectedSubscriptionFingerprint string
 }
 
 type Inbox interface {
@@ -199,47 +251,44 @@ type serialGate struct {
 type Service struct {
 	repository Repository
 	lines      LineSource
-	sender     Sender
-	inbox      Inbox
-	reports    SubmitReportInbox
+	transports []SMSTransport
 	random     io.Reader
 	now        func() time.Time
 
-	gatesMu       sync.Mutex
-	gates         map[string]*serialGate
-	availability  TransportAvailability
-	hostVoWiFiSMS bool
+	gatesMu sync.Mutex
+	gates   map[string]*serialGate
 }
 
-func (service *Service) UseHostVoWiFiTransport(availability TransportAvailability) {
-	if service != nil {
-		service.hostVoWiFiSMS = true
-		service.availability = availability
+func (service *Service) UseTransports(transports ...SMSTransport) error {
+	if service == nil {
+		return errors.New("messaging service is unavailable")
 	}
-}
-
-func (service *Service) supportsSMS(line inventory.Line) bool {
-	if service != nil && service.hostVoWiFiSMS {
-		return line.Capabilities.HostVoWiFiAuth
+	seen := make(map[string]bool, len(transports))
+	for _, transport := range transports {
+		if strings.TrimSpace(transport.Name) == "" || seen[transport.Name] || transport.Eligible == nil || transport.Sender == nil || transport.Inbox == nil {
+			return errors.New("SMS transport bundle is incomplete")
+		}
+		seen[transport.Name] = true
 	}
-	return line.Capabilities.SMS
+	service.transports = append([]SMSTransport(nil), transports...)
+	return nil
 }
 
-func NewService(ctx context.Context, repository Repository, lines LineSource, sender Sender, inboxes ...Inbox) (*Service, error) {
+func NewService(ctx context.Context, repository Repository, lines LineSource, transports ...SMSTransport) (*Service, error) {
 	if repository == nil || lines == nil {
 		return nil, errors.New("messaging service dependencies are incomplete")
 	}
 	service := &Service{
 		repository: repository,
 		lines:      lines,
-		sender:     sender,
 		random:     rand.Reader,
 		now:        time.Now,
 		gates:      make(map[string]*serialGate),
 	}
-	if len(inboxes) != 0 {
-		service.inbox = inboxes[0]
-		service.reports, _ = inboxes[0].(SubmitReportInbox)
+	if len(transports) != 0 {
+		if err := service.UseTransports(transports...); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := repository.MarkQueuedOutboundSMSUnconfirmed(ctx, ErrorOutcomeUnknownAfterRestart, service.currentTime()); err != nil {
 		return nil, fmt.Errorf("%w: reconcile interrupted outbound SMS: %v", ErrPersistence, err)
@@ -260,15 +309,9 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 	if service == nil || service.repository == nil || service.lines == nil {
 		return SendResult{}, ErrTransportUnavailable
 	}
-	if service.sender == nil {
-		return SendResult{}, ErrTransportUnavailable
-	}
-	line, err := service.sendLine(ctx, request.LineID)
+	line, runtimeTarget, transport, err := service.sendLine(ctx, request.LineID)
 	if err != nil {
 		return SendResult{}, err
-	}
-	if service.hostVoWiFiSMS && (service.availability == nil || !service.availability.Available(ctx, line.ID)) {
-		return SendResult{}, ErrLineUnavailable
 	}
 	segments, err := smscodec.Encode(request.Body)
 	if err != nil {
@@ -306,11 +349,12 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 		return SendResult{Message: failed}, nil
 	}
 
-	result, sendErr := service.sender.SendSMS(ctx, SendSMSCommand{
+	command := runtimeTarget.sendCommand(SendSMSCommand{
 		OperationID: request.OperationID, MessageID: message.ID, LineID: line.ID,
 		PhysicalDeviceID: line.PhysicalDeviceID, ModemFunctionID: line.ModemFunctionID,
 		Destination: request.Destination, Body: request.Body, Segments: segments,
 	})
+	result, sendErr := transport.Sender.SendSMS(ctx, command)
 	if sendErr != nil {
 		errorCode := transportErrorCode(sendErr)
 		if errorCode == ErrorSendOutcomeUnknown {
@@ -505,27 +549,58 @@ func (service *Service) Delete(ctx context.Context, messageID string) error {
 	return nil
 }
 
-func (service *Service) sendLine(ctx context.Context, lineID string) (inventory.Line, error) {
+func (service *Service) sendLine(ctx context.Context, lineID string) (inventory.Line, runtimeLine, SMSTransport, error) {
 	topology, err := service.lines.Topology(ctx)
 	if err != nil {
-		return inventory.Line{}, fmt.Errorf("%w: %v", ErrInventoryUnavailable, err)
+		return inventory.Line{}, runtimeLine{}, SMSTransport{}, fmt.Errorf("%w: %v", ErrInventoryUnavailable, err)
 	}
 	for _, line := range topology.Lines {
 		if line.ID != lineID {
 			continue
 		}
 		if line.State != inventory.LineReady {
-			return inventory.Line{}, ErrLineUnavailable
-		}
-		if !service.supportsSMS(line) {
-			return inventory.Line{}, ErrLineUnsupported
+			return inventory.Line{}, runtimeLine{}, SMSTransport{}, ErrLineUnavailable
 		}
 		if line.ModemFunctionID == "" || line.PhysicalDeviceID == "" {
-			return inventory.Line{}, ErrLineUnavailable
+			return inventory.Line{}, runtimeLine{}, SMSTransport{}, ErrLineUnavailable
 		}
-		return line, nil
+		transport, err := service.resolveTransport(ctx, line)
+		if err != nil {
+			return inventory.Line{}, runtimeLine{}, SMSTransport{}, err
+		}
+		runtimeTarget := runtimeLine{line: line}
+		if transport.resolveLine != nil {
+			runtimeTarget, err = transport.resolveLine(topology, line)
+			if err != nil {
+				return inventory.Line{}, runtimeLine{}, SMSTransport{}, ErrLineUnavailable
+			}
+		}
+		return line, runtimeTarget, transport, nil
 	}
-	return inventory.Line{}, ErrLineNotFound
+	return inventory.Line{}, runtimeLine{}, SMSTransport{}, ErrLineNotFound
+}
+
+func (service *Service) resolveTransport(ctx context.Context, line inventory.Line) (SMSTransport, error) {
+	if len(service.transports) == 0 {
+		return SMSTransport{}, ErrTransportUnavailable
+	}
+	eligible := make([]SMSTransport, 0, 2)
+	for _, transport := range service.transports {
+		if transport.Eligible(line) {
+			eligible = append(eligible, transport)
+		}
+	}
+	if len(eligible) == 0 {
+		return SMSTransport{}, ErrLineUnsupported
+	}
+	if len(eligible) != 1 {
+		return SMSTransport{}, ErrTransportAmbiguous
+	}
+	selected := eligible[0]
+	if selected.Availability != nil && !selected.Availability.Available(ctx, line.ID) {
+		return SMSTransport{}, ErrTransportUnavailable
+	}
+	return selected, nil
 }
 
 func (service *Service) gate(modemFunctionID string) *serialGate {

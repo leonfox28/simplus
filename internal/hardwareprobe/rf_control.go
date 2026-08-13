@@ -18,9 +18,6 @@ func (scanner *Scanner) SetRFState(ctx context.Context, snapshot agentapi.Snapsh
 	if scanner == nil {
 		return agentapi.RFObservation{}, false, agentapi.ErrRFUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
-
 	var device *agentapi.DeviceReport
 	for index := range snapshot.Devices {
 		if snapshot.Devices[index].ID == deviceID {
@@ -31,6 +28,16 @@ func (scanner *Scanner) SetRFState(ctx context.Context, snapshot agentapi.Snapsh
 	if device == nil {
 		return agentapi.RFObservation{}, false, agentapi.ErrRFDeviceStale
 	}
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return agentapi.RFObservation{}, false, agentapi.ErrRFUnavailable
+	}
+	defer release()
+	snapshot, current, err := scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return agentapi.RFObservation{}, false, agentapi.ErrRFDeviceStale
+	}
+	device = &current
 	base, ok := scanner.adapterRegistry().ForProfile(device.Profile)
 	if !ok {
 		return agentapi.RFObservation{}, false, agentapi.ErrRFUnsupported

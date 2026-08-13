@@ -19,8 +19,15 @@ func (scanner *Scanner) ReadSIMAKAIdentity(ctx context.Context, snapshot agentap
 	if scanner == nil {
 		return "", agentapi.ErrSIMAKAUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return "", agentapi.ErrSIMAKAUnavailable
+	}
+	defer release()
+	snapshot, _, err = scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return "", agentapi.ErrSIMAKADeviceStale
+	}
 	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return "", err
@@ -32,8 +39,15 @@ func (scanner *Scanner) AuthenticateSIMAKA(ctx context.Context, snapshot agentap
 	if scanner == nil {
 		return agentapi.SIMAKAExecution{}, agentapi.ErrSIMAKAUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return agentapi.SIMAKAExecution{}, agentapi.ErrSIMAKAUnavailable
+	}
+	defer release()
+	snapshot, _, err = scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return agentapi.SIMAKAExecution{}, agentapi.ErrSIMAKADeviceStale
+	}
 	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return agentapi.SIMAKAExecution{}, err
@@ -45,8 +59,15 @@ func (scanner *Scanner) ProbeSIMIMSProfile(ctx context.Context, snapshot agentap
 	if scanner == nil {
 		return false, agentapi.ErrSIMAKAUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return false, agentapi.ErrSIMAKAUnavailable
+	}
+	defer release()
+	snapshot, _, err = scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return false, agentapi.ErrSIMAKADeviceStale
+	}
 	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return false, err
@@ -58,8 +79,15 @@ func (scanner *Scanner) ReadSIMIMSIdentity(ctx context.Context, snapshot agentap
 	if scanner == nil {
 		return agentapi.SIMIMSIdentityMaterial{}, agentapi.ErrSIMAKAUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return agentapi.SIMIMSIdentityMaterial{}, agentapi.ErrSIMAKAUnavailable
+	}
+	defer release()
+	snapshot, _, err = scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return agentapi.SIMIMSIdentityMaterial{}, agentapi.ErrSIMAKADeviceStale
+	}
 	adapter, endpoint, querier, err := scanner.simAKATarget(snapshot, deviceID)
 	if err != nil {
 		return agentapi.SIMIMSIdentityMaterial{}, err

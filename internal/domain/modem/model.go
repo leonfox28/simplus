@@ -18,6 +18,16 @@ const (
 	SIMPresenceAbsent  = "absent"
 	SIMPresenceUnknown = "unknown"
 
+	CellularRegisteredHome    = "registered-home"
+	CellularRegisteredRoaming = "registered-roaming"
+	CellularSearching         = "searching"
+	CellularDenied            = "denied"
+	CellularNotRegistered     = "not-registered"
+	CellularRFOff             = "rf-off"
+	CellularSIMNotReady       = "sim-not-ready"
+	CellularUnavailable       = "unavailable"
+	CellularUnknown           = "unknown"
+
 	SupportSupported = "supported"
 	SupportNotReady  = "not-ready"
 
@@ -55,7 +65,39 @@ type View struct {
 	Capabilities hardware.Capabilities
 	RFState      string
 	SIMPresence  string
+	Cellular     CellularStatus
 	AddedAt      time.Time
+}
+
+type CellularRegistration struct {
+	Domain string
+	State  string
+}
+
+type CellularStatus struct {
+	State         string
+	ErrorCode     string
+	Registrations []CellularRegistration
+	OperatorName  string
+	OperatorCode  string
+	RAT           string
+	SignalState   string
+	SignalRSSIDBm int
+	ObservedAt    time.Time
+}
+
+type RuntimeStatus struct {
+	RFState     string
+	SIMPresence string
+	Cellular    CellularStatus
+}
+
+func UnavailableCellularStatus() CellularStatus {
+	return CellularStatus{
+		State: CellularUnavailable, ErrorCode: "CELLULAR_STATUS_UNAVAILABLE",
+		Registrations: []CellularRegistration{{Domain: "cs", State: "unknown"}, {Domain: "packet", State: "unknown"}, {Domain: "eps", State: "unknown"}},
+		SignalState:   "unknown",
+	}
 }
 
 // Candidate is a transient, read-only hardware observation. CandidateID is

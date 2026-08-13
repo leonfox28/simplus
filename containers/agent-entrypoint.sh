@@ -49,6 +49,7 @@ exec setpriv \
       --socket /run/simplus-agent/simplus-agent.sock \
       --sim-aka-socket /run/simplus-agent/sim-aka.sock \
       --identity-key /var/lib/simplus-agent/.identity-key-v1 \
+      --state-root /var/lib/simplus-agent/qdc507-sms \
       --sysfs-usb-root /host/sys/bus/usb/devices \
       --dev-root /host/dev \
       --directory-mode 0750 \

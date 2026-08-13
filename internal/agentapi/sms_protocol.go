@@ -22,13 +22,21 @@ const (
 )
 
 var (
-	ErrSMSRequestInvalid    = errors.New("Agent SMS request is invalid")
-	ErrSMSAgentStale        = errors.New("Agent SMS request targets a stale Agent instance")
-	ErrSMSDeviceNotFound    = errors.New("Agent SMS device was not found")
-	ErrSMSUnsupported       = errors.New("Agent SMS is unsupported for this device")
-	ErrSMSMessageNotFound   = errors.New("Agent SMS message was not found")
-	ErrSMSOperationConflict = errors.New("Agent SMS operation id belongs to different parameters")
-	ErrSMSOutcomeUnknown    = errors.New("Agent SMS send may have completed but its outcome is unknown")
+	ErrSMSRequestInvalid     = errors.New("Agent SMS request is invalid")
+	ErrSMSAgentStale         = errors.New("Agent SMS request targets a stale Agent instance")
+	ErrSMSDeviceNotFound     = errors.New("Agent SMS device was not found")
+	ErrSMSUnsupported        = errors.New("Agent SMS is unsupported for this device")
+	ErrSMSMessageNotFound    = errors.New("Agent SMS message was not found")
+	ErrSMSOperationConflict  = errors.New("Agent SMS operation id belongs to different parameters")
+	ErrSMSOutcomeUnknown     = errors.New("Agent SMS send may have completed but its outcome is unknown")
+	ErrSMSDeviceStale        = errors.New("Agent SMS device generation changed")
+	ErrSMSEquipmentIdentity  = errors.New("Agent SMS equipment identity changed")
+	ErrSMSSIMNotReady        = errors.New("Agent SMS SIM is not ready")
+	ErrSMSSIMIdentity        = errors.New("Agent SMS SIM identity changed")
+	ErrSMSRFOff              = errors.New("Agent SMS RF is off")
+	ErrSMSRegistrationDenied = errors.New("Agent SMS registration was denied")
+	ErrSMSNotRegistered      = errors.New("Agent SMS is not registered")
+	ErrSMSStatusUnavailable  = errors.New("Agent SMS status is unavailable")
 )
 
 var (
@@ -38,8 +46,11 @@ var (
 )
 
 type SMSListRequest struct {
-	AgentInstanceID string `json:"agentInstanceId"`
-	DeviceID        string `json:"deviceId"`
+	AgentInstanceID                 string `json:"agentInstanceId"`
+	DeviceID                        string `json:"deviceId"`
+	DeviceGeneration                uint64 `json:"deviceGeneration"`
+	ExpectedEquipmentFingerprint    string `json:"expectedEquipmentFingerprint"`
+	ExpectedSubscriptionFingerprint string `json:"expectedSubscriptionFingerprint"`
 }
 
 type SMSMessageReference struct {
@@ -58,9 +69,12 @@ type SMSListResponse struct {
 }
 
 type SMSReadRequest struct {
-	AgentInstanceID string `json:"agentInstanceId"`
-	DeviceID        string `json:"deviceId"`
-	MessageID       string `json:"messageId"`
+	AgentInstanceID                 string `json:"agentInstanceId"`
+	DeviceID                        string `json:"deviceId"`
+	MessageID                       string `json:"messageId"`
+	DeviceGeneration                uint64 `json:"deviceGeneration"`
+	ExpectedEquipmentFingerprint    string `json:"expectedEquipmentFingerprint"`
+	ExpectedSubscriptionFingerprint string `json:"expectedSubscriptionFingerprint"`
 }
 
 type SMSStoredMessage struct {
@@ -78,11 +92,14 @@ type SMSReadResponse struct {
 }
 
 type SMSSendRequest struct {
-	OperationID     string `json:"operationId"`
-	AgentInstanceID string `json:"agentInstanceId"`
-	DeviceID        string `json:"deviceId"`
-	Destination     string `json:"destination"`
-	Body            string `json:"body"`
+	OperationID                     string `json:"operationId"`
+	AgentInstanceID                 string `json:"agentInstanceId"`
+	DeviceID                        string `json:"deviceId"`
+	Destination                     string `json:"destination"`
+	Body                            string `json:"body"`
+	DeviceGeneration                uint64 `json:"deviceGeneration"`
+	ExpectedEquipmentFingerprint    string `json:"expectedEquipmentFingerprint"`
+	ExpectedSubscriptionFingerprint string `json:"expectedSubscriptionFingerprint"`
 }
 
 type SMSSubmission struct {
@@ -98,10 +115,13 @@ type SMSSendResponse struct {
 }
 
 type SMSAcknowledgeRequest struct {
-	OperationID     string `json:"operationId"`
-	AgentInstanceID string `json:"agentInstanceId"`
-	DeviceID        string `json:"deviceId"`
-	MessageID       string `json:"messageId"`
+	OperationID                     string `json:"operationId"`
+	AgentInstanceID                 string `json:"agentInstanceId"`
+	DeviceID                        string `json:"deviceId"`
+	MessageID                       string `json:"messageId"`
+	DeviceGeneration                uint64 `json:"deviceGeneration"`
+	ExpectedEquipmentFingerprint    string `json:"expectedEquipmentFingerprint"`
+	ExpectedSubscriptionFingerprint string `json:"expectedSubscriptionFingerprint"`
 }
 
 type SMSAcknowledgeResponse struct {
@@ -120,25 +140,25 @@ type SMSClientAPI interface {
 }
 
 type SMSBackend interface {
-	ListSMS(context.Context, string) ([]SMSMessageReference, error)
-	ReadSMS(context.Context, string, string) (SMSStoredMessage, error)
+	ListSMS(context.Context, SMSListRequest) ([]SMSMessageReference, error)
+	ReadSMS(context.Context, SMSReadRequest) (SMSStoredMessage, error)
 	SendSMS(context.Context, SMSSendRequest) (SMSSubmission, error)
 	AcknowledgeSMS(context.Context, SMSAcknowledgeRequest) (bool, error)
 }
 
 func validateSMSListRequest(request SMSListRequest) error {
-	return validateSMSTarget(request.AgentInstanceID, request.DeviceID)
+	return validateSMSTarget(request.AgentInstanceID, request.DeviceID, request.DeviceGeneration, request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint)
 }
 
 func validateSMSReadRequest(request SMSReadRequest) error {
-	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID); err != nil || !validSMSOpaqueID(request.MessageID) {
+	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID, request.DeviceGeneration, request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint); err != nil || !validSMSOpaqueID(request.MessageID) {
 		return ErrSMSRequestInvalid
 	}
 	return nil
 }
 
 func validateSMSSendRequest(request SMSSendRequest) error {
-	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID); err != nil ||
+	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID, request.DeviceGeneration, request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint); err != nil ||
 		!smsOperationIDPattern.MatchString(request.OperationID) || !smsAddressPattern.MatchString(request.Destination) ||
 		strings.TrimSpace(request.Body) == "" || !utf8.ValidString(request.Body) || utf8.RuneCountInString(request.Body) > 1600 || len(request.Body) > 6400 {
 		return ErrSMSRequestInvalid
@@ -147,15 +167,16 @@ func validateSMSSendRequest(request SMSSendRequest) error {
 }
 
 func validateSMSAcknowledgeRequest(request SMSAcknowledgeRequest) error {
-	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID); err != nil ||
+	if err := validateSMSTarget(request.AgentInstanceID, request.DeviceID, request.DeviceGeneration, request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint); err != nil ||
 		!smsOperationIDPattern.MatchString(request.OperationID) || !validSMSOpaqueID(request.MessageID) {
 		return ErrSMSRequestInvalid
 	}
 	return nil
 }
 
-func validateSMSTarget(instanceID, deviceID string) error {
-	if !IsValidAgentInstanceID(instanceID) || strings.TrimSpace(deviceID) == "" || len(deviceID) > 128 {
+func validateSMSTarget(instanceID, deviceID string, generation uint64, equipmentFingerprint, subscriptionFingerprint string) error {
+	if !IsValidAgentInstanceID(instanceID) || strings.TrimSpace(deviceID) == "" || len(deviceID) > 128 || generation == 0 ||
+		!isSHA256Hex(equipmentFingerprint) || !isSHA256Hex(subscriptionFingerprint) {
 		return ErrSMSRequestInvalid
 	}
 	return nil

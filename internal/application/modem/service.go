@@ -50,6 +50,14 @@ type RFController interface {
 	Set(context.Context, string, bool) (string, error)
 }
 
+type RuntimeStatusReader interface {
+	Read(context.Context, string) (domain.RuntimeStatus, error)
+}
+
+type RFSetter interface {
+	Set(context.Context, string, bool) (string, error)
+}
+
 type EquipmentIdentity struct {
 	IMEI        string
 	Fingerprint string
@@ -64,7 +72,9 @@ type Service struct {
 	inventory  Inventory
 	random     io.Reader
 	now        func() time.Time
-	rf         RFController
+	rf         RFSetter
+	runtime    RuntimeStatusReader
+	legacyRF   RFController
 	identity   EquipmentIdentityReader
 
 	mu sync.Mutex
@@ -73,6 +83,19 @@ type Service struct {
 func (service *Service) UseRFController(controller RFController) {
 	if service != nil {
 		service.rf = controller
+		service.legacyRF = controller
+		service.runtime, _ = controller.(RuntimeStatusReader)
+	}
+}
+
+func (service *Service) UseRuntimeStatusReader(reader RuntimeStatusReader) {
+	if service != nil {
+		service.runtime = reader
+	}
+}
+func (service *Service) UseRFSetter(setter RFSetter) {
+	if service != nil {
+		service.rf = setter
 	}
 }
 
@@ -110,7 +133,7 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 			ID: record.ID, DisplayName: record.DisplayName, Model: "",
 			Transport: record.Transport, State: domain.StateOffline,
 			Capabilities: record.Capabilities, RFState: domain.RFStateUnknown,
-			SIMPresence: domain.SIMPresenceUnknown, AddedAt: record.CreatedAt,
+			SIMPresence: domain.SIMPresenceUnknown, Cellular: domain.UnavailableCellularStatus(), AddedAt: record.CreatedAt,
 		}
 		if current, ok := managedObservation(record, observed, byEquipment); ok {
 			view.State = domain.StateOnline
@@ -119,8 +142,14 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 			view.Transport = current.transport
 			view.Capabilities = current.capabilities
 			view.SIMPresence = current.simPresence
-			if service.rf != nil && view.Capabilities.RFControl {
-				if state, stateErr := service.rf.State(ctx, current.id); stateErr == nil {
+			if service.runtime != nil {
+				if status, statusErr := service.runtime.Read(ctx, current.id); statusErr == nil {
+					view.RFState = status.RFState
+					view.SIMPresence = status.SIMPresence
+					view.Cellular = status.Cellular
+				}
+			} else if service.legacyRF != nil && view.Capabilities.RFControl {
+				if state, stateErr := service.legacyRF.State(ctx, current.id); stateErr == nil {
 					view.RFState = state
 				}
 			}
@@ -252,7 +281,7 @@ func (service *Service) Add(ctx context.Context, candidateID string) (domain.Vie
 	return domain.View{
 		ID: id, DisplayName: record.DisplayName, Model: current.model, SerialNumber: current.serialNumber, Transport: record.Transport,
 		State: domain.StateOnline, Capabilities: record.Capabilities, RFState: domain.RFStateUnknown,
-		SIMPresence: current.simPresence, AddedAt: now,
+		SIMPresence: current.simPresence, Cellular: domain.UnavailableCellularStatus(), AddedAt: now,
 	}, nil
 }
 
@@ -303,7 +332,7 @@ func (service *Service) SetRFState(ctx context.Context, modemID string, enabled 
 	return domain.View{
 		ID: selected.ID, DisplayName: selected.DisplayName, Model: current.model, SerialNumber: current.serialNumber,
 		Transport: current.transport, State: domain.StateOnline, Capabilities: current.capabilities,
-		RFState: state, SIMPresence: current.simPresence, AddedAt: selected.CreatedAt,
+		RFState: state, SIMPresence: current.simPresence, Cellular: domain.UnavailableCellularStatus(), AddedAt: selected.CreatedAt,
 	}, nil
 }
 
@@ -392,7 +421,7 @@ func observations(topology inventory.Topology) map[string]observation {
 		result[device.ID] = observation{
 			id: device.ID, displayName: device.DisplayName, usbAddress: device.USBAddress,
 			usbVendorID: device.USBVendorID, usbProductID: device.USBProductID,
-			model: device.ModemModel, serialNumber: device.USBSerialNumber, transport: device.Transport,
+			model: device.ModemModel, serialNumber: device.ObservedSerialNumber(), transport: device.Transport,
 			equipmentIdentity: device.EquipmentIdentityFingerprint, usbSerialIdentity: device.USBSerialFingerprint,
 			simPresence: domain.SIMPresenceUnknown,
 		}

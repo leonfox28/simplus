@@ -29,10 +29,24 @@ func (gateway *AgentSMSGateway) SendSMS(ctx context.Context, command SendSMSComm
 	response, err := gateway.client.SendSMS(ctx, agentapi.SMSSendRequest{
 		OperationID: command.OperationID, AgentInstanceID: gateway.instanceID, DeviceID: command.PhysicalDeviceID,
 		Destination: command.Destination, Body: command.Body,
+		DeviceGeneration: command.DeviceGeneration, ExpectedEquipmentFingerprint: command.ExpectedEquipmentFingerprint,
+		ExpectedSubscriptionFingerprint: command.ExpectedSubscriptionFingerprint,
 	})
 	if err != nil {
-		if errors.Is(err, agentapi.ErrSMSOutcomeUnknown) {
-			return SendSMSResult{}, &TransportError{Code: ErrorSendOutcomeUnknown}
+		mappings := []struct {
+			target error
+			code   string
+		}{
+			{agentapi.ErrSMSOutcomeUnknown, ErrorSendOutcomeUnknown}, {agentapi.ErrSMSSIMNotReady, ErrorSIMNotReady},
+			{agentapi.ErrSMSSIMIdentity, ErrorSIMIdentityChanged}, {agentapi.ErrSMSEquipmentIdentity, ErrorEquipmentIdentityChanged},
+			{agentapi.ErrSMSRFOff, ErrorRFOff}, {agentapi.ErrSMSRegistrationDenied, ErrorRegistrationDenied},
+			{agentapi.ErrSMSNotRegistered, ErrorNotRegistered}, {agentapi.ErrSMSStatusUnavailable, ErrorStatusUnavailable},
+			{agentapi.ErrSMSDeviceStale, ErrorDeviceStale}, {agentapi.ErrSMSDeviceNotFound, ErrorDeviceStale},
+		}
+		for _, mapping := range mappings {
+			if errors.Is(err, mapping.target) {
+				return SendSMSResult{}, &TransportError{Code: mapping.code}
+			}
 		}
 		return SendSMSResult{}, &TransportError{Code: "AGENT_SMS_SEND_FAILED"}
 	}
@@ -40,7 +54,9 @@ func (gateway *AgentSMSGateway) SendSMS(ctx context.Context, command SendSMSComm
 }
 
 func (gateway *AgentSMSGateway) ListSMS(ctx context.Context, target InboxTarget) ([]InboxMessageReference, error) {
-	response, err := gateway.client.ListSMS(ctx, agentapi.SMSListRequest{AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID})
+	response, err := gateway.client.ListSMS(ctx, agentapi.SMSListRequest{AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID,
+		DeviceGeneration: target.DeviceGeneration, ExpectedEquipmentFingerprint: target.ExpectedEquipmentFingerprint,
+		ExpectedSubscriptionFingerprint: target.ExpectedSubscriptionFingerprint})
 	if err != nil {
 		return nil, fmt.Errorf("list Agent SMS: %w", err)
 	}
@@ -54,6 +70,8 @@ func (gateway *AgentSMSGateway) ListSMS(ctx context.Context, target InboxTarget)
 func (gateway *AgentSMSGateway) ReadSMS(ctx context.Context, target InboxTarget, messageID string) (InboxMessage, error) {
 	response, err := gateway.client.ReadSMS(ctx, agentapi.SMSReadRequest{
 		AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID, MessageID: messageID,
+		DeviceGeneration: target.DeviceGeneration, ExpectedEquipmentFingerprint: target.ExpectedEquipmentFingerprint,
+		ExpectedSubscriptionFingerprint: target.ExpectedSubscriptionFingerprint,
 	})
 	if err != nil {
 		return InboxMessage{}, fmt.Errorf("read Agent SMS: %w", err)
@@ -67,6 +85,8 @@ func (gateway *AgentSMSGateway) ReadSMS(ctx context.Context, target InboxTarget,
 func (gateway *AgentSMSGateway) AcknowledgeSMS(ctx context.Context, target InboxTarget, messageID, operationID string) error {
 	_, err := gateway.client.AcknowledgeSMS(ctx, agentapi.SMSAcknowledgeRequest{
 		OperationID: operationID, AgentInstanceID: gateway.instanceID, DeviceID: target.PhysicalDeviceID, MessageID: messageID,
+		DeviceGeneration: target.DeviceGeneration, ExpectedEquipmentFingerprint: target.ExpectedEquipmentFingerprint,
+		ExpectedSubscriptionFingerprint: target.ExpectedSubscriptionFingerprint,
 	})
 	if err != nil {
 		return fmt.Errorf("acknowledge Agent SMS: %w", err)

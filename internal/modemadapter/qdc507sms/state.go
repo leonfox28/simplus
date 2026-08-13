@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"regexp"
 	"sort"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 )
 
 var ErrStateConflict = errors.New("QDC507 SMS state conflicts with an existing record")
+var subscriptionKeyPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type operationKind string
 type operationState string
@@ -24,11 +26,12 @@ const (
 )
 
 type operationRecord struct {
-	OperationID   string
-	Kind          operationKind
-	RequestDigest [sha256.Size]byte
-	State         operationState
-	Submission    agentapi.SMSSubmission
+	OperationID     string
+	SubscriptionKey string
+	Kind            operationKind
+	RequestDigest   [sha256.Size]byte
+	State           operationState
+	Submission      agentapi.SMSSubmission
 }
 
 // StateStore is deliberately scoped to QDC507 SMS recovery. A production
@@ -69,27 +72,27 @@ func (store *MemoryStateStore) PutInbound(ctx context.Context, record InboundRec
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if existing, found := store.inbound[inboundKey(record.DeviceID, record.MessageID)]; found {
+	if existing, found := store.inbound[inboundKey(record.SubscriptionKey, record.MessageID)]; found {
 		if !sameInboundIdentity(existing, record) {
 			return InboundRecord{}, false, ErrStateConflict
 		}
 		return cloneInbound(existing), true, nil
 	}
-	store.inbound[inboundKey(record.DeviceID, record.MessageID)] = cloneInbound(record)
+	store.inbound[inboundKey(record.SubscriptionKey, record.MessageID)] = cloneInbound(record)
 	return cloneInbound(record), false, nil
 }
 
-func (store *MemoryStateStore) FindInbound(ctx context.Context, deviceID, messageID string) (InboundRecord, bool, error) {
+func (store *MemoryStateStore) FindInbound(ctx context.Context, subscriptionKey, messageID string) (InboundRecord, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return InboundRecord{}, false, err
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	record, found := store.inbound[inboundKey(deviceID, messageID)]
+	record, found := store.inbound[inboundKey(subscriptionKey, messageID)]
 	return cloneInbound(record), found, nil
 }
 
-func (store *MemoryStateStore) ListInbound(ctx context.Context, deviceID string) ([]InboundRecord, error) {
+func (store *MemoryStateStore) ListInbound(ctx context.Context, subscriptionKey string) ([]InboundRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -97,7 +100,7 @@ func (store *MemoryStateStore) ListInbound(ctx context.Context, deviceID string)
 	defer store.mu.Unlock()
 	records := make([]InboundRecord, 0)
 	for _, record := range store.inbound {
-		if record.DeviceID == deviceID && !record.Acknowledged {
+		if record.SubscriptionKey == subscriptionKey && !record.Acknowledged {
 			records = append(records, cloneInbound(record))
 		}
 	}
@@ -119,7 +122,7 @@ func (store *MemoryStateStore) UpdateInbound(ctx context.Context, record Inbound
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	key := inboundKey(record.DeviceID, record.MessageID)
+	key := inboundKey(record.SubscriptionKey, record.MessageID)
 	existing, found := store.inbound[key]
 	if !found || !sameInboundIdentity(existing, record) || !validInboundProgress(existing, record) {
 		return ErrStateConflict
@@ -154,7 +157,7 @@ func (store *MemoryStateStore) UpdateOperation(ctx context.Context, record opera
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	existing, found := store.operations[record.OperationID]
-	if !found || existing.Kind != record.Kind || existing.RequestDigest != record.RequestDigest ||
+	if !found || existing.SubscriptionKey != record.SubscriptionKey || existing.Kind != record.Kind || existing.RequestDigest != record.RequestDigest ||
 		(existing.State != operationAccepted && existing.State != record.State) {
 		return ErrStateConflict
 	}
@@ -169,7 +172,7 @@ func (store *MemoryStateStore) DeleteOperation(ctx context.Context, record opera
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	existing, found := store.operations[record.OperationID]
-	if !found || existing.Kind != record.Kind || existing.RequestDigest != record.RequestDigest || existing.State != operationAccepted {
+	if !found || existing.SubscriptionKey != record.SubscriptionKey || existing.Kind != record.Kind || existing.RequestDigest != record.RequestDigest || existing.State != operationAccepted {
 		return ErrStateConflict
 	}
 	delete(store.operations, record.OperationID)
@@ -177,12 +180,12 @@ func (store *MemoryStateStore) DeleteOperation(ctx context.Context, record opera
 }
 
 func validInboundRecord(record InboundRecord) error {
-	if record.MessageID == "" || record.DeviceID == "" || record.Sender == "" || record.Body == "" || record.ReceivedAt.IsZero() || len(record.Segments) == 0 {
+	if record.MessageID == "" || !subscriptionKeyPattern.MatchString(record.SubscriptionKey) || record.Sender == "" || record.Body == "" || record.ReceivedAt.IsZero() || len(record.Segments) == 0 {
 		return errors.New("invalid QDC507 inbound SMS state")
 	}
 	seen := make(map[int]struct{}, len(record.Segments))
 	for _, segment := range record.Segments {
-		if segment.Index < 0 || segment.Index > maxStorageIndex {
+		if segment.Index < 0 || segment.Index > maxStorageIndex || segment.DeleteStarted {
 			return errors.New("invalid QDC507 inbound SMS storage index")
 		}
 		if _, duplicate := seen[segment.Index]; duplicate {
@@ -201,7 +204,7 @@ func validInboundRecord(record InboundRecord) error {
 }
 
 func sameInboundIdentity(left, right InboundRecord) bool {
-	if left.MessageID != right.MessageID || left.DeviceID != right.DeviceID || left.Sender != right.Sender || left.Body != right.Body ||
+	if left.MessageID != right.MessageID || left.SubscriptionKey != right.SubscriptionKey || left.Sender != right.Sender || left.Body != right.Body ||
 		!left.ReceivedAt.Equal(right.ReceivedAt) || len(left.Segments) != len(right.Segments) {
 		return false
 	}
@@ -226,10 +229,12 @@ func validInboundProgress(before, after InboundRecord) bool {
 }
 
 func validOperation(record operationRecord) bool {
-	return record.OperationID != "" && (record.Kind == operationSend || record.Kind == operationAcknowledge)
+	return record.OperationID != "" && subscriptionKeyPattern.MatchString(record.SubscriptionKey) && (record.Kind == operationSend || record.Kind == operationAcknowledge)
 }
 
-func inboundKey(deviceID, messageID string) string { return deviceID + "\x00" + messageID }
+func inboundKey(subscriptionKey, messageID string) string {
+	return subscriptionKey + "\x00" + messageID
+}
 
 func cloneInbound(record InboundRecord) InboundRecord {
 	record.Segments = append([]InboundSegment(nil), record.Segments...)

@@ -43,10 +43,10 @@ Update `docs/architecture.md` when ownership, dependency direction, a public
 data flow, a persisted truth source, or a mechanical invariant changes. Cite
 representative code/tests and describe current assembly, including limitations.
 For example, the architecture correctly distinguishes persisted Line identity
-from transient Agent targets and states that ordinary cellular SMS/calls are
-not yet wired in production; that evidence is visible in
-`internal/application/line/service.go`, `cmd/simplusd/main.go`, and
-`internal/modemadapter/registry_test.go`.
+from transient Agent targets, the HIL-accepted QDC507 native SMS production
+transport, and the still-unavailable real call transport; that evidence is
+visible in `internal/application/line/service.go`, `cmd/simplus-agent/main.go`,
+`cmd/simplusd/main.go`, and `internal/modemadapter/registry_test.go`.
 
 When code and docs appear inconsistent:
 

@@ -2,44 +2,66 @@ package modemadapter
 
 import (
 	"context"
-	"sync"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 )
 
-// SMSAdapter is implemented only by model adapters with a verified SMS
-// transport. The router supplies the current device report so implementations
-// can resolve fixed endpoint roles without accepting a path from the caller.
-type SMSAdapter interface {
-	Adapter
-	ListSMS(context.Context, agentapi.DeviceReport) ([]agentapi.SMSMessageReference, error)
-	ReadSMS(context.Context, agentapi.DeviceReport, string) (agentapi.SMSStoredMessage, error)
-	SendSMS(context.Context, agentapi.DeviceReport, agentapi.SMSSendRequest) (agentapi.SMSSubmission, error)
-	AcknowledgeSMS(context.Context, agentapi.DeviceReport, agentapi.SMSAcknowledgeRequest) (bool, error)
+type SMSRuntimeTarget struct {
+	Device          agentapi.DeviceReport
+	SubscriptionKey string
 }
 
-type SnapshotSource interface {
-	Snapshot() agentapi.Snapshot
+type SMSRuntimeFence struct {
+	DeviceID                        string
+	DeviceGeneration                uint64
+	ExpectedEquipmentFingerprint    string
+	ExpectedSubscriptionFingerprint string
+}
+
+// SMSAdapter is implemented only by model adapters with a verified complete
+// SMS transport. Temporary endpoint facts are separated from the stable SIM
+// namespace used by durable recovery.
+type SMSAdapter interface {
+	Adapter
+	ListSMS(context.Context, SMSRuntimeTarget) ([]agentapi.SMSMessageReference, error)
+	ReadSMS(context.Context, SMSRuntimeTarget, string) (agentapi.SMSStoredMessage, error)
+	SendSMS(context.Context, SMSRuntimeTarget, agentapi.SMSSendRequest) (agentapi.SMSSubmission, error)
+	AcknowledgeSMS(context.Context, SMSRuntimeTarget, agentapi.SMSAcknowledgeRequest) (bool, error)
+}
+
+type SnapshotSource interface{ Snapshot() agentapi.Snapshot }
+
+type DeviceOperationGate interface {
+	Acquire(context.Context, string) (func(), error)
+}
+
+type SMSRuntimeResolver interface {
+	ResolveSMSRuntimeTarget(context.Context, agentapi.Snapshot, SMSRuntimeFence, bool) (SMSRuntimeTarget, error)
+}
+
+type SMSRuntimeDependencies struct {
+	Gate     DeviceOperationGate
+	Resolver SMSRuntimeResolver
 }
 
 type SMSRouter struct {
 	source   SnapshotSource
 	registry *Registry
-
-	gatesMu sync.Mutex
-	gates   map[string]chan struct{}
+	gate     DeviceOperationGate
+	resolver SMSRuntimeResolver
 }
 
 var _ agentapi.SMSBackend = (*SMSRouter)(nil)
 
-// SMSBackend returns a common Agent backend only when at least one registered
-// model adapter implements SMSAdapter. An empty discovery-only registry must
-// not make the Agent advertise sms-v1.
-func (registry *Registry) SMSBackend(source SnapshotSource) (agentapi.SMSBackend, bool) {
-	if registry == nil || source == nil || !registry.SupportsSMS() {
+// SMSBackend is deliberately unavailable unless the caller supplies the same
+// gate and fresh target resolver used by the hardware scanner. Discovery-only
+// or partially composed registries cannot advertise sms-v1.
+func (registry *Registry) SMSBackend(source SnapshotSource, dependencies ...SMSRuntimeDependencies) (agentapi.SMSBackend, bool) {
+	if registry == nil || source == nil || !registry.SupportsSMS() || len(dependencies) != 1 ||
+		dependencies[0].Gate == nil || dependencies[0].Resolver == nil {
 		return nil, false
 	}
-	return &SMSRouter{source: source, registry: registry, gates: make(map[string]chan struct{})}, true
+	return &SMSRouter{source: source, registry: registry, gate: dependencies[0].Gate, resolver: dependencies[0].Resolver}, true
 }
 
 func (registry *Registry) SupportsSMS() bool {
@@ -54,63 +76,86 @@ func (registry *Registry) SupportsSMS() bool {
 	return false
 }
 
-func (router *SMSRouter) ListSMS(ctx context.Context, deviceID string) ([]agentapi.SMSMessageReference, error) {
-	release, err := router.acquire(ctx, deviceID)
+func (router *SMSRouter) ListSMS(ctx context.Context, request agentapi.SMSListRequest) ([]agentapi.SMSMessageReference, error) {
+	target, adapter, release, err := router.target(ctx, request.DeviceID, request.DeviceGeneration,
+		request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint, false)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	device, adapter, err := router.resolve(deviceID)
-	if err != nil {
-		return nil, err
-	}
-	return adapter.ListSMS(ctx, device)
+	return adapter.ListSMS(ctx, target)
 }
 
-func (router *SMSRouter) ReadSMS(ctx context.Context, deviceID, messageID string) (agentapi.SMSStoredMessage, error) {
-	release, err := router.acquire(ctx, deviceID)
+func (router *SMSRouter) ReadSMS(ctx context.Context, request agentapi.SMSReadRequest) (agentapi.SMSStoredMessage, error) {
+	target, adapter, release, err := router.target(ctx, request.DeviceID, request.DeviceGeneration,
+		request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint, false)
 	if err != nil {
 		return agentapi.SMSStoredMessage{}, err
 	}
 	defer release()
-	device, adapter, err := router.resolve(deviceID)
-	if err != nil {
-		return agentapi.SMSStoredMessage{}, err
-	}
-	return adapter.ReadSMS(ctx, device, messageID)
+	return adapter.ReadSMS(ctx, target, request.MessageID)
 }
 
 func (router *SMSRouter) SendSMS(ctx context.Context, request agentapi.SMSSendRequest) (agentapi.SMSSubmission, error) {
-	release, err := router.acquire(ctx, request.DeviceID)
+	target, adapter, release, err := router.target(ctx, request.DeviceID, request.DeviceGeneration,
+		request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint, true)
 	if err != nil {
 		return agentapi.SMSSubmission{}, err
 	}
 	defer release()
-	device, adapter, err := router.resolve(request.DeviceID)
-	if err != nil {
-		return agentapi.SMSSubmission{}, err
-	}
-	return adapter.SendSMS(ctx, device, request)
+	return adapter.SendSMS(ctx, target, request)
 }
 
 func (router *SMSRouter) AcknowledgeSMS(ctx context.Context, request agentapi.SMSAcknowledgeRequest) (bool, error) {
-	release, err := router.acquire(ctx, request.DeviceID)
+	target, adapter, release, err := router.target(ctx, request.DeviceID, request.DeviceGeneration,
+		request.ExpectedEquipmentFingerprint, request.ExpectedSubscriptionFingerprint, false)
 	if err != nil {
 		return false, err
 	}
 	defer release()
-	device, adapter, err := router.resolve(request.DeviceID)
-	if err != nil {
-		return false, err
-	}
-	return adapter.AcknowledgeSMS(ctx, device, request)
+	return adapter.AcknowledgeSMS(ctx, target, request)
 }
 
-func (router *SMSRouter) resolve(deviceID string) (agentapi.DeviceReport, SMSAdapter, error) {
-	if router == nil || router.source == nil || router.registry == nil {
-		return agentapi.DeviceReport{}, nil, agentapi.ErrSMSUnsupported
+func (router *SMSRouter) target(ctx context.Context, deviceID string, generation uint64, equipment, subscription string, requireReady bool) (SMSRuntimeTarget, SMSAdapter, func(), error) {
+	if router == nil || router.source == nil || router.registry == nil || router.gate == nil || router.resolver == nil {
+		return SMSRuntimeTarget{}, nil, nil, agentapi.ErrSMSUnsupported
 	}
-	for _, device := range router.source.Snapshot().Devices {
+	snapshot := router.source.Snapshot()
+	if _, _, err := router.adapterFor(snapshot, deviceID); err != nil {
+		return SMSRuntimeTarget{}, nil, nil, err
+	}
+	release, err := router.gate.Acquire(ctx, deviceID)
+	if err != nil {
+		return SMSRuntimeTarget{}, nil, nil, err
+	}
+	snapshot = router.source.Snapshot()
+	fence := SMSRuntimeFence{DeviceID: deviceID, DeviceGeneration: generation,
+		ExpectedEquipmentFingerprint: equipment, ExpectedSubscriptionFingerprint: subscription}
+	target, err := router.resolver.ResolveSMSRuntimeTarget(ctx, snapshot, fence, requireReady)
+	if err != nil {
+		release()
+		return SMSRuntimeTarget{}, nil, nil, err
+	}
+	// Refresh may run independently of the per-device endpoint gate. Re-read
+	// the current device after the fresh identity/SIM probe so a hotplug or
+	// re-enumeration observed during that probe cannot dispatch through the old
+	// endpoint report. Unrelated devices do not invalidate this operation.
+	current := router.source.Snapshot()
+	currentDevice, adapter, err := router.adapterFor(current, target.Device.ID)
+	if err != nil {
+		release()
+		return SMSRuntimeTarget{}, nil, nil, err
+	}
+	if currentDevice.Generation != generation || currentDevice.Profile != target.Device.Profile {
+		release()
+		return SMSRuntimeTarget{}, nil, nil, agentapi.ErrSMSDeviceStale
+	}
+	target.Device = currentDevice
+	return target, adapter, release, nil
+}
+
+func (router *SMSRouter) adapterFor(snapshot agentapi.Snapshot, deviceID string) (agentapi.DeviceReport, SMSAdapter, error) {
+	for _, device := range snapshot.Devices {
 		if device.ID != deviceID {
 			continue
 		}
@@ -125,30 +170,4 @@ func (router *SMSRouter) resolve(deviceID string) (agentapi.DeviceReport, SMSAda
 		return device, smsAdapter, nil
 	}
 	return agentapi.DeviceReport{}, nil, agentapi.ErrSMSDeviceNotFound
-}
-
-func (router *SMSRouter) acquire(ctx context.Context, deviceID string) (func(), error) {
-	if router == nil {
-		return nil, agentapi.ErrSMSUnsupported
-	}
-	// Reject missing or unsupported IDs before allocating a persistent gate.
-	// Resolve again after acquiring because hotplug may change the snapshot while
-	// an operation is queued.
-	if _, _, err := router.resolve(deviceID); err != nil {
-		return nil, err
-	}
-	router.gatesMu.Lock()
-	gate := router.gates[deviceID]
-	if gate == nil {
-		gate = make(chan struct{}, 1)
-		gate <- struct{}{}
-		router.gates[deviceID] = gate
-	}
-	router.gatesMu.Unlock()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-gate:
-		return func() { gate <- struct{}{} }, nil
-	}
 }

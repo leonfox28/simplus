@@ -67,10 +67,20 @@ type PhysicalDevice struct {
 	USBAddress                   string
 	USBVendorID                  string
 	USBProductID                 string
+	ModemSerialNumber            string
 	USBSerialNumber              string
 	EquipmentIdentityFingerprint string
 	USBSerialFingerprint         string
 	Generation                   uint64
+}
+
+// ObservedSerialNumber prefers the module-reported serial while retaining
+// the USB descriptor serial as display-only fallback metadata.
+func (device PhysicalDevice) ObservedSerialNumber() string {
+	if device.ModemSerialNumber != "" {
+		return device.ModemSerialNumber
+	}
+	return device.USBSerialNumber
 }
 
 type ModemFunction struct {

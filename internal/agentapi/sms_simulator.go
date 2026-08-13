@@ -53,13 +53,13 @@ func NewDefaultSimulatorSMSBackend() *SimulatorSMSBackend {
 	})
 }
 
-func (backend *SimulatorSMSBackend) ListSMS(ctx context.Context, deviceID string) ([]SMSMessageReference, error) {
+func (backend *SimulatorSMSBackend) ListSMS(ctx context.Context, request SMSListRequest) ([]SMSMessageReference, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
-	messages := backend.messages[deviceID]
+	messages := backend.messages[request.DeviceID]
 	references := make([]SMSMessageReference, 0, len(messages))
 	for _, message := range messages {
 		references = append(references, SMSMessageReference{
@@ -75,13 +75,13 @@ func (backend *SimulatorSMSBackend) ListSMS(ctx context.Context, deviceID string
 	return references, nil
 }
 
-func (backend *SimulatorSMSBackend) ReadSMS(ctx context.Context, deviceID, messageID string) (SMSStoredMessage, error) {
+func (backend *SimulatorSMSBackend) ReadSMS(ctx context.Context, request SMSReadRequest) (SMSStoredMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return SMSStoredMessage{}, err
 	}
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
-	message, found := backend.messages[deviceID][messageID]
+	message, found := backend.messages[request.DeviceID][request.MessageID]
 	if !found {
 		return SMSStoredMessage{}, ErrSMSMessageNotFound
 	}
@@ -158,7 +158,7 @@ func (client *LocalSMSClient) ListSMS(ctx context.Context, request SMSListReques
 	if request.AgentInstanceID != client.instanceID {
 		return SMSListResponse{}, ErrSMSAgentStale
 	}
-	messages, err := client.backend.ListSMS(ctx, request.DeviceID)
+	messages, err := client.backend.ListSMS(ctx, request)
 	if err != nil {
 		return SMSListResponse{}, err
 	}
@@ -176,7 +176,7 @@ func (client *LocalSMSClient) ReadSMS(ctx context.Context, request SMSReadReques
 	if request.AgentInstanceID != client.instanceID {
 		return SMSReadResponse{}, ErrSMSAgentStale
 	}
-	message, err := client.backend.ReadSMS(ctx, request.DeviceID, request.MessageID)
+	message, err := client.backend.ReadSMS(ctx, request)
 	if err != nil {
 		return SMSReadResponse{}, err
 	}

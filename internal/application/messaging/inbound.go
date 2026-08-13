@@ -29,7 +29,7 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 	if service == nil || service.repository == nil || service.lines == nil {
 		return InboundSyncResult{}, ErrInboundSync
 	}
-	if service.inbox == nil && service.reports == nil {
+	if len(service.transports) == 0 {
 		return InboundSyncResult{}, nil
 	}
 	topology, err := service.lines.Topology(ctx)
@@ -37,14 +37,25 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 		return InboundSyncResult{}, fmt.Errorf("%w: read line topology: %v", ErrInboundSync, err)
 	}
 	var result InboundSyncResult
+	var syncErrors error
 	for _, line := range topology.Lines {
-		if line.State != inventory.LineReady || !service.supportsSMS(line) {
+		if line.State != inventory.LineReady {
 			continue
 		}
-		if service.hostVoWiFiSMS && (service.availability == nil || !service.availability.Available(ctx, line.ID)) {
+		transport, resolveErr := service.resolveTransport(ctx, line)
+		if resolveErr != nil {
+			syncErrors = errors.Join(syncErrors, fmt.Errorf("%w: resolve SMS transport", ErrInboundSync))
 			continue
 		}
-		lineResult, err := service.syncInboundLine(ctx, line)
+		runtimeTarget := runtimeLine{line: line}
+		if transport.resolveLine != nil {
+			runtimeTarget, resolveErr = transport.resolveLine(topology, line)
+			if resolveErr != nil {
+				syncErrors = errors.Join(syncErrors, fmt.Errorf("%w: resolve SMS runtime target", ErrInboundSync))
+				continue
+			}
+		}
+		lineResult, err := service.syncInboundLine(ctx, line, runtimeTarget, transport)
 		result.Persisted += lineResult.Persisted
 		result.AlreadyKnown += lineResult.AlreadyKnown
 		result.Acknowledged += lineResult.Acknowledged
@@ -53,13 +64,13 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 		result.OutboundUnconfirmed += lineResult.OutboundUnconfirmed
 		result.OutboundReportsAcknowledged += lineResult.OutboundReportsAcknowledged
 		if err != nil {
-			return result, err
+			syncErrors = errors.Join(syncErrors, err)
 		}
 	}
-	return result, nil
+	return result, syncErrors
 }
 
-func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line) (InboundSyncResult, error) {
+func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line, runtimeTarget runtimeLine, transport SMSTransport) (InboundSyncResult, error) {
 	gate := service.gate(line.ModemFunctionID)
 	select {
 	case gate.token <- struct{}{}:
@@ -67,10 +78,11 @@ func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line
 	case <-ctx.Done():
 		return InboundSyncResult{}, fmt.Errorf("%w: wait for modem: %v", ErrInboundSync, ctx.Err())
 	}
-	target := InboxTarget{LineID: line.ID, PhysicalDeviceID: line.PhysicalDeviceID}
+	target := runtimeTarget.inboxTarget()
 	var result InboundSyncResult
-	if service.reports != nil {
-		reportResult, err := service.syncSubmitReportsLocked(ctx, target)
+	reports, _ := transport.Inbox.(SubmitReportInbox)
+	if reports != nil {
+		reportResult, err := service.syncSubmitReportsLocked(ctx, target, reports)
 		result.OutboundSent += reportResult.OutboundSent
 		result.OutboundFailed += reportResult.OutboundFailed
 		result.OutboundUnconfirmed += reportResult.OutboundUnconfirmed
@@ -79,22 +91,22 @@ func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line
 			return result, err
 		}
 	}
-	if service.inbox == nil {
+	if transport.Inbox == nil {
 		return result, nil
 	}
-	references, err := service.inbox.ListSMS(ctx, target)
+	references, err := transport.Inbox.ListSMS(ctx, target)
 	if err != nil {
 		return result, fmt.Errorf("%w: list transport messages: %v", ErrInboundSync, err)
 	}
 	for _, reference := range references {
-		message, err := service.inbox.ReadSMS(ctx, target, reference.SourceMessageID)
+		message, err := transport.Inbox.ReadSMS(ctx, target, reference.SourceMessageID)
 		if err != nil {
 			return result, fmt.Errorf("%w: read transport message: %v", ErrInboundSync, err)
 		}
 		if err := validateInboundMessage(reference, message); err != nil {
 			return result, fmt.Errorf("%w: transport message does not match its reference", ErrInboundSync)
 		}
-		messageResult, err := service.syncInboundMessage(ctx, target, line.ID, message)
+		messageResult, err := service.syncInboundMessage(ctx, target, line.ID, message, transport.Inbox)
 		result.Persisted += messageResult.Persisted
 		result.AlreadyKnown += messageResult.AlreadyKnown
 		result.Acknowledged += messageResult.Acknowledged
@@ -105,16 +117,16 @@ func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line
 	return result, nil
 }
 
-func (service *Service) syncSubmitReportsLocked(ctx context.Context, target InboxTarget) (InboundSyncResult, error) {
-	reports, err := service.reports.ListSMSSubmitReports(ctx, target)
+func (service *Service) syncSubmitReportsLocked(ctx context.Context, target InboxTarget, reports SubmitReportInbox) (InboundSyncResult, error) {
+	reportList, err := reports.ListSMSSubmitReports(ctx, target)
 	if err != nil {
 		return InboundSyncResult{}, fmt.Errorf("%w: list outbound submit reports: %v", ErrInboundSync, err)
 	}
-	if len(reports) > 256 {
+	if len(reportList) > 256 {
 		return InboundSyncResult{}, fmt.Errorf("%w: too many outbound submit reports", ErrInboundSync)
 	}
 	var result InboundSyncResult
-	for _, report := range reports {
+	for _, report := range reportList {
 		if err := validateSubmitReport(report); err != nil {
 			return result, fmt.Errorf("%w: invalid outbound submit report", ErrInboundSync)
 		}
@@ -142,7 +154,7 @@ func (service *Service) syncSubmitReportsLocked(ctx context.Context, target Inbo
 			}
 		}
 		acknowledgeID := inboundSourceID("report_ack_", target.LineID, report.ProviderMessageID)
-		if err := service.reports.AcknowledgeSMSSubmitReport(ctx, target, report.ProviderMessageID, acknowledgeID); err != nil {
+		if err := reports.AcknowledgeSMSSubmitReport(ctx, target, report.ProviderMessageID, acknowledgeID); err != nil {
 			return result, fmt.Errorf("%w: acknowledge outbound submit report: %v", ErrInboundSync, err)
 		}
 		result.OutboundReportsAcknowledged++
@@ -171,25 +183,28 @@ func validateSubmitReport(report SubmitReport) error {
 }
 
 func (service *Service) syncInboundMessage(ctx context.Context, target InboxTarget, lineID string,
-	message InboxMessage) (InboundSyncResult, error) {
+	message InboxMessage, inbox Inbox) (InboundSyncResult, error) {
 	if message.Segment == nil {
 		return service.persistAndAcknowledgeInbound(ctx, target, lineID, message.SourceMessageID,
-			message.SourceMessageID, message.Sender, message.Body, message.ReceivedAt)
+			message.SourceMessageID, message.Sender, message.Body, message.ReceivedAt, inbox)
 	}
 	segment := *message.Segment
+	if segment.Reference > 255 {
+		return InboundSyncResult{}, fmt.Errorf("%w: inbound transport uses an unsupported concatenation reference", ErrInboundSync)
+	}
 	decoded, err := smscodec.DecodeSegment(segment)
 	if err != nil {
 		return InboundSyncResult{}, fmt.Errorf("%w: decode inbound SMS segment: %v", ErrInboundSync, err)
 	}
 	if segment.Total == 1 {
 		return service.persistAndAcknowledgeInbound(ctx, target, lineID, message.SourceMessageID,
-			message.SourceMessageID, message.Sender, decoded, message.ReceivedAt)
+			message.SourceMessageID, message.Sender, decoded, message.ReceivedAt, inbox)
 	}
 
 	groupID := inboundFragmentGroupID(lineID, message.SourceMessageID)
 	fragments, _, err := service.repository.StoreInboundSMSFragment(ctx, sms.InboundFragment{
 		GroupID: groupID, SourceMessageID: message.SourceMessageID, LineID: lineID,
-		Sender: message.Sender, Encoding: string(segment.Encoding), Reference: segment.Reference,
+		Sender: message.Sender, Encoding: string(segment.Encoding), Reference: byte(segment.Reference),
 		Part: segment.Part, Total: segment.Total, UnitCount: segment.UnitCount,
 		UserData: append([]byte(nil), segment.UserData...), ReceivedAt: message.ReceivedAt,
 	})
@@ -201,7 +216,7 @@ func (service *Service) syncInboundMessage(ctx context.Context, target InboxTarg
 	}
 	groupID = fragments[0].GroupID
 	if len(fragments) < segment.Total {
-		if err := service.acknowledgeInbound(ctx, target, lineID, message.SourceMessageID); err != nil {
+		if err := service.acknowledgeInbound(ctx, target, lineID, message.SourceMessageID, inbox); err != nil {
 			return InboundSyncResult{}, err
 		}
 		return InboundSyncResult{Acknowledged: 1}, nil
@@ -210,7 +225,7 @@ func (service *Service) syncInboundMessage(ctx context.Context, target InboxTarg
 	receivedAt := fragments[0].ReceivedAt
 	for _, fragment := range fragments {
 		assembled = append(assembled, smscodec.Segment{
-			Encoding: smscodec.Encoding(fragment.Encoding), Reference: fragment.Reference,
+			Encoding: smscodec.Encoding(fragment.Encoding), Reference: uint16(fragment.Reference),
 			Part: fragment.Part, Total: fragment.Total, UnitCount: fragment.UnitCount,
 			UserData: append([]byte(nil), fragment.UserData...),
 		})
@@ -223,11 +238,11 @@ func (service *Service) syncInboundMessage(ctx context.Context, target InboxTarg
 		return InboundSyncResult{}, fmt.Errorf("%w: assemble inbound SMS fragments: %v", ErrInboundSync, err)
 	}
 	return service.persistAndAcknowledgeInbound(ctx, target, lineID, groupID,
-		message.SourceMessageID, message.Sender, body, receivedAt)
+		message.SourceMessageID, message.Sender, body, receivedAt, inbox)
 }
 
 func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target InboxTarget, lineID,
-	providerMessageID, acknowledgeMessageID, sender, body string, receivedAt time.Time) (InboundSyncResult, error) {
+	providerMessageID, acknowledgeMessageID, sender, body string, receivedAt time.Time, inbox Inbox) (InboundSyncResult, error) {
 	messageID := inboundSourceID("msg_in_", lineID, providerMessageID)
 	operationID := inboundSourceID("in_", lineID, providerMessageID)
 	_, replayed, err := service.repository.CreateInboundSMS(ctx, sms.Message{
@@ -244,16 +259,16 @@ func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target
 	} else {
 		result.Persisted = 1
 	}
-	if err := service.acknowledgeInbound(ctx, target, lineID, acknowledgeMessageID); err != nil {
+	if err := service.acknowledgeInbound(ctx, target, lineID, acknowledgeMessageID, inbox); err != nil {
 		return result, err
 	}
 	result.Acknowledged = 1
 	return result, nil
 }
 
-func (service *Service) acknowledgeInbound(ctx context.Context, target InboxTarget, lineID, sourceMessageID string) error {
+func (service *Service) acknowledgeInbound(ctx context.Context, target InboxTarget, lineID, sourceMessageID string, inbox Inbox) error {
 	acknowledgeID := inboundAcknowledgeOperationID(lineID, sourceMessageID)
-	if err := service.inbox.AcknowledgeSMS(ctx, target, sourceMessageID, acknowledgeID); err != nil {
+	if err := inbox.AcknowledgeSMS(ctx, target, sourceMessageID, acknowledgeID); err != nil {
 		return fmt.Errorf("%w: acknowledge persisted transport message: %v", ErrInboundSync, err)
 	}
 	return nil

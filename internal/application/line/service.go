@@ -249,7 +249,7 @@ func candidateObservations(records []domain.Record, modems []modemdomain.Record,
 			}
 			candidate := unavailableCandidate(modem, slotIndex, presence, readiness)
 			candidate.ManagedModemModel = device.ModemModel
-			candidate.ManagedModemSerialNumber = device.USBSerialNumber
+			candidate.ManagedModemSerialNumber = device.ObservedSerialNumber()
 			result[candidate.CandidateID] = candidate
 			continue
 		}
@@ -266,7 +266,7 @@ func candidateObservations(records []domain.Record, modems []modemdomain.Record,
 			result[candidateID] = candidateObservation{
 				Candidate: domain.Candidate{
 					CandidateID: candidateID, ManagedModemID: modem.ID, ManagedModemDisplayName: modem.DisplayName,
-					ManagedModemModel: device.ModemModel, ManagedModemSerialNumber: device.USBSerialNumber,
+					ManagedModemModel: device.ModemModel, ManagedModemSerialNumber: device.ObservedSerialNumber(),
 					SubscriptionDisplayHint: item.profile.displayHint,
 					HomeOperatorName:        item.profile.homeOperatorName, HomeOperatorCode: item.profile.homeOperatorCode,
 					SIMPresence:  hardware.SlotPresent,
@@ -374,7 +374,7 @@ func viewFor(record domain.Record, modems []modemdomain.Record, topology invento
 		state = domain.StateSIMUnavailable
 		for _, device := range topology.Devices {
 			if device.ID == physicalID {
-				model, serialNumber = device.ModemModel, device.USBSerialNumber
+				model, serialNumber = device.ModemModel, device.ObservedSerialNumber()
 				break
 			}
 		}

@@ -29,7 +29,18 @@ func (response *ErrorResponse) Error() string {
 }
 
 func (response *ErrorResponse) Is(target error) bool {
-	return response != nil && response.Code == "SMS_SEND_OUTCOME_UNKNOWN" && target == ErrSMSOutcomeUnknown
+	if response == nil {
+		return false
+	}
+	mapping := map[string]error{
+		"SMS_SEND_OUTCOME_UNKNOWN": ErrSMSOutcomeUnknown, "SMS_DEVICE_STALE": ErrSMSDeviceStale,
+		"SMS_DEVICE_NOT_FOUND":           ErrSMSDeviceNotFound,
+		"SMS_EQUIPMENT_IDENTITY_CHANGED": ErrSMSEquipmentIdentity, "SMS_SIM_NOT_READY": ErrSMSSIMNotReady,
+		"SMS_SIM_IDENTITY_CHANGED": ErrSMSSIMIdentity, "SMS_RF_OFF": ErrSMSRFOff,
+		"SMS_REGISTRATION_DENIED": ErrSMSRegistrationDenied, "SMS_NOT_REGISTERED": ErrSMSNotRegistered,
+		"SMS_STATUS_UNAVAILABLE": ErrSMSStatusUnavailable,
+	}
+	return mapping[response.Code] == target
 }
 
 func NewHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
@@ -43,10 +54,10 @@ func NewReadOnlyHardwareHandler(monitor *Monitor, logger *slog.Logger) http.Hand
 }
 
 // NewManagedHardwareHandler exposes read-only discovery plus the narrowly
-// typed RF state setter. It still has no route for arbitrary commands, paths,
-// SMS, calls, or eUICC mutations.
-func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger) http.Handler {
-	return newHandler(monitor, nil, rf, identity, logger, false)
+// typed RF, equipment-identity, and optional SMS services. It still has no
+// route for arbitrary commands, paths, calls, or eUICC mutations.
+func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
+	return newHandler(monitor, nil, rf, identity, logger, false, smsBackends...)
 }
 
 func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/hardwareprobe"
 	"github.com/leonfox28/simplus/internal/modemadapter"
+	"github.com/leonfox28/simplus/internal/modemadapter/qdc507sms"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
 )
 
@@ -81,6 +83,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	usbRoot := flags.String("sysfs-usb-root", "/sys/bus/usb/devices", "USB sysfs root")
 	devRoot := flags.String("dev-root", "/dev", "device-node root")
 	identityKeyPath := flags.String("identity-key", os.Getenv("SIMPLUS_AGENT_IDENTITY_KEY"), "absolute path to the Agent SIM identity pseudonym key")
+	stateRoot := flags.String("state-root", os.Getenv("SIMPLUS_AGENT_STATE_ROOT"), "required private Agent state root for durable hardware operations")
 	directoryMode := &octalMode{value: 0o700}
 	socketMode := &octalMode{value: 0o600}
 	flags.Var(directoryMode, "directory-mode", "agent socket directory mode in octal")
@@ -120,24 +123,65 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
+	if *identityKeyPath == "" || *stateRoot == "" || !filepath.IsAbs(*stateRoot) || filepath.Clean(*stateRoot) != *stateRoot || *stateRoot == string(filepath.Separator) {
+		fmt.Fprintln(stderr, "identity-key and an absolute non-root state-root are required")
+		return 2
+	}
 
 	logger := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo})).With("service", "simplus-agent")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	identityKeyring, keyErr := secretbox.Open(*identityKeyPath)
+	if keyErr != nil {
+		logger.Error("SIM identity key initialization failed", "error", keyErr)
+		return 1
+	}
+	stateStore, stateErr := qdc507sms.OpenSQLiteStateRoot(ctx, *stateRoot)
+	if stateErr != nil {
+		logger.Error("QDC507 SMS state initialization failed", "error", stateErr)
+		return 1
+	}
+	closeState := func() bool {
+		if stateStore == nil {
+			return true
+		}
+		if closeErr := stateStore.Close(); closeErr != nil {
+			logger.Error("QDC507 SMS state close failed", "error", closeErr)
+			stateStore = nil
+			return false
+		}
+		stateStore = nil
+		return true
+	}
+	transport := qdc507sms.NewTTYTransport()
+	driver, driverErr := qdc507sms.NewDriver(transport)
+	if driverErr != nil {
+		closeState()
+		logger.Error("QDC507 SMS driver initialization failed", "error", driverErr)
+		return 1
+	}
+	qdcAdapter, adapterErr := qdc507sms.NewAdapter(driver, stateStore)
+	if adapterErr != nil {
+		closeState()
+		logger.Error("QDC507 SMS adapter initialization failed", "error", adapterErr)
+		return 1
+	}
+	registry, registryErr := modemadapter.NewRegistry(qdcAdapter, modemadapter.ML307A{})
+	if registryErr != nil {
+		closeState()
+		logger.Error("hardware adapter registry initialization failed", "error", registryErr)
+		return 1
+	}
 	scanner := hardwareprobe.NewScanner()
 	scanner.USBRoot = *usbRoot
 	scanner.DevRoot = *devRoot
-	if *identityKeyPath != "" {
-		identityKeyring, keyErr := secretbox.Open(*identityKeyPath)
-		if keyErr != nil {
-			logger.Error("SIM identity key initialization failed", "error", keyErr)
-			return 1
-		}
-		scanner.Identities = identityKeyring
-		scanner.Querier = hardwareprobe.NewATQuerierWithIdentity(identityKeyring)
-	}
+	scanner.Adapters = registry
+	scanner.Identities = identityKeyring
+	scanner.Querier = hardwareprobe.NewATQuerierWithIdentity(identityKeyring)
 	monitor := agentapi.NewMonitor(scanner)
+	scanner.CurrentSnapshot = monitor.Snapshot
 	if _, err := monitor.Refresh(ctx); err != nil {
+		closeState()
 		logger.Error("initial hardware scan failed", "error", err)
 		return 1
 	}
@@ -146,14 +190,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		OwnerUID: -1, OwnerGID: *socketGID, AllowedUIDs: allowedUIDs,
 	})
 	if err != nil {
+		closeState()
 		logger.Error("agent socket bind failed", "path", *socketPath, "error", err)
 		return 1
 	}
 	rfService := agentapi.NewRFService(monitor, scanner)
 	equipmentIdentityService := agentapi.NewEquipmentIdentityService(monitor, scanner)
+	smsBackend, ok := registry.SMSBackend(monitor, modemadapter.SMSRuntimeDependencies{Gate: scanner.Gate, Resolver: scanner})
+	if !ok {
+		_ = listener.Close()
+		closeState()
+		logger.Error("QDC507 SMS backend initialization failed")
+		return 1
+	}
 	server := &http.Server{
-		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, equipmentIdentityService, logger), ReadHeaderTimeout: 3 * time.Second,
-		ReadTimeout: 15 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
+		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, equipmentIdentityService, logger, smsBackend), ReadHeaderTimeout: 3 * time.Second,
+		ReadTimeout: 15 * time.Second, WriteTimeout: agentapi.SMSRequestTimeout + 10*time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	var simAKAServer *http.Server
 	var simAKAListener *agentapi.UIDListener
@@ -164,6 +216,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		})
 		if err != nil {
 			_ = listener.Close()
+			closeState()
 			logger.Error("SIM AKA HIL socket bind failed", "path", *simAKASocketPath, "error", err)
 			return 1
 		}
@@ -227,6 +280,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if exitCode == 0 {
 		logger.Info("hardware agent stopped")
+	}
+	if !closeState() {
+		exitCode = 1
 	}
 	return exitCode
 }

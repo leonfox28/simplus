@@ -45,6 +45,30 @@ function SIMPresenceTag({ value }: { value: ManagedModem['simPresence'] }) {
   return <Tag color="orange">未知</Tag>
 }
 
+const cellularLabels: Record<ManagedModem['cellular']['state'], { label: string; color?: string }> = {
+  'registered-home': { label: '已注册（本地）', color: 'green' },
+  'registered-roaming': { label: '已注册（漫游）', color: 'cyan' },
+  searching: { label: '正在搜网', color: 'processing' },
+  denied: { label: '注册被拒绝', color: 'red' },
+  'not-registered': { label: '未注册', color: 'orange' },
+  'rf-off': { label: '射频已关闭' },
+  'sim-not-ready': { label: 'SIM 未就绪', color: 'orange' },
+  unavailable: { label: '状态不可用', color: 'red' },
+  unknown: { label: '状态未知', color: 'orange' },
+}
+
+function CellularStatusView({ item }: { item: ManagedModem }) {
+  const presentation = cellularLabels[item.cellular.state]
+  const network = [item.cellular.operatorName || item.cellular.operatorCode, item.cellular.rat.toUpperCase()].filter(Boolean).join(' · ')
+  const signal = item.cellular.signalState === 'measured' ? `${item.cellular.signalRssiDbm} dBm` : '信号不可用'
+  const observed = item.cellular.observedAt ? new Date(item.cellular.observedAt).toLocaleString('zh-CN') : ''
+  return <Space orientation="vertical" size={0}>
+    <Tag color={presentation.color}>{presentation.label}</Tag>
+    <Typography.Text type="secondary">{network || '网络未知'} · {signal}</Typography.Text>
+    <Typography.Text type="secondary">{observed ? `观测于 ${observed}` : item.cellular.errorCode || '无新鲜观测'}</Typography.Text>
+  </Space>
+}
+
 function ModemModel({ value, strong = false }: { value: string; strong?: boolean }) {
   return value
     ? <Typography.Text strong={strong}>{value}</Typography.Text>
@@ -169,6 +193,7 @@ export default function Modems() {
     { title: 'IMEI', render: (_, item) => renderIMEI(item) },
     { title: '在线状态', dataIndex: 'state', render: (value) => <Tag color={value === 'online' ? 'green' : 'default'}>{value === 'online' ? '在线' : '离线'}</Tag> },
     { title: 'SIM 卡', dataIndex: 'simPresence', render: (_, item) => <SIMPresenceTag value={item.simPresence} /> },
+    { title: '蜂窝网络', dataIndex: 'cellular', render: (_, item) => <CellularStatusView item={item} /> },
     { title: '射频', dataIndex: 'rfState', render: (_, item) => renderRF(item) },
   ]
 
@@ -194,6 +219,7 @@ export default function Modems() {
           { key: 'imei', label: 'IMEI', children: renderIMEI(item) },
           { key: 'state', label: '在线状态', children: <Tag color={item.state === 'online' ? 'green' : 'default'}>{item.state === 'online' ? '在线' : '离线'}</Tag> },
           { key: 'sim', label: 'SIM 卡', children: <SIMPresenceTag value={item.simPresence} /> },
+          { key: 'cellular', label: '蜂窝网络', children: <CellularStatusView item={item} /> },
           { key: 'rf', label: '射频', children: renderRF(item) },
         ]} />
       </Card>}

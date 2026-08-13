@@ -244,6 +244,7 @@ type ModemIdentity struct {
 	Manufacturer                 string `json:"manufacturer,omitempty"`
 	Model                        string `json:"model,omitempty"`
 	Revision                     string `json:"revision,omitempty"`
+	SerialNumber                 string `json:"serialNumber,omitempty"`
 	EquipmentIdentityFingerprint string `json:"equipmentIdentityFingerprint,omitempty"`
 }
 

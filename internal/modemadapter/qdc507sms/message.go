@@ -16,27 +16,33 @@ import (
 
 var ErrMultipartAmbiguous = errors.New("QDC507 multipart SMS is ambiguous")
 
+var (
+	errInboundPDUDecode         = errors.New("QDC507 inbound SMS PDU structure is invalid")
+	errInboundContentValidation = errors.New("QDC507 inbound SMS decoded content is invalid")
+)
+
 const maxMultipartAssemblySpan = 10 * time.Minute
 
 // InboundSegment binds an Agent message to the modem storage entry that must
 // be acknowledged. PDUDigest protects a newly reused storage index from being
 // deleted as though it still held the original message.
 type InboundSegment struct {
-	Index     int
-	PDUDigest [sha256.Size]byte
-	Deleted   bool
+	Index         int
+	PDUDigest     [sha256.Size]byte
+	DeleteStarted bool `json:",omitempty"`
+	Deleted       bool
 }
 
 // InboundRecord is the minimum state needed to keep list/read stable while a
 // multipart acknowledgement is partially complete.
 type InboundRecord struct {
-	MessageID    string
-	DeviceID     string
-	Sender       string
-	Body         string
-	ReceivedAt   time.Time
-	Segments     []InboundSegment
-	Acknowledged bool
+	MessageID       string
+	SubscriptionKey string
+	Sender          string
+	Body            string
+	ReceivedAt      time.Time
+	Segments        []InboundSegment
+	Acknowledged    bool
 }
 
 type decodedStoredPDU struct {
@@ -49,13 +55,13 @@ type multipartKey struct {
 	sender    string
 	encoding  smscodec.Encoding
 	dcs       byte
-	reference byte
+	reference uint16
 	total     int
 }
 
-func assembleInbound(deviceID string, stored []StoredPDU) ([]InboundRecord, error) {
-	if deviceID == "" {
-		return nil, errors.New("QDC507 inbound SMS requires a device id")
+func assembleInbound(subscriptionKey string, stored []StoredPDU) ([]InboundRecord, error) {
+	if !subscriptionKeyPattern.MatchString(subscriptionKey) {
+		return nil, errors.New("QDC507 inbound SMS requires a subscription key")
 	}
 	seenIndexes := make(map[int]struct{}, len(stored))
 	singles := make([]decodedStoredPDU, 0, len(stored))
@@ -67,12 +73,12 @@ func assembleInbound(deviceID string, stored []StoredPDU) ([]InboundRecord, erro
 			continue
 		}
 		if _, duplicate := seenIndexes[candidate.Index]; duplicate {
-			return nil, fmt.Errorf("duplicate QDC507 SMS storage index %d", candidate.Index)
+			return nil, fmt.Errorf("%w: duplicate QDC507 SMS storage index %d", errInboundPDUDecode, candidate.Index)
 		}
 		seenIndexes[candidate.Index] = struct{}{}
 		delivered, err := smscodec.DecodeDeliverPDU(candidate.PDU)
 		if err != nil {
-			return nil, fmt.Errorf("decode QDC507 SMS storage index %d: %w", candidate.Index, err)
+			return nil, fmt.Errorf("%w: decode QDC507 SMS storage index %d: %v", errInboundPDUDecode, candidate.Index, err)
 		}
 		decoded := decodedStoredPDU{stored: candidate, delivered: delivered, digest: sha256.Sum256(candidate.PDU)}
 		if delivered.Segment.Total == 1 {
@@ -88,9 +94,9 @@ func assembleInbound(deviceID string, stored []StoredPDU) ([]InboundRecord, erro
 
 	records := make([]InboundRecord, 0, len(singles)+len(groups))
 	for _, single := range singles {
-		record, err := inboundRecord(deviceID, []decodedStoredPDU{single})
+		record, err := inboundRecord(subscriptionKey, []decodedStoredPDU{single})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", errInboundContentValidation, err)
 		}
 		records = append(records, record)
 	}
@@ -117,9 +123,9 @@ func assembleInbound(deviceID string, stored []StoredPDU) ([]InboundRecord, erro
 		if ambiguous || latest.Sub(earliest) > maxMultipartAssemblySpan {
 			continue
 		}
-		record, err := inboundRecord(deviceID, group)
+		record, err := inboundRecord(subscriptionKey, group)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrMultipartAmbiguous, err)
+			return nil, fmt.Errorf("%w: %w: %v", ErrMultipartAmbiguous, errInboundContentValidation, err)
 		}
 		records = append(records, record)
 	}
@@ -132,7 +138,7 @@ func assembleInbound(deviceID string, stored []StoredPDU) ([]InboundRecord, erro
 	return records, nil
 }
 
-func inboundRecord(deviceID string, decoded []decodedStoredPDU) (InboundRecord, error) {
+func inboundRecord(subscriptionKey string, decoded []decodedStoredPDU) (InboundRecord, error) {
 	sort.Slice(decoded, func(left, right int) bool {
 		return decoded[left].delivered.Segment.Part < decoded[right].delivered.Segment.Part
 	})
@@ -154,14 +160,14 @@ func inboundRecord(deviceID string, decoded []decodedStoredPDU) (InboundRecord, 
 		return InboundRecord{}, errors.New("assembled QDC507 SMS is outside the Agent message limits")
 	}
 	return InboundRecord{
-		MessageID: stableInboundMessageID(deviceID, decoded), DeviceID: deviceID,
+		MessageID: stableInboundMessageID(subscriptionKey, decoded), SubscriptionKey: subscriptionKey,
 		Sender: decoded[0].delivered.Sender, Body: body, ReceivedAt: receivedAt.UTC(), Segments: storedSegments,
 	}, nil
 }
 
-func stableInboundMessageID(deviceID string, decoded []decodedStoredPDU) string {
+func stableInboundMessageID(subscriptionKey string, decoded []decodedStoredPDU) string {
 	digest := sha256.New()
-	writeHashField(digest, []byte(deviceID))
+	writeHashField(digest, []byte(subscriptionKey))
 	for _, part := range decoded {
 		var index [8]byte
 		binary.BigEndian.PutUint64(index[:], uint64(part.stored.Index))

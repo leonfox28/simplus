@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineapp "github.com/leonfox28/simplus/internal/application/line"
 	modemapp "github.com/leonfox28/simplus/internal/application/modem"
+	"github.com/leonfox28/simplus/internal/domain/hardware"
 	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
 	"github.com/leonfox28/simplus/internal/smscodec"
@@ -79,6 +81,39 @@ type failOnceInbox struct {
 	failed bool
 }
 
+type isolatingInbox struct {
+	failedLine   string
+	listed       []string
+	acknowledged []string
+}
+
+type noopInbox struct{}
+
+func (noopInbox) ListSMS(context.Context, InboxTarget) ([]InboxMessageReference, error) {
+	return nil, nil
+}
+func (noopInbox) ReadSMS(context.Context, InboxTarget, string) (InboxMessage, error) {
+	return InboxMessage{}, ErrInboundSync
+}
+func (noopInbox) AcknowledgeSMS(context.Context, InboxTarget, string, string) error {
+	return ErrInboundSync
+}
+
+func (inbox *isolatingInbox) ListSMS(_ context.Context, target InboxTarget) ([]InboxMessageReference, error) {
+	inbox.listed = append(inbox.listed, target.LineID)
+	if target.LineID == inbox.failedLine {
+		return nil, errors.New("injected line failure")
+	}
+	return []InboxMessageReference{{SourceMessageID: "source-message-0001", ReceivedAt: time.Unix(10, 0).UTC()}}, nil
+}
+func (*isolatingInbox) ReadSMS(_ context.Context, _ InboxTarget, messageID string) (InboxMessage, error) {
+	return InboxMessage{SourceMessageID: messageID, Sender: "10086", Body: "isolated", ReceivedAt: time.Unix(10, 0).UTC()}, nil
+}
+func (inbox *isolatingInbox) AcknowledgeSMS(_ context.Context, target InboxTarget, _, _ string) error {
+	inbox.acknowledged = append(inbox.acknowledged, target.LineID)
+	return nil
+}
+
 func (inbox *failOnceInbox) AcknowledgeSMS(ctx context.Context, target InboxTarget, messageID, operationID string) error {
 	if !inbox.failed {
 		inbox.failed = true
@@ -109,7 +144,11 @@ func newTestService(t *testing.T, sender Sender) (*Service, *sqlitestore.Set) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), sender)
+	var transports []SMSTransport
+	if sender != nil {
+		transports = append(transports, AgentNativeSMSTransport(sender, noopInbox{}))
+	}
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), transports...)
 	if err != nil {
 		stores.Close()
 		t.Fatal(err)
@@ -296,10 +335,11 @@ func TestPersistentLineResolvesSimulatorTransportWithoutLeakingRuntimeIdentity(t
 		t.Fatal(err)
 	}
 	var dispatched SendSMSCommand
-	service, err := NewService(ctx, stores, lines, senderFunc(func(_ context.Context, command SendSMSCommand) (SendSMSResult, error) {
+	sender := senderFunc(func(_ context.Context, command SendSMSCommand) (SendSMSResult, error) {
 		dispatched = command
 		return SendSMSResult{ProviderMessageID: "provider-stable-line"}, nil
-	}))
+	})
+	service, err := NewService(ctx, stores, lines, AgentNativeSMSTransport(sender, noopInbox{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,6 +352,32 @@ func TestPersistentLineResolvesSimulatorTransportWithoutLeakingRuntimeIdentity(t
 	if dispatched.LineID != created.ID || dispatched.PhysicalDeviceID != "simulator-device-1" ||
 		dispatched.ModemFunctionID != "simulator-function-1" || dispatched.LineID == "simulator-line-1" {
 		t.Fatalf("dispatched=%#v", dispatched)
+	}
+}
+
+func TestAgentRuntimeLineUsesPrivateFencesAndTransientAgentDeviceID(t *testing.T) {
+	equipment, subscription := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	line := inventory.Line{
+		ID: testManagedLineID1, PhysicalDeviceID: "agent-usb-synthetic", SubscriptionProfileID: "profile-synthetic",
+		Generation: 7,
+	}
+	topology := inventory.Topology{
+		Devices: []hardware.PhysicalDevice{{ID: line.PhysicalDeviceID, EquipmentIdentityFingerprint: equipment}},
+		SubscriptionProfiles: []inventory.SubscriptionProfile{{SubscriptionProfile: hardware.SubscriptionProfile{
+			ID: line.SubscriptionProfileID, State: hardware.ProfileActive, IdentityFingerprint: subscription,
+		}}},
+	}
+	target, err := resolveRuntimeLine(topology, line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := target.sendCommand(SendSMSCommand{})
+	inbox := target.inboxTarget()
+	if command.PhysicalDeviceID != "usb-synthetic" || inbox.PhysicalDeviceID != "usb-synthetic" ||
+		command.DeviceGeneration != 7 || command.ExpectedEquipmentFingerprint != equipment ||
+		command.ExpectedSubscriptionFingerprint != subscription || inbox.ExpectedEquipmentFingerprint != equipment ||
+		inbox.ExpectedSubscriptionFingerprint != subscription {
+		t.Fatalf("command=%#v inbox=%#v", command, inbox)
 	}
 }
 
@@ -432,17 +498,150 @@ func TestHostVoWiFiSMSRequiresOnlineTransport(t *testing.T) {
 		return SendSMSResult{ProviderMessageID: "provider-" + command.OperationID}, nil
 	}))
 	request := SendRequest{OperationID: "operation-vowifi-sms-001", LineID: testManagedLineID1, Destination: "13800138000", Body: "VoWiFi"}
-	service.UseHostVoWiFiTransport(messagingTransportAvailability(false))
-	if _, err := service.Send(context.Background(), request); !errors.Is(err, ErrLineUnavailable) {
+	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(false), service.transports[0].Sender, noopInbox{})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Send(context.Background(), request); !errors.Is(err, ErrTransportUnavailable) {
 		t.Fatalf("offline error=%v", err)
 	}
 	if calls != 0 {
 		t.Fatalf("offline transport calls=%d", calls)
 	}
-	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
+	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), service.transports[0].Sender, noopInbox{})); err != nil {
+		t.Fatal(err)
+	}
 	request.OperationID = "operation-vowifi-sms-002"
 	if result, err := service.Send(context.Background(), request); err != nil || result.Message.Status != sms.StatusSent {
 		t.Fatalf("online=%#v err=%v", result, err)
+	}
+}
+
+func TestHostVoWiFiAvailabilityCompletesOnlyHostBundleWithoutNameDispatch(t *testing.T) {
+	availability := messagingTransportAvailability(true)
+	native := AgentNativeSMSTransport(senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		return SendSMSResult{}, nil
+	}), noopInbox{})
+	host := HostVoWiFiSMSTransport(nil, native.Sender, noopInbox{})
+	updatedNative := native.UseHostVoWiFiAvailability(availability)
+	updatedHost := host.UseHostVoWiFiAvailability(availability)
+	if updatedNative.Availability != nil || updatedHost.Availability == nil {
+		t.Fatalf("native=%#v host=%#v", updatedNative, updatedHost)
+	}
+	// Display/name metadata is not the dispatch key.
+	host.Name = "renamed-display-metadata"
+	if updated := host.UseHostVoWiFiAvailability(availability); updated.Availability == nil {
+		t.Fatal("Host bundle completion depended on its name")
+	}
+}
+
+func TestPerLineTransportResolverRequiresOneEligibleTransportAndNeverFallsBack(t *testing.T) {
+	service, _ := newTestService(t, senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		return SendSMSResult{ProviderMessageID: "unused"}, nil
+	}))
+	nativeCalls, vowifiCalls := 0, 0
+	native := AgentNativeSMSTransport(senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		nativeCalls++
+		return SendSMSResult{ProviderMessageID: "native"}, nil
+	}), noopInbox{})
+	native.Availability = messagingTransportAvailability(false)
+	vowifi := HostVoWiFiSMSTransport(messagingTransportAvailability(true), senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		vowifiCalls++
+		return SendSMSResult{ProviderMessageID: "vowifi"}, nil
+	}), noopInbox{})
+	if err := service.UseTransports(native, vowifi); err != nil {
+		t.Fatal(err)
+	}
+	request := SendRequest{OperationID: "operation-resolver-0001", LineID: testManagedLineID1, Destination: "10086", Body: "test"}
+	if _, err := service.Send(t.Context(), request); !errors.Is(err, ErrTransportAmbiguous) {
+		t.Fatalf("ambiguous error = %v", err)
+	}
+	if nativeCalls != 0 || vowifiCalls != 0 {
+		t.Fatalf("ambiguous calls native=%d vowifi=%d", nativeCalls, vowifiCalls)
+	}
+
+	if err := service.UseTransports(native); err != nil {
+		t.Fatal(err)
+	}
+	request.OperationID = "operation-resolver-0002"
+	if _, err := service.Send(t.Context(), request); !errors.Is(err, ErrTransportUnavailable) {
+		t.Fatalf("selected unavailable error = %v", err)
+	}
+	if nativeCalls != 0 || vowifiCalls != 0 {
+		t.Fatalf("fallback calls native=%d vowifi=%d", nativeCalls, vowifiCalls)
+	}
+
+	if err := service.UseTransports(SMSTransport{Name: "none", Eligible: func(inventory.Line) bool { return false }, Sender: vowifi.Sender, Inbox: noopInbox{}}); err != nil {
+		t.Fatal(err)
+	}
+	request.OperationID = "operation-resolver-0003"
+	if _, err := service.Send(t.Context(), request); !errors.Is(err, ErrLineUnsupported) {
+		t.Fatalf("zero eligible error = %v", err)
+	}
+}
+
+func TestNewServiceRejectsIncompleteTransportBundles(t *testing.T) {
+	ctx := t.Context()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	_, err = NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), SMSTransport{
+		Name: "incomplete", Eligible: func(inventory.Line) bool { return true },
+		Sender: senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) { return SendSMSResult{}, nil }),
+	})
+	if err == nil {
+		t.Fatal("NewService accepted a transport without an inbox")
+	}
+}
+
+func TestInboundTransportFailureDoesNotStarveAnotherLine(t *testing.T) {
+	ctx := t.Context()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	inbox := &isolatingInbox{failedLine: testManagedLineID1}
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewMultiSimulator()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := AgentNativeSMSTransport(senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) { return SendSMSResult{}, nil }), inbox)
+	if err := service.UseTransports(transport); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.SyncInbound(ctx)
+	if !errors.Is(err, ErrInboundSync) || result.Persisted != 1 || len(inbox.listed) != 2 || len(inbox.acknowledged) != 1 || inbox.acknowledged[0] != testManagedLineID2 {
+		t.Fatalf("result=%#v listed=%#v acknowledged=%#v error=%v", result, inbox.listed, inbox.acknowledged, err)
+	}
+}
+
+func TestInboundRuntimeTargetFailureIsReportedWithoutStarvingAnotherLine(t *testing.T) {
+	ctx := t.Context()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	inbox := &isolatingInbox{}
+	transport := AgentNativeSMSTransport(
+		senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) { return SendSMSResult{}, nil }), inbox,
+	)
+	baseResolver := transport.resolveLine
+	transport.resolveLine = func(topology inventory.Topology, line inventory.Line) (runtimeLine, error) {
+		if line.ID == testManagedLineID1 {
+			return runtimeLine{}, errors.New("injected target failure")
+		}
+		return baseResolver(topology, line)
+	}
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewMultiSimulator()), transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.SyncInbound(ctx)
+	if !errors.Is(err, ErrInboundSync) || result.Persisted != 1 || len(inbox.listed) != 1 || inbox.listed[0] != testManagedLineID2 {
+		t.Fatalf("result=%#v listed=%#v error=%v", result, inbox.listed, err)
 	}
 }
 
@@ -518,6 +717,28 @@ func TestAgentGatewayPreservesUnknownSendOutcomeCode(t *testing.T) {
 	}
 }
 
+func TestAgentGatewayMapsMissingDeviceToStableStaleCode(t *testing.T) {
+	const instanceID = "01234567-89ab-cdef-0123-456789abcdef"
+	gateway, err := NewAgentSMSGateway(sendErrorSMSClient{err: &agentapi.ErrorResponse{
+		Code: "SMS_DEVICE_NOT_FOUND", Detail: "device unavailable",
+	}}, instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segments, err := smscodec.Encode("hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = gateway.SendSMS(t.Context(), SendSMSCommand{
+		OperationID: "operation-0123456789", PhysicalDeviceID: "usb-1-1",
+		Destination: "10086", Body: "hello", Segments: segments,
+	})
+	var mapped *TransportError
+	if !errors.As(err, &mapped) || mapped.Code != ErrorDeviceStale {
+		t.Fatalf("mapped transport error = %#v", err)
+	}
+}
+
 func TestServiceStartupDoesNotRedispatchInterruptedQueuedSMS(t *testing.T) {
 	ctx := context.Background()
 	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
@@ -535,10 +756,11 @@ func TestServiceStartupDoesNotRedispatchInterruptedQueuedSMS(t *testing.T) {
 		t.Fatal(err)
 	}
 	transportCalls := 0
-	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+	sender := senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
 		transportCalls++
 		return SendSMSResult{ProviderMessageID: "unexpected"}, nil
-	}))
+	})
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(sender, noopInbox{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +836,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	gateway, backend := newAgentGatewayForTest(t, inbound)
 	inbox := &failOnceInbox{Inbox: gateway}
-	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), gateway, inbox)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(gateway, inbox))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +858,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	if second.AlreadyKnown != 1 || second.Acknowledged != 1 {
 		t.Fatalf("second sync = %#v", second)
 	}
-	remaining, err := backend.ListSMS(ctx, inbound.DeviceID)
+	remaining, err := backend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +867,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 
 	restartedGateway, restartedBackend := newAgentGatewayForTest(t, inbound)
-	restarted, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), restartedGateway, restartedGateway)
+	restarted, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(restartedGateway, restartedGateway))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +878,7 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	if restartResult.Persisted != 0 || restartResult.AlreadyKnown != 1 || restartResult.Acknowledged != 1 {
 		t.Fatalf("restart sync = %#v", restartResult)
 	}
-	remaining, err = restartedBackend.ListSMS(ctx, inbound.DeviceID)
+	remaining, err = restartedBackend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,7 +906,7 @@ func TestHistoryReadDoesNotCompeteWithBackgroundInboundSync(t *testing.T) {
 		Body: "background owns synchronization", ReceivedAt: time.Date(2026, 8, 7, 15, 0, 0, 0, time.UTC),
 	}
 	gateway, _ := newAgentGatewayForTest(t, inbound)
-	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), gateway, gateway)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(gateway, gateway))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,14 +932,14 @@ func TestInboundSyncDoesNotAcknowledgePersistenceFailure(t *testing.T) {
 		Body: "must remain in Agent", ReceivedAt: time.Date(2026, 8, 3, 14, 0, 0, 0, time.UTC),
 	}
 	gateway, backend := newAgentGatewayForTest(t, inbound)
-	service, err := NewService(ctx, failingInboundRepository{Set: stores}, managedTestLines(inventory.NewSimulator()), gateway, gateway)
+	service, err := NewService(ctx, failingInboundRepository{Set: stores}, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(gateway, gateway))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SyncInbound(ctx); !errors.Is(err, ErrPersistence) {
 		t.Fatalf("SyncInbound() error = %v", err)
 	}
-	remaining, err := backend.ListSMS(ctx, inbound.DeviceID)
+	remaining, err := backend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
 		t.Fatal(err)
 	}

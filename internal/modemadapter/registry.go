@@ -106,6 +106,14 @@ type SIMIdentityAdapter interface {
 	ReadSIMIdentity(context.Context, attransport.Query, IdentityPseudonymizer) (SIMProfileIdentity, error)
 }
 
+// ModuleSerialAdapter owns a model-specific, fixed read-only serial-number
+// query. The result is bounded display metadata only: it does not replace the
+// equipment identity or USB descriptor serial used for fingerprints.
+type ModuleSerialAdapter interface {
+	Adapter
+	ReadModuleSerial(context.Context, attransport.Query) (string, error)
+}
+
 // RFControlAdapter describes model-specific runtime RF transitions. Commands
 // never cross the Agent API; they are fixed adapter facts consumed by the
 // bounded Agent driver and confirmed through a fresh read-only probe.
@@ -121,6 +129,14 @@ type RFControlAdapter interface {
 type EquipmentIdentityAdapter interface {
 	Adapter
 	ReadEquipmentIdentity(context.Context, attransport.Query) (string, error)
+}
+
+// SMSCallSafetyAdapter owns the fixed model-specific read-only check that
+// distinguishes call classes relevant to SMS dispatch. It returns known=false
+// for malformed or unavailable state so callers fail closed.
+type SMSCallSafetyAdapter interface {
+	Adapter
+	ReadSMSBlockingCallCount(context.Context, attransport.Query) (count int, known bool)
 }
 
 type Registry struct {

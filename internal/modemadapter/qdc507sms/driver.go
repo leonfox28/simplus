@@ -27,6 +27,7 @@ const (
 	maxTranscriptLines = 512
 	maxTranscriptLine  = 1024
 	maxStorageIndex    = 65535
+	maxStorageCount    = maxStorageIndex + 1
 )
 
 var (
@@ -37,9 +38,7 @@ var (
 	ErrSendOutcomeUnknown = errors.New("QDC507 SMS send outcome is unknown")
 )
 
-// Transport is deliberately transcript-shaped. A production implementation
-// may only be attached after HIL verifies this exact command flow. Returned
-// lines are trimmed AT result lines without command echo or the input prompt.
+// Returned lines are trimmed AT result lines without command echo or prompt.
 type Transport interface {
 	Command(context.Context, string, string, time.Duration) ([]string, error)
 	Prompt(context.Context, string, string, []byte, time.Duration) ([]string, error)
@@ -186,13 +185,30 @@ func (driver *Driver) Delete(ctx context.Context, device agentapi.DeviceReport, 
 }
 
 func (driver *Driver) Send(ctx context.Context, device agentapi.DeviceReport, destination, text string) (SendResult, error) {
+	if driver == nil {
+		return SendResult{}, ErrControlEndpoint
+	}
+	return dispatchPDU(ctx, driver.transport, device, destination, text)
+}
+
+func dispatchPDU(ctx context.Context, transport Transport, device agentapi.DeviceReport, destination, text string) (SendResult, error) {
+	return dispatchSMS(ctx, transport.Command, transport.Prompt, device, destination, text)
+}
+
+func dispatchSMS(
+	ctx context.Context,
+	command func(context.Context, string, string, time.Duration) ([]string, error),
+	prompt func(context.Context, string, string, []byte, time.Duration) ([]string, error),
+	device agentapi.DeviceReport,
+	destination, text string,
+) (SendResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	segments, err := smscodec.Encode(text)
 	if err != nil {
 		return SendResult{}, err
 	}
-	endpoint, err := driver.prepare(ctx, device)
+	endpoint, err := prepareSMSCommands(ctx, command, device)
 	if err != nil {
 		return SendResult{}, &SendFailure{TotalParts: len(segments), Cause: err}
 	}
@@ -200,14 +216,17 @@ func (driver *Driver) Send(ctx context.Context, device agentapi.DeviceReport, de
 	for index, segment := range segments {
 		messageReference := byte(index)
 		if segment.Total > 1 {
-			messageReference = segment.Reference + byte(index)
+			if segment.Reference > 255 {
+				return SendResult{}, errors.New("QDC507 outbound SMS concatenation reference is invalid")
+			}
+			messageReference = byte(segment.Reference) + byte(index)
 		}
 		pdu, err := smscodec.EncodeSubmitPDU(destination, segment, messageReference)
 		if err != nil {
 			return result, &SendFailure{CompletedParts: len(result.Parts), TotalParts: len(segments), Cause: err}
 		}
 		payload := append([]byte(pdu.Hex()), 0x1a)
-		lines, err := driver.transport.Prompt(ctx, endpoint, "AT+CMGS="+strconv.Itoa(pdu.TPDULength), payload, sendTimeout)
+		lines, err := prompt(ctx, endpoint, "AT+CMGS="+strconv.Itoa(pdu.TPDULength), payload, sendTimeout)
 		if err != nil {
 			if errors.Is(err, ErrPromptNotDispatched) {
 				return result, &SendFailure{CompletedParts: len(result.Parts), TotalParts: len(segments), Cause: transportFailure(err)}
@@ -229,14 +248,28 @@ func (driver *Driver) Send(ctx context.Context, device agentapi.DeviceReport, de
 }
 
 func (driver *Driver) prepare(ctx context.Context, device agentapi.DeviceReport) (string, error) {
-	if driver == nil || driver.transport == nil || device.Profile != agentapi.ProfileQDC507 {
+	if driver == nil {
 		return "", ErrControlEndpoint
 	}
-	endpoint, ok := (modemadapter.QDC507{}).Endpoint(device, modemadapter.EndpointPrimaryAT)
+	return prepareSMS(ctx, driver.transport, device)
+}
+
+func prepareSMS(ctx context.Context, transport Transport, device agentapi.DeviceReport) (string, error) {
+	if transport == nil || device.Profile != agentapi.ProfileQDC507 {
+		return "", ErrControlEndpoint
+	}
+	return prepareSMSCommands(ctx, transport.Command, device)
+}
+
+func prepareSMSCommands(ctx context.Context, command func(context.Context, string, string, time.Duration) ([]string, error), device agentapi.DeviceReport) (string, error) {
+	if command == nil || device.Profile != agentapi.ProfileQDC507 {
+		return "", ErrControlEndpoint
+	}
+	endpoint, ok := (modemadapter.QDC507SMS{}).Endpoint(device, modemadapter.EndpointPrimaryAT)
 	if !ok {
 		return "", ErrControlEndpoint
 	}
-	lines, err := driver.transport.Command(ctx, endpoint.Node, "AT+CMGF=0", modeTimeout)
+	lines, err := command(ctx, endpoint.Node, "AT+CMGF=0", modeTimeout)
 	if err != nil {
 		return "", transportFailure(err)
 	}
@@ -247,7 +280,40 @@ func (driver *Driver) prepare(ctx context.Context, device agentapi.DeviceReport)
 	if len(body) != 0 {
 		return "", invalidResponse(nil, false)
 	}
+	lines, err = command(ctx, endpoint.Node, `AT+CPMS="SM","SM","SM"`, modeTimeout)
+	if err != nil {
+		return "", transportFailure(err)
+	}
+	body, err = responseBody(lines, false)
+	if err != nil {
+		return "", err
+	}
+	if err := validateCPMSSelection(body); err != nil {
+		return "", err
+	}
 	return endpoint.Node, nil
+}
+
+// The Quectel write form returns exactly six counters:
+// used1,total1,used2,total2,used3,total3. The selected storage names appear
+// only in the read form, so accepting an empty body would turn a fixture
+// shortcut into protocol evidence.
+func validateCPMSSelection(lines []string) error {
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "+CPMS:") {
+		return invalidResponse(nil, false)
+	}
+	fields, err := csvFields(strings.TrimSpace(strings.TrimPrefix(lines[0], "+CPMS:")))
+	if err != nil || len(fields) != 6 {
+		return invalidResponse(nil, false)
+	}
+	for index := 0; index < len(fields); index += 2 {
+		used, usedErr := boundedInteger(fields[index], 0, maxStorageCount)
+		total, totalErr := boundedInteger(fields[index+1], 0, maxStorageCount)
+		if usedErr != nil || totalErr != nil || used > total {
+			return invalidResponse(errors.Join(usedErr, totalErr), false)
+		}
+	}
+	return nil
 }
 
 func responseBody(lines []string, afterDispatch bool) ([]string, error) {

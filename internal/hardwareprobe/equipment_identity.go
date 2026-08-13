@@ -18,9 +18,6 @@ func (scanner *Scanner) ReadEquipmentIdentity(ctx context.Context, snapshot agen
 	if scanner == nil {
 		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
-
 	var device *agentapi.DeviceReport
 	for index := range snapshot.Devices {
 		if snapshot.Devices[index].ID == deviceID {
@@ -31,6 +28,16 @@ func (scanner *Scanner) ReadEquipmentIdentity(ctx context.Context, snapshot agen
 	if device == nil {
 		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityDeviceStale
 	}
+	release, err := scanner.operationGate().Acquire(ctx, deviceID)
+	if err != nil {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnavailable
+	}
+	defer release()
+	_, current, err := scanner.currentSnapshotDevice(snapshot, deviceID)
+	if err != nil {
+		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityDeviceStale
+	}
+	device = &current
 	base, ok := scanner.adapterRegistry().ForProfile(device.Profile)
 	if !ok {
 		return agentapi.EquipmentIdentityObservation{}, agentapi.ErrEquipmentIdentityUnsupported

@@ -13,6 +13,38 @@ import (
 	"github.com/leonfox28/simplus/internal/domain/sms"
 )
 
+func TestListAllSMSBoundedUsesCompleteCardinality(t *testing.T) {
+	set, err := OpenSet(t.Context(), filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	if _, err := set.ListAllSMSBounded(t.Context(), 2); err == nil {
+		t.Fatal("empty complete message set was accepted")
+	}
+	createdAt := time.Date(2026, 8, 12, 1, 2, 3, 0, time.UTC)
+	for index := 1; index <= 2; index++ {
+		_, _, err := set.CreateOutboundSMS(t.Context(), sms.Message{
+			ID: fmt.Sprintf("msg_complete_%016d", index), OperationID: fmt.Sprintf("operation-complete-%08d", index),
+			Direction: sms.DirectionOutbound, LineID: "line_AQEBAQEBAQEBAQEBAQEBAQ",
+			RemoteAddress: "+12025550123", Body: fmt.Sprintf("body-%d", index), Status: sms.StatusQueued,
+			CreatedAt: createdAt.Add(time.Duration(index) * time.Second), UpdatedAt: createdAt.Add(time.Duration(index) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, listErr := set.ListAllSMSBounded(t.Context(), index)
+		if listErr != nil || len(messages) != index {
+			t.Fatalf("index=%d messages=%#v error=%v", index, messages, listErr)
+		}
+		if index == 2 {
+			if _, err := set.ListAllSMSBounded(t.Context(), 1); err == nil {
+				t.Fatal("over-bound complete message set was accepted")
+			}
+		}
+	}
+}
+
 func TestSMSKeysetPaginationIsStableAcrossTiesFiltersConcurrentInsertAndReopen(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "db")

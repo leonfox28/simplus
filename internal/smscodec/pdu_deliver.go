@@ -179,13 +179,14 @@ func decodeDeliverUserData(encoding Encoding, hasHeader bool, userDataLength int
 	segment := Segment{Encoding: encoding, Part: 1, Total: 1}
 	headerBytes := 0
 	if hasHeader {
-		if len(data) < 6 || data[0] != 0x05 || data[1] != 0x00 || data[2] != 0x03 || data[4] < 2 || data[5] < 1 || data[5] > data[4] {
-			return Segment{}, errors.New("SMS-DELIVER PDU uses an unsupported user-data header")
+		header, err := parseConcatenationHeader(data)
+		if err != nil {
+			return Segment{}, fmt.Errorf("SMS-DELIVER PDU uses an unsupported user-data header: %w", err)
 		}
-		headerBytes = 6
-		segment.Reference = data[3]
-		segment.Total = int(data[4])
-		segment.Part = int(data[5])
+		headerBytes = header.bytes
+		segment.Reference = header.reference
+		segment.Total = header.total
+		segment.Part = header.part
 	}
 
 	switch encoding {

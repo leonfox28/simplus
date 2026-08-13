@@ -114,11 +114,13 @@ with `errors.Is` or `errors.As`.
 Describe current assembly, not a planned universal platform:
 
 - `cmd/simplusd/main.go` wires calls and eUICC only for the Simulator backend.
-- The hardware backend can wire Host VoWiFi SMS through a typed supervisor,
-  but ordinary cellular SMS and real calls are not production transports.
-- `modemadapter.DefaultRegistry` does not expose the QDC507 candidate SMS
-  backend; `internal/modemadapter/registry_test.go` explicitly protects that
-  fail-closed default.
+- The hardware backend wires the HIL-accepted QDC507 native SMS transport and
+  can additionally wire Host VoWiFi SMS through a typed supervisor. Real calls
+  and other ordinary cellular SMS transports are not production capabilities.
+- `modemadapter.DefaultRegistry` remains SMS-closed, while the production Agent
+  explicitly composes the QDC507 transport, durable store, adapter, registry,
+  shared operation gate, and resolver. Registry and Agent tests protect both
+  sides of that boundary.
 
 Tests or UI fixtures must not be used to advertise a real hardware capability.
 Update `docs/compatibility.md` only when the stated evidence level is actually

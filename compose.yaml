@@ -25,6 +25,7 @@ services:
     environment:
       SIMPLUS_DEVICE_GID: ${SIMPLUS_DEVICE_GID:-20}
       SIMPLUS_AGENT_SOCKET: /run/simplus-agent/simplus-agent.sock
+      SIMPLUS_AGENT_STATE_ROOT: /var/lib/simplus-agent/qdc507-sms
     cap_drop: [ALL]
     cap_add: [CHOWN, SETGID, SETPCAP, SETUID]
     security_opt:

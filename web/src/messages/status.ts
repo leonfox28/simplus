@@ -20,6 +20,16 @@ export function smsStatusPresentation(message: Pick<SMSMessage, 'status' | 'erro
     case 'sent':
       return { color: 'green', label: '已发送' }
     case 'failed':
+      switch (message.errorCode) {
+        case 'SMS_SIM_NOT_READY': return { color: 'red', label: 'SIM 未就绪' }
+        case 'SMS_SIM_IDENTITY_CHANGED': return { color: 'red', label: 'SIM 已更换' }
+        case 'SMS_EQUIPMENT_IDENTITY_CHANGED': return { color: 'red', label: '模组身份已变化' }
+        case 'SMS_RF_OFF': return { color: 'red', label: '射频已关闭' }
+        case 'SMS_REGISTRATION_DENIED': return { color: 'red', label: '蜂窝注册被拒绝' }
+        case 'SMS_NOT_REGISTERED': return { color: 'red', label: '蜂窝网络未注册' }
+        case 'SMS_STATUS_UNAVAILABLE': return { color: 'red', label: '蜂窝状态不可用' }
+        case 'SMS_DEVICE_STALE': return { color: 'red', label: '模组连接已变化' }
+      }
       return { color: 'red', label: '发送失败' }
     case 'received':
       return { color: 'green', label: '已接收' }

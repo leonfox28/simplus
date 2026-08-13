@@ -29,12 +29,14 @@ systemd 安装仅作为过渡回退保留，不能与容器同时占用模组或
 - 安装时生成唯一管理员和随机初始密码；
 - Simulator 中完整验证短信、电话、数字音频和 eUICC Profile 管理交互；
 - QDC507 与 ML307A 的类型化硬件识别、固定端点角色和只读状态探测；
+- QDC507 经受控 HIL 验收并装配到 production Agent 的原生蜂窝短信收发；
 - Mihomo core、订阅、国家分组、共享 DoH、TPROXY 生命周期和 Zashboard 管理；
 - ML307A Host VoWiFi 的 SIM AKA、ePDG、Gm IPsec、IMS 注册、保活、提前刷新和服务恢复；
 - Docker Compose 下相互隔离的 control、agent、netd 镜像，以及类型化健康检查和持久化
   数据目录。
 
-真实硬件的普通蜂窝短信、电话、数字音频和 eUICC 切换仍未开放。默认 Agent 不提供任意
+除已验收的 QDC507 原生短信和 ML307A Host VoWiFi 短信外，真实硬件电话、数字音频、
+eUICC 切换及其他蜂窝通信仍未开放。默认 Agent 不提供任意
 AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独立实现、验证和明确授权。
 
 ## Docker Compose 部署

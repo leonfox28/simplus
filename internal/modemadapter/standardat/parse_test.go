@@ -125,6 +125,29 @@ func TestReadOnlyATParsingRedactsIdentityNumbersAndCallDestinations(t *testing.T
 	if got := ActiveCallCount(calls); got != 2 {
 		t.Fatalf("call count = %d", got)
 	}
+	for _, test := range []struct {
+		name  string
+		lines []string
+		count int
+		known bool
+	}{
+		{name: "none", lines: []string{"OK"}, known: true},
+		{name: "data only", lines: []string{`+CLCC: 1,0,0,1,0,"",129`, `+CLCC: 2,0,0,1,0,"",129`, "OK"}, known: true},
+		{name: "voice", lines: []string{`+CLCC: 1,0,0,0,0,"+12025550123",145`, "OK"}, count: 1, known: true},
+		{name: "mixed", lines: []string{`+CLCC: 1,0,0,1,0,"",129`, `+CLCC: 2,0,0,2,0,"",129`, "OK"}, count: 1, known: true},
+		{name: "malformed", lines: []string{`+CLCC: 1,0,0`, "OK"}},
+		{name: "unknown mode", lines: []string{`+CLCC: 1,0,0,3,0,"",129`, "OK"}},
+		{name: "unexpected", lines: []string{`+CREG: 0,1`, "OK"}},
+		{name: "terminal missing", lines: []string{`+CLCC: 1,0,0,1,0,"",129`}},
+		{name: "duplicate terminal", lines: []string{"OK", "OK"}},
+	} {
+		t.Run("SMS blocking "+test.name, func(t *testing.T) {
+			count, known := ActiveNonDataCallCount(test.lines)
+			if count != test.count || known != test.known {
+				t.Fatalf("count=%d known=%t", count, known)
+			}
+		})
+	}
 	if observation := SIMObservation([]string{"+CPIN: SIM PIN", "OK"}, nil); observation.State != agentapi.SIMStateLocked || observation.LockType != "pin1" {
 		t.Fatalf("SIM observation = %#v", observation)
 	}

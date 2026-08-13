@@ -79,6 +79,7 @@ func TestNormalizeAndValidateRejectsBrokenCrossReferencesAndDuplicateProfiles(t 
 			snapshot.Devices[0].USBProductID = "301Z"
 		}},
 		{name: "control character in USB serial", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].USBSerialNumber = "serial\nvalue" }},
+		{name: "control character in module serial", mutate: func(snapshot *Snapshot) { snapshot.Devices[0].ModemSerialNumber = "serial\nvalue" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

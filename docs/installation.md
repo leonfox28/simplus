@@ -87,6 +87,11 @@ docker compose logs bootstrap
 ./data/agent  -> /var/lib/simplus-agent
 ```
 
+Agent 在这个私有目录下固定使用 `qdc507-sms/` 保存 QDC507 v2 SMS recovery ledger；container
+entrypoint 通过 `--state-root /var/lib/simplus-agent/qdc507-sms` 传入，原生 unit 使用对应
+`StateDirectory` 子目录。缺失/不安全目录、schema 不兼容或 store/adapter 构造失败会阻止 Agent
+启动，不能退化为不带恢复状态的短信发送。该目录与 WAL/SHM 都是私有运行数据，不应复制进仓库。
+
 全新数据目录还会获得 netd 镜像中固定并校验过摘要的 Mihomo core。后续重建不会覆盖
 当前 core；管理员仍可在后台按既有的官方 release 校验流程升级。镜像所含 GPL-3.0
 许可证位于 `/usr/share/doc/simplus/mihomo-LICENSE`，相同 Simplus tag 的 GitHub
@@ -131,7 +136,7 @@ docker compose down
 
 - `app` 以 UID/GID 10001 运行，没有 Linux capability；
 - `agent` 没有网络，root entrypoint 只注册 option ID 和准备目录，随后降到 UID 10002
-  并清空 capability bounding set；
+  并清空 capability bounding set；QDC507 蜂窝短信由模组/SIM 承载，不给 Agent 容器增加宿主网络；
 - `netd` 是唯一网络 owner，使用普通 Docker bridge 和固定 capability，不使用
   `privileged` 或 host network；
 - per-Line netns、veth、nftables、TPROXY、strongSwan 与 XFRM 位于 netd 容器网络

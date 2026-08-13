@@ -100,8 +100,13 @@ func TestManagedLineOwnsStableBusinessIdentityAndResolvesRuntimeTarget(t *testin
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, simIdentity, capabilities)
 	views, err := service.List(t.Context())
 	if err != nil || len(views) != 1 || views[0].State != domain.StateReady ||
-		views[0].ManagedModemModel != "ML307A-DSLN" || views[0].ManagedModemSerialNumber != "ML307A-SERIAL-0001" {
+		views[0].ManagedModemModel != "ML307A-DSLN" || views[0].ManagedModemSerialNumber != "SYNTHETIC-MODULE-0001" {
 		t.Fatalf("moved-port views=%#v error=%v", views, err)
+	}
+	source.topology.Devices[0].ModemSerialNumber = ""
+	views, err = service.List(t.Context())
+	if err != nil || len(views) != 1 || views[0].ManagedModemSerialNumber != "ML307A-SERIAL-0001" {
+		t.Fatalf("USB serial fallback views=%#v error=%v", views, err)
 	}
 
 	source.topology = readyTopology("agent-usb-2-4", modemIdentity, strings.Repeat("c", 64), capabilities)
@@ -173,7 +178,7 @@ func readyTopology(deviceID, modemIdentity, simIdentity string, capabilities har
 		Generation: 1, ObservedAt: time.Unix(1, 0),
 		Devices: []hardware.PhysicalDevice{{
 			ID: deviceID, DisplayName: "ML307A", Transport: hardware.TransportUSB, State: hardware.DeviceAvailable,
-			ModemModel: "ML307A-DSLN", USBSerialNumber: "ML307A-SERIAL-0001",
+			ModemModel: "ML307A-DSLN", ModemSerialNumber: "SYNTHETIC-MODULE-0001", USBSerialNumber: "ML307A-SERIAL-0001",
 			EquipmentIdentityFingerprint: modemIdentity, Generation: 1,
 		}},
 		ModemFunctions: []hardware.ModemFunction{{

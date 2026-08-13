@@ -597,6 +597,39 @@ func (set *Set) CountSMS(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// ListAllSMSBounded returns the complete application message set from one
+// read-only SQLite snapshot, but only when its cardinality fits the caller's
+// small explicit bound. Recovery code uses this instead of a count/list pair
+// so a concurrent write cannot change which rows are correlated.
+func (set *Set) ListAllSMSBounded(ctx context.Context, maximum int) ([]sms.Message, error) {
+	if set == nil || set.Messages == nil || maximum < 1 || maximum > pagination.MaximumLimit {
+		return nil, fmt.Errorf("invalid bounded complete SMS request")
+	}
+	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin complete SMS snapshot: %w", err)
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&count); err != nil {
+		return nil, fmt.Errorf("count complete SMS snapshot: %w", err)
+	}
+	if count < 1 || count > maximum {
+		return nil, fmt.Errorf("complete SMS snapshot cardinality is outside its bound")
+	}
+	page, err := listSMSPage(ctx, tx, pagination.Request{Limit: maximum}, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("read complete SMS snapshot: %w", err)
+	}
+	if len(page.Items) != count || page.Next != nil {
+		return nil, fmt.Errorf("complete SMS snapshot is inconsistent")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit complete SMS snapshot: %w", err)
+	}
+	return page.Items, nil
+}
+
 func (set *Set) DeleteSMS(ctx context.Context, messageID string) error {
 	if set == nil || set.Messages == nil || messageID == "" {
 		return fmt.Errorf("invalid SMS deletion")

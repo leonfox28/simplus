@@ -193,6 +193,74 @@ export const zManagedModemSimPresence = z.enum([
     'unknown'
 ]);
 
+export const zCellularState = z.enum([
+    'registered-home',
+    'registered-roaming',
+    'searching',
+    'denied',
+    'not-registered',
+    'rf-off',
+    'sim-not-ready',
+    'unavailable',
+    'unknown'
+]);
+
+export const zCellularErrorCode = z.enum([
+    '',
+    'CELLULAR_STATUS_UNAVAILABLE',
+    'CELLULAR_SIM_NOT_READY',
+    'CELLULAR_RF_OFF',
+    'CELLULAR_REGISTRATION_DENIED',
+    'CELLULAR_NOT_REGISTERED'
+]);
+
+export const zCellularRegistrationDomain = z.enum([
+    'cs',
+    'packet',
+    'eps'
+]);
+
+export const zCellularRegistrationState = z.enum([
+    'not-registered',
+    'searching',
+    'denied',
+    'registered-home',
+    'registered-roaming',
+    'registered-sms-home',
+    'registered-sms-roaming',
+    'emergency-only',
+    'registered-home-csfb-not-preferred',
+    'registered-roaming-csfb-not-preferred',
+    'unknown'
+]);
+
+export const zCellularRegistration = z.object({
+    domain: zCellularRegistrationDomain,
+    state: zCellularRegistrationState
+});
+
+export const zCellularSignalState = z.enum([
+    'measured',
+    'unavailable',
+    'unknown'
+]);
+
+export const zManagedModemCellularStatus = z.object({
+    state: zCellularState,
+    errorCode: zCellularErrorCode,
+    registrations: z.tuple([
+        zCellularRegistration,
+        zCellularRegistration,
+        zCellularRegistration
+    ]),
+    operatorName: z.string().max(64),
+    operatorCode: z.string().regex(/^(?:[0-9]{3}-[0-9]{2,3})?$/),
+    rat: z.string().max(32),
+    signalState: zCellularSignalState,
+    signalRssiDbm: z.int().gte(-200).lte(0),
+    observedAt: z.string().max(64)
+});
+
 export const zModemSupportStatus = z.enum(['supported', 'not-ready']);
 
 export const zModemCandidateReadinessReason = z.enum([
@@ -213,6 +281,7 @@ export const zManagedModem = z.object({
     capabilities: zHardwareCapabilities,
     rfState: zManagedModemRfState,
     simPresence: zManagedModemSimPresence,
+    cellular: zManagedModemCellularStatus,
     addedAt: z.iso.datetime()
 });
 

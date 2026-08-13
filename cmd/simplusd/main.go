@@ -82,8 +82,7 @@ func run() int {
 	}
 	var inventoryService *inventory.Service
 	var hardwareAgentClient *agentapi.Client
-	var messageSender messaging.Sender
-	var messageInbox messaging.Inbox
+	var messageTransports []messaging.SMSTransport
 	mihomoSupervisorSocket := os.Getenv("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET")
 	var voWiFiSupervisor *vowifisupervisor.Client
 	switch cfg.Runtime.Backend {
@@ -102,8 +101,8 @@ func run() int {
 			_ = stores.Close()
 			return 2
 		}
-		messageSender = simulatorGateway
-		messageInbox = simulatorGateway
+		simulatorTransport := messaging.AgentNativeSMSTransport(simulatorGateway, simulatorGateway)
+		messageTransports = append(messageTransports, simulatorTransport)
 	case config.BackendHardware:
 		agentClient, clientErr := agentapi.NewClient(cfg.Runtime.AgentSocket)
 		if clientErr != nil {
@@ -126,6 +125,13 @@ func run() int {
 		}
 		inventoryService = inventory.New(inventory.NewAgentSource(agentClient))
 		hardwareAgentClient = agentClient
+		agentSMSGateway, gatewayErr := messaging.NewAgentSMSGateway(agentClient, hello.AgentInstanceID)
+		if gatewayErr != nil {
+			logger.Error("hardware Agent SMS gateway configuration rejected", "error", gatewayErr)
+			_ = stores.Close()
+			return 2
+		}
+		messageTransports = append(messageTransports, messaging.AgentNativeSMSTransport(agentSMSGateway, agentSMSGateway))
 		if mihomoSupervisorSocket != "" {
 			voWiFiSupervisor, clientErr = vowifisupervisor.NewClient(mihomoSupervisorSocket)
 			if clientErr != nil {
@@ -139,7 +145,7 @@ func run() int {
 				_ = stores.Close()
 				return 2
 			}
-			messageSender, messageInbox = voWiFiGateway, voWiFiGateway
+			messageTransports = append(messageTransports, messaging.HostVoWiFiSMSTransport(nil, voWiFiGateway, voWiFiGateway))
 		}
 	case config.BackendReplay:
 		logger.Error("replay backend is not implemented", "backend", cfg.Runtime.Backend)
@@ -166,11 +172,18 @@ func run() int {
 		_ = stores.Close()
 		return 1
 	}
-	messageService, err := messaging.NewService(ctx, stores, managedLineService, messageSender, messageInbox)
+	messageService, err := messaging.NewService(ctx, stores, managedLineService)
 	if err != nil {
 		logger.Error("messaging initialization failed", "error", err)
 		_ = stores.Close()
 		return 1
+	}
+	if cfg.Runtime.Backend == config.BackendSimulator {
+		if err := messageService.UseTransports(messageTransports...); err != nil {
+			logger.Error("Simulator SMS transport configuration failed", "error", err)
+			_ = stores.Close()
+			return 2
+		}
 	}
 	contactService, err := contacts.New(stores)
 	if err != nil {
@@ -246,7 +259,21 @@ func run() int {
 			}
 			realtimeHub.Publish([]realtime.Topic{realtime.TopicVoWiFi}, "")
 		})
-		messageService.UseHostVoWiFiTransport(voWiFiService)
+		for index := range messageTransports {
+			messageTransports[index] = messageTransports[index].UseHostVoWiFiAvailability(voWiFiService)
+		}
+		if err := messageService.UseTransports(messageTransports...); err != nil {
+			logger.Error("Host VoWiFi SMS transport configuration failed", "error", err)
+			_ = stores.Close()
+			return 2
+		}
+	}
+	if cfg.Runtime.Backend == config.BackendHardware && voWiFiService == nil {
+		if err := messageService.UseTransports(messageTransports...); err != nil {
+			logger.Error("hardware Agent SMS transport configuration failed", "error", err)
+			_ = stores.Close()
+			return 2
+		}
 	}
 	go runSMSSync(ctx, messageService, notificationService, realtimeHub, logger, 2*time.Second)
 	if hardwareAgentClient != nil {
@@ -541,17 +568,21 @@ func managementListenerNetwork(address string) string {
 }
 
 func requireTypedHardwareAgent(hello agentapi.Hello) error {
-	rfControl := false
+	rfControl, equipmentIdentity, sms := false, false, false
 	for _, feature := range hello.Features {
 		switch feature {
 		case agentapi.FeatureRFControl:
 			rfControl = true
-		case agentapi.FeatureSMS, agentapi.CommandRadioEnsureOff, "durable-command-outcomes":
+		case agentapi.FeatureEquipmentIdentityRead:
+			equipmentIdentity = true
+		case agentapi.FeatureSMS:
+			sms = true
+		case agentapi.CommandRadioEnsureOff, "durable-command-outcomes":
 			return fmt.Errorf("Agent advertises forbidden mutation feature %q", feature)
 		}
 	}
-	if !rfControl {
-		return errors.New("Agent does not advertise rf-control-v1")
+	if !rfControl || !equipmentIdentity || !sms {
+		return errors.New("Agent does not advertise the required RF, equipment identity, and SMS features")
 	}
 	return nil
 }

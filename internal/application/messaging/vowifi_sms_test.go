@@ -50,8 +50,9 @@ func TestVoWiFiAcceptedSubmissionIsFinalizedByLaterRPACK(t *testing.T) {
 		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
-	service.inbox, service.reports = gateway, gateway
-	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
+	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), gateway, gateway)); err != nil {
+		t.Fatal(err)
+	}
 	sent, err := service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_report_01", LineID: line.ID,
 		Destination: "+447700900456", Body: "accepted over IMS",
@@ -170,9 +171,9 @@ func TestVoWiFiGatewayAllowsHostLineWithoutCellularSMSCapability(t *testing.T) {
 		Capabilities: hardware.Capabilities{SMS: false, HostVoWiFiAuth: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
-	service.inbox = gateway
-	service.reports = gateway
-	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
+	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), gateway, gateway)); err != nil {
+		t.Fatal(err)
+	}
 	result, err := service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_012345", LineID: line.ID, Destination: "+447700900456", Body: "sent over IMS",
 	})
@@ -202,7 +203,9 @@ func TestVoWiFiGatewayRequiresHostVoWiFiCapability(t *testing.T) {
 		Capabilities: hardware.Capabilities{SMS: true},
 	}
 	service.lines = fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}
-	service.UseHostVoWiFiTransport(messagingTransportAvailability(true))
+	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), gateway, gateway)); err != nil {
+		t.Fatal(err)
+	}
 	_, err = service.Send(context.Background(), SendRequest{
 		OperationID: "operation_vowifi_012345", LineID: line.ID, Destination: "+447700900456", Body: "must not route",
 	})
@@ -238,11 +241,11 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstService, err := NewService(ctx, stores, fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}, firstGateway, firstGateway)
+	firstService, err := NewService(ctx, stores, fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}},
+		HostVoWiFiSMSTransport(messagingTransportAvailability(true), firstGateway, firstGateway))
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstService.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	result, err := firstService.SyncInbound(ctx)
 	if err != nil || result.Persisted != 0 || result.Acknowledged != 1 || len(first.ackRequests) != 1 {
 		t.Fatalf("first sync=%#v acks=%#v error=%v", result, first.ackRequests, err)
@@ -267,11 +270,11 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondService, err := NewService(ctx, stores, fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}}, secondGateway, secondGateway)
+	secondService, err := NewService(ctx, stores, fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}},
+		HostVoWiFiSMSTransport(messagingTransportAvailability(true), secondGateway, secondGateway))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondService.UseHostVoWiFiTransport(messagingTransportAvailability(true))
 	result, err = secondService.SyncInbound(ctx)
 	if err != nil || result.Persisted != 1 || result.Acknowledged != 1 || len(second.ackRequests) != 1 {
 		t.Fatalf("second sync=%#v acks=%#v error=%v", result, second.ackRequests, err)

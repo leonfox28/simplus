@@ -109,7 +109,12 @@ make dev-hardware
 make dev-hardware-lan
 ```
 
-硬件 backend 与 Simulator 使用不同数据目录，服务或协议不兼容时不会回退 Simulator。production Agent 不提供任意命令、短信、电话、eUICC mutation 或蜂窝数据入口；ML307A 运行时 RF 控制只接受布尔目标状态并要求读回确认。
+硬件 backend 与 Simulator 使用不同数据目录，服务或协议不兼容时不会回退 Simulator。production Agent 不提供任意命令、电话、eUICC mutation 或蜂窝数据入口；它只装配通过 HIL 的 QDC507 typed SMS，并以必需私有 state root 保留发送/ACK 恢复状态。运行时 RF 控制只接受布尔目标状态并要求读回确认。
+
+QDC507 原生短信的受控入站与独立确认出站 HIL 已通过，production Agent 装配同一 typed
+driver/store/router。一次性 QDC507 HIL runner 与 build tag 已从生产仓库删除；普通开发与
+故障排查只使用确定性的测试和已有 typed production 路径，不提供任意 AT/QMI、设备路径或
+重新执行历史实机流程的入口。新的真实短信、RF、SIM 或数据动作仍需单独设计和明确授权。
 
 ## 4. strongSwan 插件发布包
 

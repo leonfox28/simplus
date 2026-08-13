@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
@@ -23,6 +22,10 @@ type ModemQuerier interface {
 	Probe(context.Context, string, modemadapter.Adapter) agentapi.DeviceProbe
 }
 
+type smsCallSafetyQuerier interface {
+	ReadSMSBlockingCallCount(context.Context, string, modemadapter.SMSCallSafetyAdapter) (int, bool)
+}
+
 type IdentityPseudonymizer = modemadapter.IdentityPseudonymizer
 
 type Scanner struct {
@@ -32,21 +35,41 @@ type Scanner struct {
 	Adapters   *modemadapter.Registry
 	Identities IdentityPseudonymizer
 
-	controlMu sync.Mutex
+	Gate            *OperationGate
+	CurrentSnapshot func() agentapi.Snapshot
+}
+
+func (scanner *Scanner) readSMSBlockingCallCount(
+	ctx context.Context,
+	endpoint string,
+	adapter modemadapter.SMSCallSafetyAdapter,
+) (int, bool) {
+	querier, ok := scanner.Querier.(smsCallSafetyQuerier)
+	if !ok {
+		return 0, false
+	}
+	return querier.ReadSMSBlockingCallCount(ctx, endpoint, adapter)
 }
 
 func NewScanner() *Scanner {
 	return &Scanner{
 		USBRoot: "/sys/bus/usb/devices", DevRoot: "/dev", Querier: NewATQuerier(),
-		Adapters: modemadapter.DefaultRegistry(),
+		Adapters: modemadapter.DefaultRegistry(), Gate: NewOperationGate(),
 	}
 }
 
 func (scanner *Scanner) Scan(ctx context.Context) ([]agentapi.DeviceReport, error) {
-	if scanner == nil || !filepath.IsAbs(scanner.USBRoot) || !filepath.IsAbs(scanner.DevRoot) {
+	if scanner == nil {
 		return nil, errors.New("hardware scanner roots must be absolute")
 	}
-	entries, err := os.ReadDir(scanner.USBRoot)
+	return scanHardware(ctx, scanner.USBRoot, scanner.DevRoot, scanner.adapterRegistry(), scanner.Identities)
+}
+
+func scanHardware(ctx context.Context, usbRoot, devRoot string, registry *modemadapter.Registry, identities IdentityPseudonymizer) ([]agentapi.DeviceReport, error) {
+	if !filepath.IsAbs(usbRoot) || !filepath.IsAbs(devRoot) || registry == nil {
+		return nil, errors.New("hardware scanner roots and adapter registry are required")
+	}
+	entries, err := os.ReadDir(usbRoot)
 	if err != nil {
 		return nil, fmt.Errorf("read USB device tree: %w", err)
 	}
@@ -61,7 +84,7 @@ func (scanner *Scanner) Scan(ctx context.Context) ([]agentapi.DeviceReport, erro
 		if strings.Contains(name, ":") {
 			continue
 		}
-		path := filepath.Join(scanner.USBRoot, name)
+		path := filepath.Join(usbRoot, name)
 		vendorID, err := readAttribute(path, "idVendor", 16)
 		if err != nil {
 			continue
@@ -72,13 +95,13 @@ func (scanner *Scanner) Scan(ctx context.Context) ([]agentapi.DeviceReport, erro
 		}
 		manufacturer, _ := readAttribute(path, "manufacturer", 128)
 		product, _ := readAttribute(path, "product", 128)
-		adapter, ok := scanner.adapterRegistry().Match(modemadapter.USBDescriptor{
+		adapter, ok := registry.Match(modemadapter.USBDescriptor{
 			VendorID: vendorID, ProductID: productID, Manufacturer: manufacturer, Product: product,
 		})
 		if !ok {
 			continue
 		}
-		device, err := scanner.scanDevice(name, path, adapter, strings.ToLower(vendorID), strings.ToLower(productID), manufacturer, product)
+		device, err := scanDevice(usbRoot, devRoot, identities, name, path, adapter, strings.ToLower(vendorID), strings.ToLower(productID), manufacturer, product)
 		if err != nil {
 			return nil, fmt.Errorf("scan USB device %s: %w", name, err)
 		}
@@ -92,9 +115,80 @@ func (scanner *Scanner) Probe(ctx context.Context, snapshot agentapi.Snapshot, r
 	if scanner == nil {
 		return nil, errors.New("hardware scanner is unavailable")
 	}
-	scanner.controlMu.Lock()
-	defer scanner.controlMu.Unlock()
-	return scanner.probeLocked(ctx, snapshot, requested)
+	selected := make([]string, 0, len(snapshot.Devices))
+	requestedSet := make(map[string]bool, len(requested))
+	for _, id := range requested {
+		if requestedSet[id] {
+			return nil, fmt.Errorf("duplicate requested device %q", id)
+		}
+		requestedSet[id] = true
+	}
+	for _, device := range snapshot.Devices {
+		if len(requestedSet) == 0 || requestedSet[device.ID] {
+			selected = append(selected, device.ID)
+		}
+	}
+	if len(requestedSet) != 0 && len(selected) != len(requestedSet) {
+		return nil, errors.New("requested device is not present in snapshot")
+	}
+	results := make([]agentapi.DeviceProbe, 0, len(selected))
+	for _, id := range selected {
+		release, err := scanner.operationGate().Acquire(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		current, _, currentErr := scanner.currentSnapshotDevice(snapshot, id)
+		if currentErr != nil {
+			release()
+			return nil, currentErr
+		}
+		probes, probeErr := scanner.probeLocked(ctx, current, []string{id})
+		release()
+		if probeErr != nil {
+			return nil, probeErr
+		}
+		results = append(results, probes...)
+	}
+	return results, nil
+}
+
+// currentSnapshotDevice revalidates a queued operation against the monitor's
+// latest published device generation after the per-device gate is acquired.
+// Focused adapter fixtures may omit CurrentSnapshot and use their supplied
+// immutable snapshot directly.
+func (scanner *Scanner) currentSnapshotDevice(expected agentapi.Snapshot, deviceID string) (agentapi.Snapshot, agentapi.DeviceReport, error) {
+	var expectedDevice agentapi.DeviceReport
+	expectedFound := false
+	for _, device := range expected.Devices {
+		if device.ID == deviceID {
+			expectedDevice, expectedFound = device, true
+			break
+		}
+	}
+	if !expectedFound {
+		return agentapi.Snapshot{}, agentapi.DeviceReport{}, errors.New("requested device is not present in snapshot")
+	}
+	current := expected
+	if scanner != nil && scanner.CurrentSnapshot != nil {
+		current = scanner.CurrentSnapshot()
+	}
+	for _, device := range current.Devices {
+		if device.ID != deviceID {
+			continue
+		}
+		if device.Generation != expectedDevice.Generation || device.Profile != expectedDevice.Profile {
+			return agentapi.Snapshot{}, agentapi.DeviceReport{}, errors.New("requested device generation changed while queued")
+		}
+		return current, device, nil
+	}
+	return agentapi.Snapshot{}, agentapi.DeviceReport{}, errors.New("requested device disappeared while queued")
+}
+
+func (scanner *Scanner) operationGate() *OperationGate {
+	if scanner.Gate == nil {
+		scanner.Gate = NewOperationGate()
+	}
+	return scanner.Gate
 }
 
 func (scanner *Scanner) probeLocked(ctx context.Context, snapshot agentapi.Snapshot, requested []string) ([]agentapi.DeviceProbe, error) {
@@ -162,7 +256,7 @@ func (scanner *Scanner) probeLocked(ctx context.Context, snapshot agentapi.Snaps
 	return results, nil
 }
 
-func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapter, vendorID, productID, manufacturer, product string) (agentapi.DeviceReport, error) {
+func scanDevice(usbRoot, devRoot string, identities IdentityPseudonymizer, name, path string, adapter modemadapter.Adapter, vendorID, productID, manufacturer, product string) (agentapi.DeviceReport, error) {
 	bcdDevice, _ := readAttribute(path, "bcdDevice", 16)
 	serial, serialErr := readAttribute(path, "serial", 128)
 	serial = safeText(serial, 128)
@@ -171,15 +265,15 @@ func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapt
 		serial = ""
 	}
 	serialFingerprint := ""
-	if serialPresent && scanner.Identities != nil {
+	if serialPresent && identities != nil {
 		value := adapter.Profile() + "\x00" + vendorID + ":" + productID + "\x00" + serial
-		if fingerprint, fingerprintErr := scanner.Identities.Pseudonym("modem-usb-serial-v1", []byte(value)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
+		if fingerprint, fingerprintErr := identities.Pseudonym("modem-usb-serial-v1", []byte(value)); fingerprintErr == nil && fingerprintPattern.MatchString(fingerprint) {
 			serialFingerprint = fingerprint
 		}
 	}
 	configurationText, _ := readAttribute(path, "bConfigurationValue", 16)
 	configuration, _ := strconv.Atoi(configurationText)
-	interfaces, err := scanner.scanInterfaces(name, configuration)
+	interfaces, err := scanInterfaces(usbRoot, devRoot, name, configuration)
 	if err != nil {
 		return agentapi.DeviceReport{}, err
 	}
@@ -197,8 +291,8 @@ func (scanner *Scanner) scanDevice(name, path string, adapter modemadapter.Adapt
 	return device, nil
 }
 
-func (scanner *Scanner) scanInterfaces(deviceName string, configuration int) ([]agentapi.USBInterface, error) {
-	pattern := filepath.Join(scanner.USBRoot, deviceName+":*.*")
+func scanInterfaces(usbRoot, devRoot, deviceName string, configuration int) ([]agentapi.USBInterface, error) {
+	pattern := filepath.Join(usbRoot, deviceName+":*.*")
 	paths, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, err
@@ -221,7 +315,7 @@ func (scanner *Scanner) scanInterfaces(deviceName string, configuration int) ([]
 			Number: int(numberValue), Class: strings.ToLower(class), Subclass: strings.ToLower(subclass),
 			Protocol: strings.ToLower(protocol), Driver: driver,
 		}
-		usbInterface.Endpoints = scanner.scanInterfaceEndpoints(path, usbInterface.Number, driver)
+		usbInterface.Endpoints = scanInterfaceEndpoints(devRoot, path, usbInterface.Number, driver)
 		interfaces = append(interfaces, usbInterface)
 	}
 	sort.Slice(interfaces, func(left, right int) bool { return interfaces[left].Number < interfaces[right].Number })
@@ -229,7 +323,7 @@ func (scanner *Scanner) scanInterfaces(deviceName string, configuration int) ([]
 	return interfaces, nil
 }
 
-func (scanner *Scanner) scanInterfaceEndpoints(path string, interfaceNumber int, driver string) []agentapi.Endpoint {
+func scanInterfaceEndpoints(devRoot, path string, interfaceNumber int, driver string) []agentapi.Endpoint {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil
@@ -239,12 +333,12 @@ func (scanner *Scanner) scanInterfaceEndpoints(path string, interfaceNumber int,
 		name := entry.Name()
 		switch {
 		case strings.HasPrefix(name, "ttyUSB") || strings.HasPrefix(name, "ttyACM"):
-			endpoints = append(endpoints, agentapi.Endpoint{Kind: agentapi.EndpointTTY, InterfaceNumber: interfaceNumber, Driver: driver, Node: filepath.Join(scanner.DevRoot, name)})
+			endpoints = append(endpoints, agentapi.Endpoint{Kind: agentapi.EndpointTTY, InterfaceNumber: interfaceNumber, Driver: driver, Node: filepath.Join(devRoot, name)})
 		case name == "usbmisc":
 			children, _ := os.ReadDir(filepath.Join(path, name))
 			for _, child := range children {
 				if strings.HasPrefix(child.Name(), "cdc-wdm") {
-					endpoints = append(endpoints, agentapi.Endpoint{Kind: agentapi.EndpointQMI, InterfaceNumber: interfaceNumber, Driver: driver, Node: filepath.Join(scanner.DevRoot, child.Name())})
+					endpoints = append(endpoints, agentapi.Endpoint{Kind: agentapi.EndpointQMI, InterfaceNumber: interfaceNumber, Driver: driver, Node: filepath.Join(devRoot, child.Name())})
 				}
 			}
 		case name == "net":

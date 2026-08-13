@@ -85,7 +85,7 @@ func validSMSMessagePayload(message SMSMessage, expectedMessageID string) bool {
 	validBody := message.Total > 1 && message.Body == "" || message.Total == 1 && strings.TrimSpace(message.Body) != "" &&
 		utf8.ValidString(message.Body) && utf8.RuneCountInString(message.Body) <= 1600 && len(message.Body) <= 6400
 	segment := smscodec.Segment{
-		Encoding: smscodec.Encoding(message.Encoding), Reference: byte(message.ConcatenationReference),
+		Encoding: smscodec.Encoding(message.Encoding), Reference: uint16(message.ConcatenationReference),
 		Part: message.Part, Total: message.Total, UnitCount: message.UnitCount, UserData: message.UserData,
 	}
 	decoded, decodeErr := smscodec.DecodeSegment(segment)

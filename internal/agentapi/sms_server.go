@@ -19,7 +19,7 @@ func registerSMSHandlers(mux *http.ServeMux, monitor *Monitor, backend SMSBacken
 			writeSMSError(w, r, logger, err, "SMS list rejected")
 			return
 		}
-		messages, err := backend.ListSMS(r.Context(), request.DeviceID)
+		messages, err := backend.ListSMS(r.Context(), request)
 		if err != nil {
 			writeSMSError(w, r, logger, err, "SMS list failed")
 			return
@@ -43,7 +43,7 @@ func registerSMSHandlers(mux *http.ServeMux, monitor *Monitor, backend SMSBacken
 			writeSMSError(w, r, logger, err, "SMS read rejected")
 			return
 		}
-		message, err := backend.ReadSMS(r.Context(), request.DeviceID, request.MessageID)
+		message, err := backend.ReadSMS(r.Context(), request)
 		if err != nil {
 			writeSMSError(w, r, logger, err, "SMS read failed")
 			return
@@ -156,6 +156,30 @@ func writeSMSError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, 
 	case errors.Is(err, ErrSMSOutcomeUnknown):
 		status = http.StatusConflict
 		response = ErrorResponse{Code: "SMS_SEND_OUTCOME_UNKNOWN", Detail: "SMS may have been submitted; do not resend it automatically"}
+	case errors.Is(err, ErrSMSDeviceStale):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_DEVICE_STALE", Detail: "SMS device generation changed", Retryable: true}
+	case errors.Is(err, ErrSMSEquipmentIdentity):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_EQUIPMENT_IDENTITY_CHANGED", Detail: "SMS equipment identity changed"}
+	case errors.Is(err, ErrSMSSIMNotReady):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_SIM_NOT_READY", Detail: "SIM is not ready"}
+	case errors.Is(err, ErrSMSSIMIdentity):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_SIM_IDENTITY_CHANGED", Detail: "SIM identity changed"}
+	case errors.Is(err, ErrSMSRFOff):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_RF_OFF", Detail: "RF is off"}
+	case errors.Is(err, ErrSMSRegistrationDenied):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_REGISTRATION_DENIED", Detail: "cellular registration was denied"}
+	case errors.Is(err, ErrSMSNotRegistered):
+		status = http.StatusConflict
+		response = ErrorResponse{Code: "SMS_NOT_REGISTERED", Detail: "cellular service is not registered", Retryable: true}
+	case errors.Is(err, ErrSMSStatusUnavailable):
+		status = http.StatusServiceUnavailable
+		response = ErrorResponse{Code: "SMS_STATUS_UNAVAILABLE", Detail: "cellular status is unavailable", Retryable: true}
 	default:
 		logger.WarnContext(r.Context(), message, "error", err)
 	}

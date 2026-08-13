@@ -24,6 +24,26 @@ func TestHardwareWriteFlagsAreNotAccepted(t *testing.T) {
 	}
 }
 
+func TestProductionRuntimeRequiresIdentityAndStateRootWithoutEnableFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	status := run([]string{"--identity-key", "/synthetic/key"}, &stdout, &stderr)
+	if status != 2 || !strings.Contains(stderr.String(), "state-root") {
+		t.Fatalf("missing state root status=%d stderr=%q", status, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	status = run([]string{"--state-root", "/synthetic/state"}, &stdout, &stderr)
+	if status != 2 || !strings.Contains(stderr.String(), "identity-key") {
+		t.Fatalf("missing identity key status=%d stderr=%q", status, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	status = run([]string{"--identity-key", "/synthetic/key", "--state-root", "relative"}, &stdout, &stderr)
+	if status != 2 || !strings.Contains(stderr.String(), "absolute non-root") {
+		t.Fatalf("relative state root status=%d stderr=%q", status, stderr.String())
+	}
+}
+
 func TestRegisterOptionDriverUsesOnlyRegistryIDs(t *testing.T) {
 	registry := modemadapter.DefaultRegistry()
 	var paths []string

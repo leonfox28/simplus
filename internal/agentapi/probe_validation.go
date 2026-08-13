@@ -58,7 +58,7 @@ func validateDeviceProbe(device DeviceProbe) error {
 		return errors.New("equipment identity must be an instance-scoped fingerprint")
 	}
 	if !validOptionalProbeText(device.Identity.Manufacturer, 128) || !validOptionalProbeText(device.Identity.Model, 128) ||
-		!validOptionalProbeText(device.Identity.Revision, 128) {
+		!validOptionalProbeText(device.Identity.Revision, 128) || !validOptionalProbeText(device.Identity.SerialNumber, 128) {
 		return errors.New("modem identity text is invalid")
 	}
 	if !oneOf(device.SIM.State, SIMStatePresent, SIMStateAbsent, SIMStateLocked, SIMStateUnknown) {

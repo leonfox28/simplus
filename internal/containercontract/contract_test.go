@@ -97,6 +97,9 @@ func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 	if agent.Environment["SIMPLUS_AGENT_SOCKET"] != "/run/simplus-agent/simplus-agent.sock" {
 		t.Fatalf("Agent CLI socket environment = %#v", agent.Environment)
 	}
+	if agent.Environment["SIMPLUS_AGENT_STATE_ROOT"] != "/var/lib/simplus-agent/qdc507-sms" {
+		t.Fatalf("Agent SMS state root environment = %#v", agent.Environment)
+	}
 	if !reflect.DeepEqual(agent.DeviceCgroupRules, []string{"c 188:* rw"}) {
 		t.Fatalf("Agent device cgroup rules = %#v", agent.DeviceCgroupRules)
 	}
@@ -248,6 +251,14 @@ func TestAgentEntrypointInitializesRuntimeVolumeWithoutFowner(t *testing.T) {
 	agentOwner := strings.Index(text, "chown 10002:10001 /run/simplus-agent")
 	if rootOwner < 0 || mode < 0 || agentOwner < 0 || !(rootOwner < mode && mode < agentOwner) {
 		t.Fatal("Agent runtime initialization must temporarily restore root ownership before chmod and final handoff")
+	}
+	for _, required := range []string{
+		"--state-root /var/lib/simplus-agent/qdc507-sms",
+		"--identity-key /var/lib/simplus-agent/.identity-key-v1",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("Agent entrypoint is missing production state contract %q", required)
+		}
 	}
 	compose := readCompose(t)
 	if contains(compose.Services["agent"].CapAdd, "FOWNER") {

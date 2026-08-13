@@ -26,16 +26,16 @@ var (
 // readML307AHomeOperator returns best-effort metadata for the active profile.
 // EF_SPN is the human-facing provider label. MCC/MNC is derived locally from
 // IMSI plus EF_AD and only the bounded PLMN code leaves this function.
-func readML307AHomeOperator(ctx context.Context, query attransport.Query) (string, string) {
+func readSIMHomeOperator(ctx context.Context, query attransport.Query) (string, string) {
 	if query == nil {
 		return "", ""
 	}
-	name := readML307AServiceProviderName(ctx, query)
-	code := readML307AHomeOperatorCode(ctx, query)
+	name := readSIMServiceProviderName(ctx, query)
+	code := readSIMHomeOperatorCode(ctx, query)
 	return name, code
 }
 
-func readML307AServiceProviderName(ctx context.Context, query attransport.Query) string {
+func readSIMServiceProviderName(ctx context.Context, query attransport.Query) string {
 	command := fmt.Sprintf("AT+CRSM=176,%d,0,0,17", usimServiceProviderNameFileID)
 	lines, err := query(ctx, command, 3*time.Second)
 	if err != nil || !attransport.HasTerminalOK(lines) {
@@ -54,7 +54,7 @@ func readML307AServiceProviderName(ctx context.Context, query attransport.Query)
 	return normalizeSIMOperatorName(decodeSIMAlphaIdentifier(data[1:]))
 }
 
-func readML307AHomeOperatorCode(ctx context.Context, query attransport.Query) string {
+func readSIMHomeOperatorCode(ctx context.Context, query attransport.Query) string {
 	lines, err := query(ctx, "AT+CIMI", 2*time.Second)
 	if err != nil {
 		return ""
@@ -63,11 +63,17 @@ func readML307AHomeOperatorCode(ctx context.Context, query attransport.Query) st
 	if imsi == "" {
 		return ""
 	}
-	mncLength, err := readML307AMNCLength(ctx, query)
+	mncLength, err := readSIMMNCLength(ctx, query)
 	if err != nil || len(imsi) < 3+mncLength {
 		return ""
 	}
 	return imsi[:3] + "-" + imsi[3:3+mncLength]
+}
+
+// Kept as a compatibility seam for the SIM AKA implementation and its focused
+// tests. Operator metadata itself is model-neutral and is also used by QDC507.
+func readML307AHomeOperator(ctx context.Context, query attransport.Query) (string, string) {
+	return readSIMHomeOperator(ctx, query)
 }
 
 func decodeSIMAlphaIdentifier(data []byte) string {

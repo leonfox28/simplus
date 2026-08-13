@@ -83,7 +83,7 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 	source := &topologySource{topology: inventory.Topology{
 		Devices: []hardware.PhysicalDevice{{
 			ID: "agent-usb-1-3", DisplayName: "China Mobile IoT ML307A", Transport: hardware.TransportUSB,
-			ModemModel: "ML307A",
+			ModemModel: "ML307A", ModemSerialNumber: "SYNTHETIC-MODULE-0001",
 			USBAddress: "1-3", USBVendorID: "2ecc", USBProductID: "3012",
 			USBSerialNumber: "ML307A-SERIAL-0001",
 			State:           hardware.DeviceAvailable, EquipmentIdentityFingerprint: equipmentIdentity, USBSerialFingerprint: usbSerialIdentity,
@@ -123,7 +123,7 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 		t.Fatal(err)
 	}
 	if added.ID != "modem_AQEBAQEBAQEBAQEBAQEBAQ" || added.State != domain.StateOnline || added.RFState != domain.RFStateUnknown ||
-		added.Model != "ML307A" || added.SerialNumber != "ML307A-SERIAL-0001" || added.SIMPresence != domain.SIMPresencePresent || added.AddedAt != now {
+		added.Model != "ML307A" || added.SerialNumber != "SYNTHETIC-MODULE-0001" || added.SIMPresence != domain.SIMPresencePresent || added.AddedAt != now {
 		t.Fatalf("added=%#v", added)
 	}
 	if len(repository.records) != 1 || repository.records[0].EquipmentIdentityFingerprint != equipmentIdentity ||
@@ -140,11 +140,13 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 
 	views, err := service.List(t.Context())
 	if err != nil || len(views) != 1 || views[0].State != domain.StateOnline || views[0].RFState != domain.RFStateOff ||
-		views[0].Model != "ML307A" || views[0].SerialNumber != "ML307A-SERIAL-0001" || views[0].SIMPresence != domain.SIMPresencePresent || rf.hardwareID != "agent-usb-1-3" {
+		views[0].Model != "ML307A" || views[0].SerialNumber != "SYNTHETIC-MODULE-0001" || views[0].SIMPresence != domain.SIMPresencePresent || rf.hardwareID != "agent-usb-1-3" {
 		t.Fatalf("online views=%#v error=%v", views, err)
 	}
 	changed, err := service.SetRFState(t.Context(), added.ID, true)
-	if err != nil || changed.RFState != domain.RFStateOn || !rf.enabled || rf.hardwareID != "agent-usb-1-3" {
+	if err != nil || changed.RFState != domain.RFStateOn || changed.Cellular.State != domain.CellularUnavailable ||
+		changed.Cellular.ErrorCode != "CELLULAR_STATUS_UNAVAILABLE" || len(changed.Cellular.Registrations) != 3 ||
+		!rf.enabled || rf.hardwareID != "agent-usb-1-3" {
 		t.Fatalf("RF change=%#v controller=%#v error=%v", changed, rf, err)
 	}
 	imei, err := service.ReadEquipmentIdentity(t.Context(), added.ID)
@@ -157,6 +159,11 @@ func TestManagedModemAddSeparatesCandidatesFromPersistentConfiguration(t *testin
 	views, err = service.List(t.Context())
 	if err != nil || len(views) != 1 || views[0].State != domain.StateOnline || rf.hardwareID != "agent-usb-2-4" {
 		t.Fatalf("moved-port views=%#v controller=%#v error=%v", views, rf, err)
+	}
+	source.topology.Devices[0].ModemSerialNumber = ""
+	views, err = service.List(t.Context())
+	if err != nil || len(views) != 1 || views[0].SerialNumber != "ML307A-SERIAL-0001" {
+		t.Fatalf("USB serial fallback views=%#v error=%v", views, err)
 	}
 	source.topology.SIMSlots[0].Presence = hardware.SlotAbsent
 	views, err = service.List(t.Context())

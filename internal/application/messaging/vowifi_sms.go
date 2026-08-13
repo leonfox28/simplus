@@ -58,7 +58,7 @@ func (gateway *VoWiFiSMSGateway) ReadSMS(ctx context.Context, target InboxTarget
 		return InboxMessage{}, fmt.Errorf("read Host VoWiFi SMS: %w", err)
 	}
 	segment := &smscodec.Segment{
-		Encoding: smscodec.Encoding(message.Encoding), Reference: byte(message.ConcatenationReference),
+		Encoding: smscodec.Encoding(message.Encoding), Reference: uint16(message.ConcatenationReference),
 		Part: message.Part, Total: message.Total, UnitCount: message.UnitCount,
 		UserData: append([]byte(nil), message.UserData...),
 	}

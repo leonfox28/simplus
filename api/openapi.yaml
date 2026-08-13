@@ -2132,6 +2132,46 @@ components:
     ManagedModemSIMPresence:
       type: string
       enum: [present, absent, unknown]
+    CellularState:
+      type: string
+      enum: [registered-home, registered-roaming, searching, denied, not-registered, rf-off, sim-not-ready, unavailable, unknown]
+    CellularErrorCode:
+      type: string
+      enum: ["", CELLULAR_STATUS_UNAVAILABLE, CELLULAR_SIM_NOT_READY, CELLULAR_RF_OFF, CELLULAR_REGISTRATION_DENIED, CELLULAR_NOT_REGISTERED]
+    CellularRegistrationDomain:
+      type: string
+      enum: [cs, packet, eps]
+    CellularRegistrationState:
+      type: string
+      enum: [not-registered, searching, denied, registered-home, registered-roaming, registered-sms-home, registered-sms-roaming, emergency-only, registered-home-csfb-not-preferred, registered-roaming-csfb-not-preferred, unknown]
+    CellularRegistration:
+      type: object
+      additionalProperties: false
+      required: [domain, state]
+      properties:
+        domain: { $ref: "#/components/schemas/CellularRegistrationDomain" }
+        state: { $ref: "#/components/schemas/CellularRegistrationState" }
+    CellularSignalState:
+      type: string
+      enum: [measured, unavailable, unknown]
+    ManagedModemCellularStatus:
+      type: object
+      additionalProperties: false
+      required: [state, errorCode, registrations, operatorName, operatorCode, rat, signalState, signalRssiDbm, observedAt]
+      properties:
+        state: { $ref: "#/components/schemas/CellularState" }
+        errorCode: { $ref: "#/components/schemas/CellularErrorCode" }
+        registrations:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: "#/components/schemas/CellularRegistration" }
+        operatorName: { type: string, maxLength: 64 }
+        operatorCode: { type: string, pattern: "^(?:[0-9]{3}-[0-9]{2,3})?$" }
+        rat: { type: string, maxLength: 32 }
+        signalState: { $ref: "#/components/schemas/CellularSignalState" }
+        signalRssiDbm: { type: integer, minimum: -200, maximum: 0 }
+        observedAt: { type: string, maxLength: 64 }
     ModemSupportStatus:
       type: string
       enum: [supported, not-ready]
@@ -2141,17 +2181,18 @@ components:
     ManagedModem:
       type: object
       additionalProperties: false
-      required: [id, displayName, model, serialNumber, transport, state, capabilities, rfState, simPresence, addedAt]
+      required: [id, displayName, model, serialNumber, transport, state, capabilities, rfState, simPresence, cellular, addedAt]
       properties:
         id: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         displayName: { type: string, minLength: 1, maxLength: 120 }
         model: { type: string, maxLength: 128 }
-        serialNumber: { type: string, maxLength: 128 }
+        serialNumber: { type: string, maxLength: 128, description: "Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable" }
         transport: { $ref: "#/components/schemas/DeviceTransport" }
         state: { $ref: "#/components/schemas/ManagedModemState" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
         rfState: { $ref: "#/components/schemas/ManagedModemRFState" }
         simPresence: { $ref: "#/components/schemas/ManagedModemSIMPresence" }
+        cellular: { $ref: "#/components/schemas/ManagedModemCellularStatus" }
         addedAt: { type: string, format: date-time }
     ManagedModemEquipmentIdentity:
       type: object
@@ -2181,7 +2222,7 @@ components:
         managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
         managedModemModel: { type: string, maxLength: 128, description: Current bounded AT model result; empty when unavailable and displayed as read failure by the Web UI }
-        managedModemSerialNumber: { type: string, maxLength: 128, description: Current bounded USB Serial; empty when unavailable and displayed as read failure by the Web UI }
+        managedModemSerialNumber: { type: string, maxLength: 128, description: "Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable" }
         subscriptionDisplayHint: { type: string, minLength: 1, maxLength: 64 }
         state: { $ref: "#/components/schemas/ManagedLineState" }
         capabilities: { $ref: "#/components/schemas/HardwareCapabilities" }
@@ -2201,7 +2242,7 @@ components:
         managedModemId: { type: string, pattern: "^modem_[A-Za-z0-9_-]{22}$" }
         managedModemDisplayName: { type: string, minLength: 1, maxLength: 120 }
         managedModemModel: { type: string, maxLength: 128 }
-        managedModemSerialNumber: { type: string, maxLength: 128 }
+        managedModemSerialNumber: { type: string, maxLength: 128, description: "Current bounded module serial when observed, otherwise the USB descriptor serial; empty when unavailable" }
         subscriptionDisplayHint: { type: string, maxLength: 64 }
         homeOperatorName: { type: string, maxLength: 64, description: Bounded EF_SPN name for the active profile; empty when unavailable }
         homeOperatorCode: { type: string, pattern: "^$|^[0-9]{3}-[0-9]{2,3}$", description: Home MCC-MNC derived inside the Agent without exposing IMSI }

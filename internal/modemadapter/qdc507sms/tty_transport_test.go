@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -125,6 +126,114 @@ func TestTTYTransportWaitsForPromptBeforeDispatchingPayload(t *testing.T) {
 	}
 	if len(session.writes) != 2 || !bytes.Equal(session.writes[0], []byte("AT+CMGS=19\r")) || !bytes.Equal(session.writes[1], payload) {
 		t.Fatalf("writes = %q", session.writes)
+	}
+}
+
+func TestTTYTransportFiltersOneExactSubmitPayloadEcho(t *testing.T) {
+	payloadText := "0001000D91683108108300F0000005E8329BFD06"
+	payload := append([]byte(payloadText), 0x1a)
+	for name, echo := range map[string]string{
+		"without control-z": payloadText,
+		"with control-z":    payloadText + string(rune(0x1a)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			session := &scriptedSerialSession{reads: []serialRead{
+				{data: []byte("\r\n> ")},
+				{data: []byte("\r\n" + echo + "\r\n+CMGS: 42\r\nOK\r\n")},
+			}}
+			lines, err := fixtureTTYTransport(t, session).Prompt(t.Context(), "/dev/ttyUSB2", "AT+CMGS=19", payload, sendTimeout)
+			if err != nil || !reflect.DeepEqual(lines, []string{"+CMGS: 42", "OK"}) {
+				t.Fatalf("lines=%#v error=%v", lines, err)
+			}
+		})
+	}
+}
+
+func TestTTYTransportDoesNotHideUnexpectedOrDuplicateSubmitPayloadLines(t *testing.T) {
+	payloadText := "0001000D91683108108300F0000005E8329BFD06"
+	payload := append([]byte(payloadText), 0x1a)
+	for name, response := range map[string]string{
+		"different hex":    "0001000D91683108108300F0000005E8329BFD07\r\n+CMGS: 42\r\nOK\r\n",
+		"duplicate echo":   payloadText + "\r\n" + payloadText + "\r\n+CMGS: 42\r\nOK\r\n",
+		"unsolicited line": payloadText + "\r\n+PRIVATE-URC: bounded\r\n+CMGS: 42\r\nOK\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			session := &scriptedSerialSession{reads: []serialRead{{data: []byte("\r\n> ")}, {data: []byte("\r\n" + response)}}}
+			lines, err := fixtureTTYTransport(t, session).Prompt(t.Context(), "/dev/ttyUSB2", "AT+CMGS=19", payload, sendTimeout)
+			if err != nil || len(lines) != 3 || lines[1] != "+CMGS: 42" || lines[2] != "OK" {
+				t.Fatalf("lines=%#v error=%v", lines, err)
+			}
+			if lines[0] == payloadText && name != "duplicate echo" {
+				t.Fatalf("unexpected line was hidden as a payload echo: %#v", lines)
+			}
+		})
+	}
+}
+
+func TestDriverConfirmsSubmitWhenTTYEchoesExactPayload(t *testing.T) {
+	payloadText := "0001000D91683108108300F0000005E8329BFD06"
+	sessions := []*scriptedSerialSession{
+		{reads: []serialRead{{data: []byte("AT+CMGF=0\r\nOK\r\n")}}},
+		{reads: []serialRead{{data: []byte("AT+CPMS=\"SM\",\"SM\",\"SM\"\r\n+CPMS: 0,10,0,10,0,10\r\nOK\r\n")}}},
+		{reads: []serialRead{
+			{data: []byte("AT+CMGS=19\r\n\r\n> ")},
+			{data: []byte("\r\n" + payloadText + string(rune(0x1a)) + "\r\n+CMGS: 42\r\nOK\r\n")},
+		}},
+	}
+	opened := 0
+	transport := &TTYTransport{open: func(endpoint string) (serialSession, error) {
+		if endpoint != "/dev/ttyUSB2" || opened >= len(sessions) {
+			t.Fatalf("open endpoint=%q count=%d", endpoint, opened)
+		}
+		session := sessions[opened]
+		opened++
+		return session, nil
+	}}
+	driver, err := NewDriver(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := driver.Send(t.Context(), qdc507Device(), "+8613800138000", "hello")
+	if err != nil || len(result.Parts) != 1 || result.Parts[0].MessageReference != 42 {
+		t.Fatalf("result=%#v error=%v", result, err)
+	}
+	if opened != len(sessions) {
+		t.Fatalf("opened %d sessions", opened)
+	}
+	for index, session := range sessions {
+		if !session.closed || session.flushes != 1 {
+			t.Fatalf("session %d closed=%t flushes=%d", index, session.closed, session.flushes)
+		}
+	}
+}
+
+func TestDriverKeepsDuplicateOrUnexpectedSubmitEchoOutcomeUnknown(t *testing.T) {
+	payloadText := "0001000D91683108108300F0000005E8329BFD06"
+	for name, response := range map[string]string{
+		"duplicate":   payloadText + "\r\n" + payloadText + "\r\n+CMGS: 42\r\nOK\r\n",
+		"different":   "0001000D91683108108300F0000005E8329BFD07\r\n+CMGS: 42\r\nOK\r\n",
+		"unsolicited": payloadText + "\r\n+PRIVATE-URC: bounded\r\n+CMGS: 42\r\nOK\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			sessions := []*scriptedSerialSession{
+				{reads: []serialRead{{data: []byte("AT+CMGF=0\r\nOK\r\n")}}},
+				{reads: []serialRead{{data: []byte("AT+CPMS=\"SM\",\"SM\",\"SM\"\r\n+CPMS: 0,10,0,10,0,10\r\nOK\r\n")}}},
+				{reads: []serialRead{{data: []byte("AT+CMGS=19\r\n\r\n> ")}, {data: []byte("\r\n" + response)}}},
+			}
+			opened := 0
+			transport := &TTYTransport{open: func(string) (serialSession, error) {
+				session := sessions[opened]
+				opened++
+				return session, nil
+			}}
+			driver, err := NewDriver(transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := driver.Send(t.Context(), qdc507Device(), "+8613800138000", "hello"); !errors.Is(err, ErrSendOutcomeUnknown) {
+				t.Fatalf("send error=%v", err)
+			}
+		})
 	}
 }
 

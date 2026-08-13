@@ -139,4 +139,4 @@ Simplus 是运行在 Linux 主机上的局域网 Web 工具，用来控制一台
 11. SMS over IMS 先通过 fixture 验证 RPDU、SIP transaction、异步提交报告和 persist-before-RP-ACK，再在单独授权下完成真实单段与长短信收发；
 12. 安装和运行步骤可以由仓库文档在目标机器上复现。
 
-真实硬件默认禁止修改上电策略、建立蜂窝数据流量，以及短信、电话、eUICC 切换等会改变模组、SIM、网络或外部通信状态的操作。ML307A 运行时 RF 开关按 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md) 作为窄化例外：只接受明确的开关目标，使用型号固定命令并读回确认；它不等于已验证上电策略，也不允许 HIL 在未授权时实际切换。ML307A Host VoWiFi 注册仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；真实 SMS over IMS 还必须遵循 [`0016`](decisions/0016-vowifi-sms-over-ims.md) 的单独授权，其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。
+真实硬件默认禁止修改上电策略、建立蜂窝数据流量，以及未经独立验收的短信、电话、eUICC 切换等会改变模组、SIM、网络或外部通信状态的操作。ML307A 运行时 RF 开关按 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md) 作为窄化例外：只接受明确的开关目标，使用型号固定命令并读回确认；它不等于已验证上电策略，也不允许 HIL 在未授权时实际切换。ML307A Host VoWiFi 注册仅按 [`0011`](decisions/0011-ml307a-host-vowifi-hil.md) 的明确授权例外执行；真实 SMS over IMS 还必须遵循 [`0016`](decisions/0016-vowifi-sms-over-ims.md) 的单独授权。QDC507 原生蜂窝短信按 [`0026`](decisions/0026-qdc507-native-cellular-sms.md) 的 typed production 纵切开放；其余边界仍见 [`0003`](decisions/0003-v1-read-only-hardware.md)。

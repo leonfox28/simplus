@@ -49,6 +49,7 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 			response.Devices[0].Identity.EquipmentIdentityFingerprint = "490154203237518"
 		}},
 		{name: "invalid model text", mutate: func(response *ProbeResponse) { response.Devices[0].Identity.Model = "ML307A\n" }},
+		{name: "invalid module serial", mutate: func(response *ProbeResponse) { response.Devices[0].Identity.SerialNumber = strings.Repeat("S", 129) }},
 		{name: "missing primary lock state", mutate: func(response *ProbeResponse) { response.Devices[0].SIM.PrimaryLockState = "" }},
 		{name: "invalid signal state", mutate: func(response *ProbeResponse) { response.Devices[0].SignalMetrics.State = "weak" }},
 		{name: "missing registrations array", mutate: func(response *ProbeResponse) { response.Devices[0].Registrations = nil }},
@@ -91,6 +92,7 @@ func TestValidateProbeResponseRejectsInvalidTypedContract(t *testing.T) {
 
 func TestValidateProbeResponseAcceptsOnlyMaskedReadySIMIdentity(t *testing.T) {
 	response := validProbeResponseFixture()
+	response.Devices[0].Identity.SerialNumber = "SYNTHETIC-MODULE-0001"
 	response.Devices[0].SIM = SIMObservation{
 		State: SIMStatePresent, PrimaryLockState: PrimaryLockReady,
 		IdentityFingerprint: strings.Repeat("b", 64), DisplayIdentityHint: "ICCID •••• 2115",
@@ -98,6 +100,17 @@ func TestValidateProbeResponseAcceptsOnlyMaskedReadySIMIdentity(t *testing.T) {
 	}
 	if err := validateProbeResponse(response); err != nil {
 		t.Fatal(err)
+	}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ProbeResponse
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Devices[0].Identity.SerialNumber != response.Devices[0].Identity.SerialNumber {
+		t.Fatalf("module serial did not survive the Agent protocol: %#v", decoded.Devices[0].Identity)
 	}
 }
 

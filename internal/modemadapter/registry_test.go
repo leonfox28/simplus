@@ -3,6 +3,7 @@ package modemadapter
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,9 +17,10 @@ type staticSnapshotSource struct {
 func (source staticSnapshotSource) Snapshot() agentapi.Snapshot { return source.snapshot }
 
 type smsTestAdapter struct {
-	profile string
-	entered chan string
-	release chan struct{}
+	profile   string
+	entered   chan string
+	release   chan struct{}
+	listCalls int
 }
 
 type matchingAdapter struct{ smsTestAdapter }
@@ -48,7 +50,9 @@ func (*smsTestAdapter) Capabilities(agentapi.DeviceReport) []agentapi.Capability
 	return nil
 }
 
-func (adapter *smsTestAdapter) ListSMS(ctx context.Context, device agentapi.DeviceReport) ([]agentapi.SMSMessageReference, error) {
+func (adapter *smsTestAdapter) ListSMS(ctx context.Context, target SMSRuntimeTarget) ([]agentapi.SMSMessageReference, error) {
+	adapter.listCalls++
+	device := target.Device
 	if adapter.entered != nil {
 		adapter.entered <- device.ID
 		select {
@@ -60,19 +64,70 @@ func (adapter *smsTestAdapter) ListSMS(ctx context.Context, device agentapi.Devi
 	return []agentapi.SMSMessageReference{{MessageID: "message-1", DeviceID: device.ID, Sender: "10086"}}, nil
 }
 
-func (*smsTestAdapter) ReadSMS(_ context.Context, device agentapi.DeviceReport, messageID string) (agentapi.SMSStoredMessage, error) {
+func (*smsTestAdapter) ReadSMS(_ context.Context, target SMSRuntimeTarget, messageID string) (agentapi.SMSStoredMessage, error) {
+	device := target.Device
 	return agentapi.SMSStoredMessage{MessageID: messageID, DeviceID: device.ID, Sender: "10086", Body: "test"}, nil
 }
 
-func (*smsTestAdapter) SendSMS(_ context.Context, device agentapi.DeviceReport, request agentapi.SMSSendRequest) (agentapi.SMSSubmission, error) {
+func (*smsTestAdapter) SendSMS(_ context.Context, target SMSRuntimeTarget, request agentapi.SMSSendRequest) (agentapi.SMSSubmission, error) {
+	device := target.Device
 	if device.ID != request.DeviceID {
 		return agentapi.SMSSubmission{}, errors.New("router supplied a mismatched device")
 	}
 	return agentapi.SMSSubmission{OperationID: request.OperationID, MessageID: "submitted-1", SubmittedAt: time.Unix(1, 0).UTC()}, nil
 }
 
-func (*smsTestAdapter) AcknowledgeSMS(_ context.Context, device agentapi.DeviceReport, request agentapi.SMSAcknowledgeRequest) (bool, error) {
+func (*smsTestAdapter) AcknowledgeSMS(_ context.Context, target SMSRuntimeTarget, request agentapi.SMSAcknowledgeRequest) (bool, error) {
+	device := target.Device
 	return device.ID == request.DeviceID && request.MessageID == "message-1", nil
+}
+
+type testSMSGate struct{ token chan struct{} }
+
+func newTestSMSGate() *testSMSGate {
+	gate := &testSMSGate{token: make(chan struct{}, 1)}
+	gate.token <- struct{}{}
+	return gate
+}
+func (gate *testSMSGate) Acquire(ctx context.Context, _ string) (func(), error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-gate.token:
+		return func() { gate.token <- struct{}{} }, nil
+	}
+}
+
+type testSMSResolver struct{}
+
+func (testSMSResolver) ResolveSMSRuntimeTarget(_ context.Context, snapshot agentapi.Snapshot, fence SMSRuntimeFence, _ bool) (SMSRuntimeTarget, error) {
+	for _, device := range snapshot.Devices {
+		if device.ID == fence.DeviceID {
+			return SMSRuntimeTarget{Device: device, SubscriptionKey: fence.ExpectedSubscriptionFingerprint}, nil
+		}
+	}
+	return SMSRuntimeTarget{}, agentapi.ErrSMSDeviceNotFound
+}
+
+type changingSMSResolver struct{ source *staticSnapshotSource }
+
+func (resolver changingSMSResolver) ResolveSMSRuntimeTarget(_ context.Context, snapshot agentapi.Snapshot, fence SMSRuntimeFence, _ bool) (SMSRuntimeTarget, error) {
+	for _, device := range snapshot.Devices {
+		if device.ID == fence.DeviceID {
+			resolver.source.snapshot.Devices[0].Generation++
+			return SMSRuntimeTarget{Device: device, SubscriptionKey: fence.ExpectedSubscriptionFingerprint}, nil
+		}
+	}
+	return SMSRuntimeTarget{}, agentapi.ErrSMSDeviceNotFound
+}
+
+func testSMSDependencies() SMSRuntimeDependencies {
+	return SMSRuntimeDependencies{Gate: newTestSMSGate(), Resolver: testSMSResolver{}}
+}
+
+func testSMSListRequest(deviceID string) agentapi.SMSListRequest {
+	return agentapi.SMSListRequest{DeviceID: deviceID, DeviceGeneration: 1,
+		ExpectedEquipmentFingerprint: strings.Repeat("a", 64), ExpectedSubscriptionFingerprint: strings.Repeat("b", 64)}
 }
 
 func TestDefaultRegistryMatchesOnlyEvidenceBackedUSBIdentities(t *testing.T) {
@@ -263,38 +318,65 @@ func TestSMSBackendRoutesTypedOperationsByCurrentDeviceProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend, supported := registry.SMSBackend(staticSnapshotSource{snapshot: agentapi.Snapshot{Devices: []agentapi.DeviceReport{
-		{ID: "usb-sms", Profile: "sms-test"},
-		{ID: "usb-ml307a", Profile: agentapi.ProfileML307A},
-	}}})
+		{ID: "usb-sms", Generation: 1, Profile: "sms-test"},
+		{ID: "usb-ml307a", Generation: 1, Profile: agentapi.ProfileML307A},
+	}}}, testSMSDependencies())
 	if !supported || backend == nil {
 		t.Fatal("registered SMS adapter did not produce a backend")
 	}
 
-	messages, err := backend.ListSMS(context.Background(), "usb-sms")
+	messages, err := backend.ListSMS(context.Background(), testSMSListRequest("usb-sms"))
 	if err != nil || len(messages) != 1 || messages[0].DeviceID != "usb-sms" {
 		t.Fatalf("list = %#v, error = %v", messages, err)
 	}
-	message, err := backend.ReadSMS(context.Background(), "usb-sms", "message-1")
+	readRequest := agentapi.SMSReadRequest{DeviceID: "usb-sms", MessageID: "message-1", DeviceGeneration: 1,
+		ExpectedEquipmentFingerprint: strings.Repeat("a", 64), ExpectedSubscriptionFingerprint: strings.Repeat("b", 64)}
+	message, err := backend.ReadSMS(context.Background(), readRequest)
 	if err != nil || message.DeviceID != "usb-sms" || message.MessageID != "message-1" {
 		t.Fatalf("read = %#v, error = %v", message, err)
 	}
 	submission, err := backend.SendSMS(context.Background(), agentapi.SMSSendRequest{
 		OperationID: "operation-0123456789", DeviceID: "usb-sms", Destination: "10086", Body: "test",
+		DeviceGeneration: 1, ExpectedEquipmentFingerprint: strings.Repeat("a", 64), ExpectedSubscriptionFingerprint: strings.Repeat("b", 64),
 	})
 	if err != nil || submission.OperationID != "operation-0123456789" {
 		t.Fatalf("send = %#v, error = %v", submission, err)
 	}
 	acknowledged, err := backend.AcknowledgeSMS(context.Background(), agentapi.SMSAcknowledgeRequest{
 		OperationID: "acknowledge-012345", DeviceID: "usb-sms", MessageID: "message-1",
+		DeviceGeneration: 1, ExpectedEquipmentFingerprint: strings.Repeat("a", 64), ExpectedSubscriptionFingerprint: strings.Repeat("b", 64),
 	})
 	if err != nil || !acknowledged {
 		t.Fatalf("acknowledged = %t, error = %v", acknowledged, err)
 	}
-	if _, err := backend.ListSMS(context.Background(), "usb-ml307a"); !errors.Is(err, agentapi.ErrSMSUnsupported) {
+	if _, err := backend.ListSMS(context.Background(), testSMSListRequest("usb-ml307a")); !errors.Is(err, agentapi.ErrSMSUnsupported) {
 		t.Fatalf("ML307A SMS error = %v", err)
 	}
-	if _, err := backend.ListSMS(context.Background(), "usb-missing"); !errors.Is(err, agentapi.ErrSMSDeviceNotFound) {
+	if _, err := backend.ListSMS(context.Background(), testSMSListRequest("usb-missing")); !errors.Is(err, agentapi.ErrSMSDeviceNotFound) {
 		t.Fatalf("missing device SMS error = %v", err)
+	}
+}
+
+func TestSMSBackendRejectsTargetGenerationChangeObservedDuringProbe(t *testing.T) {
+	adapter := &smsTestAdapter{profile: "sms-test"}
+	registry, err := NewRegistry(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &staticSnapshotSource{snapshot: agentapi.Snapshot{Devices: []agentapi.DeviceReport{{
+		ID: "usb-sms", Generation: 1, Profile: "sms-test",
+	}}}}
+	backend, supported := registry.SMSBackend(source, SMSRuntimeDependencies{
+		Gate: newTestSMSGate(), Resolver: changingSMSResolver{source: source},
+	})
+	if !supported {
+		t.Fatal("SMS backend was not constructed")
+	}
+	if _, err := backend.ListSMS(t.Context(), testSMSListRequest("usb-sms")); !errors.Is(err, agentapi.ErrSMSDeviceStale) {
+		t.Fatalf("generation-change error = %v", err)
+	}
+	if adapter.listCalls != 0 {
+		t.Fatalf("adapter was called %d times after a generation change", adapter.listCalls)
 	}
 }
 
@@ -303,6 +385,22 @@ func TestDefaultRegistryDoesNotAdvertiseSMSBeforeDriverVerification(t *testing.T
 	backend, supported := registry.SMSBackend(staticSnapshotSource{})
 	if supported || backend != nil || registry.SupportsSMS() {
 		t.Fatalf("unverified default adapters exposed SMS: backend=%#v supported=%t", backend, supported)
+	}
+}
+
+func TestEvidencePromotedQDC507ModelKeepsDefaultRegistryClosed(t *testing.T) {
+	device := agentapi.DeviceReport{
+		Profile: agentapi.ProfileQDC507,
+		Interfaces: []agentapi.USBInterface{{Number: 2, Endpoints: []agentapi.Endpoint{{
+			Kind: agentapi.EndpointTTY, InterfaceNumber: 2, Node: "/dev/ttyUSB2",
+		}}}},
+	}
+	capabilities := (QDC507SMS{}).Capabilities(device)
+	assertCapability(t, capabilities, "sms-control", agentapi.EvidenceObserved)
+	assertCapability(t, capabilities, "rf-control", agentapi.EvidenceObserved)
+	assertCapability(t, capabilities, "host-vowifi-auth", agentapi.EvidenceUnverified)
+	if DefaultRegistry().SupportsSMS() {
+		t.Fatal("safe default registry was promoted with production SMS")
 	}
 }
 
@@ -315,14 +413,14 @@ func TestSMSBackendSerializesOperationsForOneDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend, supported := registry.SMSBackend(staticSnapshotSource{snapshot: agentapi.Snapshot{Devices: []agentapi.DeviceReport{
-		{ID: "usb-one", Profile: "blocking-sms"},
-	}}})
+		{ID: "usb-one", Generation: 1, Profile: "blocking-sms"},
+	}}}, testSMSDependencies())
 	if !supported {
 		t.Fatal("blocking SMS adapter did not produce a backend")
 	}
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := backend.ListSMS(context.Background(), "usb-one")
+		_, err := backend.ListSMS(context.Background(), testSMSListRequest("usb-one"))
 		firstDone <- err
 	}()
 	if entered := <-adapter.entered; entered != "usb-one" {
@@ -331,7 +429,7 @@ func TestSMSBackendSerializesOperationsForOneDevice(t *testing.T) {
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := backend.ListSMS(cancelled, "usb-one"); !errors.Is(err, context.Canceled) {
+	if _, err := backend.ListSMS(cancelled, testSMSListRequest("usb-one")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("queued operation error = %v", err)
 	}
 	close(adapter.release)

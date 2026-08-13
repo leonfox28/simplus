@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { smsStatusPresentation } from './status'
 
 describe('SMS status presentation', () => {
+  it('presents bounded cellular preflight failures', () => {
+    expect(smsStatusPresentation({ status: 'failed', errorCode: 'SMS_RF_OFF' })).toEqual({ color: 'red', label: '射频已关闭' })
+    expect(smsStatusPresentation({ status: 'failed', errorCode: 'SMS_SIM_IDENTITY_CHANGED' })).toEqual({ color: 'red', label: 'SIM 已更换' })
+    expect(smsStatusPresentation({ status: 'failed', errorCode: 'SMS_NOT_REGISTERED' })).toEqual({ color: 'red', label: '蜂窝网络未注册' })
+  })
   it('distinguishes unconfirmed submission from a definitive failure', () => {
     expect(smsStatusPresentation({ status: 'unconfirmed', errorCode: 'SMS_SEND_OUTCOME_UNKNOWN' })).toEqual({
       color: 'orange',

@@ -30,6 +30,16 @@ type scriptedATOpener struct {
 	err      error
 }
 
+type moduleSerialProbeAdapter struct{ modemadapter.ML307A }
+
+func (moduleSerialProbeAdapter) ReadModuleSerial(ctx context.Context, query attransport.Query) (string, error) {
+	lines, err := query(ctx, "AT+SYNTHETIC-SERIAL", time.Second)
+	if err != nil || len(lines) != 2 || lines[0] != "SYNTHETIC-MODULE-0001" || lines[1] != "OK" {
+		return "", errors.New("module serial unavailable")
+	}
+	return lines[0], nil
+}
+
 func (opener *scriptedATOpener) Open(endpoint string) (attransport.Session, error) {
 	opener.endpoint = endpoint
 	if opener.err != nil {
@@ -64,6 +74,8 @@ func TestATRuntimeDelegatesCommandsToAdapterCapabilitiesAndClosesSession(t *test
 			return []string{"ERROR"}, nil
 		case "AT+CGSN=1":
 			return []string{"+CGSN: 490154203237518", "OK"}, nil
+		case "AT+SYNTHETIC-SERIAL":
+			return []string{"SYNTHETIC-MODULE-0001", "OK"}, nil
 		case "AT+MCCID":
 			return []string{"+MCCID: 89861118216007272115", "OK"}, nil
 		case "AT+CRSM=176,28486,0,0,17":
@@ -79,11 +91,12 @@ func TestATRuntimeDelegatesCommandsToAdapterCapabilitiesAndClosesSession(t *test
 	opener := &scriptedATOpener{session: session}
 	runtime := atRuntime{opener: opener, identities: deterministicPseudonymizer{}}
 
-	probe := runtime.Probe(t.Context(), "/dev/fixture-ml307a", modemadapter.ML307A{})
+	probe := runtime.Probe(t.Context(), "/dev/fixture-ml307a", moduleSerialProbeAdapter{})
 	if probe.State != agentapi.ProbeStateFailed || probe.ErrorCode != agentapi.ErrorCallStateUnknown {
 		t.Fatalf("probe state = %#v", probe)
 	}
-	if probe.Identity.Model != "ML307A" || probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" ||
+	if probe.Identity.Model != "ML307A" || probe.Identity.SerialNumber != "SYNTHETIC-MODULE-0001" ||
+		probe.Identity.EquipmentIdentityFingerprint == "" || probe.SIM.IdentityFingerprint == "" ||
 		probe.SIM.DisplayIdentityHint != "ICCID •••• 2115" || probe.SIM.HomeOperatorName != "VOXI" || probe.SIM.HomeOperatorCode != "234-15" {
 		t.Fatalf("independent identity observations = %#v", probe)
 	}

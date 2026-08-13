@@ -42,7 +42,7 @@ Vite/React Router/TanStack Query，并直接使用 Ant Design。旧 Umi/Pro 构�
 - 为每个模组维护串行 worker；
 - 把硬件结果转换成面向用户的稳定状态。
 
-当前代码已经有 API、setup/auth、inventory 和存储，并完成 Simulator 短信纵切：发送前持久化、按 Modem 串行、GSM7/UCS-2 长短信编码、fake Agent list/read/send/ACK、入站 persist-before-ACK、最终状态和 Web 历史。Host VoWiFi 已接入同一短信业务模型；普通蜂窝 SMS backend 与电话业务尚未实现。
+当前代码已经有 API、setup/auth、inventory 和存储，并完成 Simulator 短信纵切：发送前持久化、按 Modem 串行、GSM7/UCS-2 长短信编码、fake Agent list/read/send/ACK、入站 persist-before-ACK、最终状态和 Web 历史。Host VoWiFi 与 HIL 验收后的 QDC507 原生蜂窝 SMS 已接入同一短信业务模型；真实电话业务尚未实现。
 
 ### `simplus-agent`（目标职责）
 
@@ -54,7 +54,7 @@ Vite/React Router/TanStack Query，并直接使用 Ant Design。旧 Umi/Pro 构�
   写入精确映射的 `option1/new_id`，随后清空 capability 并以 UID 10002 运行；本地
   HIL 开发仍可使用无 capability 的 `simplus-agent-dev` systemd 用户。
 
-当前 Agent 保留经过 Client/Unix socket 集成测试的 typed SMS fixture contract，但 production `simplus-agent` 不注入 SMS/Call/eUICC backend，也不注册旧的 `radio.ensure-off`。正式硬件入口只包含只读探测、独立 root-only SIM 鉴权，以及使用布尔目标状态、固定型号命令和读回确认的 ML307A 运行时 RF 控制；它仍不接受任意 AT/QMI、设备路径或命令字符串。
+production `simplus-agent` 注入完整 QDC507 typed SMS backend，但不注入 Call/eUICC backend，也不注册旧的 `radio.ensure-off`。正式硬件入口还包含只读探测、独立 root-only SIM 鉴权，以及使用布尔目标状态、固定型号命令和读回确认的 ML307A 运行时 RF 控制；它仍不接受任意 AT/QMI、设备路径或命令字符串。
 
 Agent 是映射宿主设备后的单一硬件边界，不为每种模组或每个 USB 设备启动一套不同协议的 Agent。模型差异由进程内 adapter 隔离：
 
@@ -71,11 +71,11 @@ simplusd typed SMS/Call/eUICC API
 
 `internal/modemadapter` 当前负责 USB identity、内部显示名称、固定端点角色、型号 AT 探测计划、SIM/设备身份、SIM AKA/IMS、RF 控制及证据化能力；`hardwareprobe.Scanner` 只通过 registry 选择模型和编排类型化能力，重叠的匹配规则 fail closed。QDC507 只解析已验证的 `primary-at` interface 2 和 QMI interface 4；ML307A 根据官方 V1.0.1 拨号手册与本机 HIL 固定解析 `2ecc:3012` 的 interface 2 为 primary AT。这里固定的是 USB interface 的功能角色，不是 `/dev/ttyUSB*` 或 `N-P` 物理端口；设备节点和 sysfs 拓扑都在每次扫描时重新解析。看到 tty、QMI 或 UAC 只构成硬件证据，不自动注册 SMS、Call 或数字音频业务能力。Adapter 的内部显示名称不能作为 Web 型号回退值；模组页与候选列表的型号只使用只读 `AT+CGMM` 结果，模组离线、命令失败、空值或非法响应统一显示“读取失败”。
 
-动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。添加对话框可以为人工辨认显示本次扫描的相对 USB 拓扑地址、VID:PID 和 USB Serial 每实例 HMAC 的短标识；这些字段不参与业务分支、不成为持久绑定，也不包含原始 IMEI、`/dev` 节点或 sysfs 绝对路径。USB 描述符的原始 Serial 被产品定义为可直接显示的模组元数据：Agent 对它做长度和控制字符限制，已添加模组在线时由普通列表直接展示，但它不落入 Managed Modem 记录、不参与绑定或业务控制；对应的每实例 HMAC 指纹仍只作辅助观察。普通 probe、inventory、模组列表和数据库只以 HMAC 处理 IMEI；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹。管理员在模组页点击显示按钮时，可以通过独立的鉴权 POST 实时读取当前在线模组的 IMEI：请求以 Managed Modem ID 进入，经过当前 Agent/快照/设备代际约束并再次核对持久 IMEI 指纹，响应固定为 `no-store`，原值不落库、不进入普通日志，隐藏或刷新后从页面状态清除。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
+动态扫描结果不是业务配置。`DiscoveredDevice` 只代表 Agent 当前观察；管理员通过模组页把候选添加为持久 `ManagedModem`，再从已添加模组创建 Line。添加对话框可以为人工辨认显示本次扫描的相对 USB 拓扑地址、VID:PID 和 USB Serial 每实例 HMAC 的短标识；这些字段不参与业务分支、不成为持久绑定，也不包含原始 IMEI、`/dev` 节点或 sysfs 绝对路径。Agent 的当前序列号展示优先使用型号 adapter 严格验证的模块序列号，没有时回退经过长度与控制字符限制的 USB 描述符 Serial；两者都不落入 Managed Modem 记录、不参与绑定或业务控制，USB Serial 的每实例 HMAC 指纹仍只作辅助观察。普通 probe、inventory、模组列表和数据库只以 HMAC 处理 IMEI；`ManagedModem` 以随机业务 ID 对应稳定 IMEI 指纹。管理员在模组页点击显示按钮时，可以通过独立的鉴权 POST 实时读取当前在线模组的 IMEI：请求以 Managed Modem ID 进入，经过当前 Agent/快照/设备代际约束并再次核对持久 IMEI 指纹，响应固定为 `no-store`，原值不落库、不进入普通日志，隐藏或刷新后从页面状态清除。拔出或换端口只令当前定位变化，不删除管理记录；重复 IMEI、缺失 IMEI，以及相同型号都不能触发猜测绑定。版本 18 的端口绑定在原设备仍位于旧位置时一次性提升为 IMEI 指纹。分层与迁移边界见 [`0017`](decisions/0017-managed-modems-and-capability-adapters.md)。
 
 Line 也不是扫描结果。管理员只能从已添加模组当前可确认的 SIM/Profile 候选创建持久 Line；随机 `line_...` ID、显示名称及 `ManagedModem + SIM/Profile 身份` 绑定进入 core 数据库。USB/sysfs 名称、设备节点、具体型号和临时 `agent-line-...` 只留在运行时解析边界。端口变化会重新解析到同一 Line；模组离线、SIM 更换、卡槽不符或身份冲突时 Line fail closed，不猜测改绑。射频、Host VoWiFi 意图、`direct`/Mihomo 国家出口及短信/电话 transport 都不是 Line 身份的一部分，各自通过独立配置与类型化能力工作。短信、电话、出口和 Host VoWiFi 只消费稳定 Line 目录，细节见 [`0018`](decisions/0018-persistent-lines-and-runtime-resolution.md) 与 [`0019`](decisions/0019-line-identity-and-communication-paths.md)。
 
-能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。当前只有 `ATProbeAdapter`、`EquipmentIdentityAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter` 与 `RFControlAdapter`：六者分别声明型号支持的只读综合探测、读取 IMEI、读取主卡槽插入状态、读取用于稳定 Line 绑定的 ICCID 脱敏身份及活动 Profile 的有界归属运营商元数据、提供统一 SIM/IMS 身份与 AKA challenge-response，以及把布尔 RF 目标映射为固定动作并要求新鲜读回。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务，后续只在接入真实 transport 时增加最小接口；现有 QDC507 `SMSAdapter` 只是未装配到 production 的候选 transport。端点路径与 AT/QMI 命令始终留在 Agent 内部。
+能力适配采用按当前纵切新增的小接口，而不是要求所有模组实现一个巨型通用接口。`ATProbeAdapter`、`EquipmentIdentityAdapter`、`ModuleSerialAdapter`、`SIMPresenceAdapter`、`SIMIdentityAdapter`、`SIMAuthAdapter`、`RFControlAdapter`、SMS adapter 与 SMS call-safety seam 分别拥有只读综合探测、IMEI、模块序列号、主卡槽插入状态、ICCID 脱敏身份与归属元数据、SIM/IMS AKA、布尔 RF 动作、短信收发/恢复和发送前通话分类。模块序列号只是当前显示元数据，不替代 IMEI 稳定指纹或 USB descriptor Serial 语义。设备身份、SIM 插入状态和 SIM 身份分别探测，不依赖 RF、通话或完整综合探测成功。归属运营商优先来自活动 Profile 的 EF_SPN，并在 Agent 内从 IMSI 与 EF_AD 只推导 MCC-MNC；原始 IMSI 不进入公共 API、数据库或日志，运营商读取失败也不影响 Line 候选。SIM presence 只输出 `present / absent / unknown`；PIN/PUK 锁卡属于 present，查询失败属于 unknown，它不读取身份、不解锁 SIM、不修改 RF，也不自动创建 Line。`sim-auth` 与 `host-vowifi-auth` 是另外两个证据：前者描述模组鉴权能力，后者描述已经验证的完整业务路径。短信和电话仍是 Line 业务；QDC507 SMS 通过完整 production composite 接入统一 SMS 契约，端点路径与 AT/QMI 命令始终留在 Agent 内部。
 
 `USBSerialBindingAdapter` 不是业务能力；它只让容器 entrypoint 在扫描前取得经过型号
 审查的 option driver 动态 ID。Registry 会拒绝非法或跨型号重复 ID，Web、Compose
@@ -102,24 +102,35 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 
 这条约束不要求提前抽象尚不存在的能力。接口随经过验证的纵切逐步出现；抽象的是已经存在的共同业务语义，而不是厂商命令的表面相似性。
 
-### QDC507 SMS 候选传输
+### QDC507 原生蜂窝 SMS 传输
 
 第一个 QDC507 SMS driver 候选采用 interface 2 上的 3GPP PDU-mode AT，而不先实现 QMI WMS。依据是：该固件的 primary AT 端点已经完成 HIL-0 映射；[Quectel EC2x 系列手册](https://forums.quectel.com/uploads/short-url/cBnrTmjnCg7OGnqRsk8dIpbHuVX.pdf)依据 [3GPP TS 27.005](https://www.3gpp.org/ftp/specs/archive/27_series/27.005/) 明确提供 `CMGF/CMGL/CMGR/CMGS/CMGD` PDU 流程；当前开发机的 `qmicli 1.36` 没有 raw WMS list/read/send/delete CLI，而 [libqmi WMS API](https://www.freedesktop.org/software/libqmi/libqmi-glib/1.26.0/) 虽然具备 raw 操作，接入它需要新增 GLib/cgo 或自行实现 QMI client。QMI WMS 仍是 AT 真机验收失败时的备选，不视为不支持。
 
-`internal/modemadapter/qdc507sms` 当前包含 transcript-shaped PDU driver、有界 tty transport，以及只供 fixture 装配的完整 `SMSAdapter`。它们不从 production Agent 装配，因此真实 Agent 不会声明 `sms-v1`。已经由纯单元测试覆盖：
+`internal/modemadapter/qdc507sms` 包含 transcript-shaped PDU driver、有界 tty transport 和完整 `SMSAdapter`。production Agent 以必需的私有 state root 打开 v2 SQLite recovery store，再把完整 adapter、共享 device gate 和 fenced resolver 装配为 `sms-v1`；任一依赖失败都阻止启动。安全的 `DefaultRegistry()` 仍不装配 SMS，只有 production composite 把 QDC507 `sms-control` 提升为 observed。已经由自动化覆盖：
 
 - GSM7/UCS-2 SMS-SUBMIT PDU、8-bit UDH 长短信和逐段递增 TP-MR；
 - `CMGF=0` 后固定的 list/read/send/delete 命令形状与 PDU 长度；
 - SMS-DELIVER sender、SCTS、GSM7/UCS-2 和分段 UDH 解码；
 - `+CMS ERROR`、非法 transcript、部分长短信成功，以及提交后响应丢失的 outcome-unknown 映射；
+- prompt 后只过滤一次与刚发送 hexadecimal PDU 逐字节相同的 payload 回显（允许附带 Ctrl-Z）；
+  不同 hex、第二次回显或 URC 均保留并 fail closed，避免把真实异常误认成成功；
 - 入站 message ID 对 device、按 part 排序的 storage index 与原始 PDU 做摘要，不含 unread/read 状态；只装配十分钟内完整且 part 唯一的长短信，8-bit reference 复用造成的歧义组保持不可见；
 - 完整入站消息先进入窄化的 `StateStore`，ACK 每确认删除一段就保存进度；删除前重新读取并校验 PDU 摘要，删除响应丢失时只做一次 read-back，不会误删已复用索引中的新短信；
 - send operation 在 dispatch 前进入 accepted，相同参数的成功结果可重放，不同参数复用 ID 会冲突；部分成功、响应未知或重启遗留 accepted 统一返回 `SMS_SEND_OUTCOME_UNKNOWN`，该 code 会穿过 Agent client/gateway 保存到应用消息状态，不自动重发；
 - QDC507 专用 `SQLiteStateStore` 原子保存上述入站进度和 operation；测试实际关闭并重新打开数据库后继续部分 ACK、重放成功发送，并拒绝重新 dispatch 遗留 accepted；
 - 120 秒是整个 multipart modem dispatch 的总预算，不是每一段各 120 秒；Agent 与 simplusd 的外层 HTTP write budget 为 130 秒，给结果持久化和返回留出余量；
-- candidate PDU driver 本身不能使真实 Agent 声明 `sms-v1`，完整 candidate adapter 也只有显式加入非默认 registry 才能暴露该能力。
+- PDU driver 本身不能使 Agent 声明 `sms-v1`；只有完整 store/adapter/router 注入 managed handler 才注册 typed SMS 路由；
+- `simplusd` hardware backend 始终注册 Agent native bundle，并在配置时额外注册 Host VoWiFi bundle；Line 能力要求唯一匹配，选中 transport 失败不 fallback。
 
-`MemoryStateStore` 只用于快速 fixture；跨进程恢复语义由独立 SQLite 文件证明。这个状态层只保存 QDC507 SMS 恢复必需字段，不扩展旧的通用命令账本。按 V1 read-only policy，它不会接入 production Agent。`CMGL/CMGR` 可能把 unread 状态改为 read，`CMGD` 会删除存储副本，`CMGS` 会产生运营商副作用，因此都不允许在真实硬件 V1 执行。
+受控 HIL 已在指定 QDC507/SIM 与批准 peer 上完成一条入站 persist→PDU revalidate/delete→pending-zero，
+以及一条新的出站 persist→modem-confirmed。第一次历史出站的 outcome-unknown 记录仍原样保留且从未重发。
+出站 preflight 对 `CLCC` 做型号内的固定只读分类：语音、alternate voice/fax 与未知响应阻止发送；
+既存 mode=1 data bearer 可以与 SMS 共存，但 SMS 路径不创建、配置、挂断或公开该 bearer，亦不构成
+通用蜂窝数据能力。RF mutation 继续把任何活动 bearer 视为阻断条件。
+
+`MemoryStateStore` 只用于快速 fixture；production 使用固定私有 v2 SQLite 文件保存跨进程恢复所需字段，
+不扩展旧的通用命令账本。`CMGL/CMGR` 可能把 unread 状态改为 read，`CMGD` 会删除存储副本，
+`CMGS` 会产生运营商副作用；它们只通过本节的 typed SMS 纵切使用，不能从 Web/API 提交任意命令。
 
 ### Web
 
@@ -153,7 +164,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - 登录、基础初始化以及导航中的模组、线路、短信、语音、Mihomo、通知和系统设置页面
   使用同一套直接 Ant Design 视觉语言；桌面以 Table/Sider 为主，手机以 Card/List 与
   Drawer 为主，宽表只在自身容器滚动，加载、空、错误、部分失败和不可用原因明确可见；
-- 模组页只展示管理员已添加的模组，主表固定为型号、USB Serial 序列号、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏序列标识、支持状态、类型化不可添加原因和能力；
+- 模组页只展示管理员已添加的模组，主表固定为型号、当前模块序列号（不可用时回退 USB Serial）、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏 USB 序列标识、支持状态、类型化不可添加原因和能力；
 - 线路页只展示管理员创建的持久 Line；“添加线路”以单选表格展示所有已添加模组的当前 SIM/Profile 候选及类型化不可添加原因，创建只保存不可改绑的身份和名称；主表直接显示 IMS 注册明确返回的 E.164 手机号，无法确认时显示未获取；配置抽屉分别维护名称、显式 `direct`/Mihomo 国家出口和 Host VoWiFi 激活意图，不出现 RF 控制；
 - 只展示业务术语：Modem、SIM、Line、Message、Call；
 - 不把 Agent 协议、AT 指令或内部 fencing 模型泄漏到 UI。
@@ -257,7 +268,7 @@ Web -> simplusd validation -> persist queued message
     -> active Web query refetches authoritative HTTP snapshot
 ```
 
-Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独立 typed gateway，把 GSM7/UCS-2 产生的 SMS-SUBMIT TPDU 封装为 RP-DATA 和 binary SIP MESSAGE。worker 收齐各分段 SIP 最终响应即返回，绝不为 RP 报告占住业务请求；SIP `202` 只把带 provider ID 的消息持久化为橙色 `unconfirmed`。后台随后消费异步 RP 报告：全部匹配的 RP-ACK 才提升为 `sent`，单段 RP-ERROR 可成为 `failed`，multipart 的部分拒绝仍是 `unconfirmed`；响应丢失或报告超时也保持 `unconfirmed` 且不自动重发。同一个 multipart 操作始终逐段各提交一次，不会因为第一段缺少报告而截断，也不会重新提交已经处理过的分段。普通 hardware cellular SMS sender 仍未接入 production Agent。
+Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独立 typed gateway，把 GSM7/UCS-2 产生的 SMS-SUBMIT TPDU 封装为 RP-DATA 和 binary SIP MESSAGE。worker 收齐各分段 SIP 最终响应即返回，绝不为 RP 报告占住业务请求；SIP `202` 只把带 provider ID 的消息持久化为橙色 `unconfirmed`。后台随后消费异步 RP 报告：全部匹配的 RP-ACK 才提升为 `sent`，单段 RP-ERROR 可成为 `failed`，multipart 的部分拒绝仍是 `unconfirmed`；响应丢失或报告超时也保持 `unconfirmed` 且不自动重发。同一个 multipart 操作始终逐段各提交一次，不会因为第一段缺少报告而截断，也不会重新提交已经处理过的分段。QDC507 Line 则通过 production Agent 的 typed native SMS backend 使用 SIM `SM` 暂存和 durable v2 recovery；其他型号的普通蜂窝 SMS transport 仍未接入。
 
 ### 接收短信
 

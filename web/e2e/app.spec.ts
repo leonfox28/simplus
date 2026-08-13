@@ -108,7 +108,12 @@ async function installApi(page: Page, authenticated = false) {
     if (path === '/api/v1/hardware/topology') return json(route, { code: 'TOPOLOGY_UNAVAILABLE', retryable: true }, 503)
     if (path === '/api/v1/modems') return json(route, { modems: [{
       id: line.managedModemId, displayName: 'Synthetic Modem', model: 'Simulator', serialNumber: 'SYNTHETIC-001',
-      transport: 'simulated', state: 'online', capabilities, rfState: 'on', simPresence: 'present', addedAt: '2026-08-07T00:00:00Z',
+      transport: 'simulated', state: 'online', capabilities, rfState: 'on', simPresence: 'present', cellular: {
+        state: 'registered-home', errorCode: '', registrations: [
+          { domain: 'cs', state: 'registered-home' }, { domain: 'packet', state: 'registered-home' }, { domain: 'eps', state: 'registered-home' },
+        ], operatorName: 'Synthetic Carrier', operatorCode: '001-01', rat: 'lte', signalState: 'measured', signalRssiDbm: -65,
+        observedAt: '2026-08-07T00:00:01Z',
+      }, addedAt: '2026-08-07T00:00:00Z',
     }] })
     if (path === '/api/v1/modem-candidates') return json(route, { candidates: [{
       candidateId: 'synthetic-candidate', usbAddress: '', vendorId: '', productId: '', usbSerialHint: 'SIMULATED',
@@ -241,6 +246,8 @@ test('@desktop login, core workflows, cursor history, and SSE invalidation', asy
 
   await page.getByText('模组配置', { exact: true }).click()
   await expect(page.getByText('Simulator', { exact: true })).toBeVisible()
+  await expect(page.getByText('已注册（本地）')).toBeVisible()
+  await expect(page.getByText(/Synthetic Carrier · LTE/)).toBeVisible()
   await page.getByRole('button', { name: '添加模组' }).click()
   await expect(page.getByRole('radio', { name: 'Unavailable Candidate：控制端点不可用' })).toBeDisabled()
   await page.getByRole('button', { name: /^(取\s*消|Cancel)$/ }).click()
@@ -309,8 +316,13 @@ test('@mobile Drawer navigation has no overflow or unintended autofocus', async 
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()
   expect(await page.evaluate(() => ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName ?? ''))).toBe(false)
-  await drawer.getByText('线路配置', { exact: true }).click()
-  await expect(drawer).toBeHidden()
+  await drawer.getByText('模组配置', { exact: true }).click()
+  await expect(page.locator('.mobile-record-card').getByText('已注册（本地）')).toBeVisible()
+  await expect(page.locator('.mobile-record-card').getByText(/Synthetic Carrier · LTE/)).toBeVisible()
+  await page.getByRole('button', { name: '打开导航' }).click()
+  const lineDrawer = page.getByRole('dialog')
+  await lineDrawer.getByText('线路配置', { exact: true }).click()
+  await expect(lineDrawer).toBeHidden()
   await expect(page.getByRole('heading', { name: '线路配置' })).toBeVisible()
   await expect(page.getByText('Synthetic Line', { exact: true })).toBeVisible()
   await expect(page.locator('.mobile-record-card')).toBeVisible()

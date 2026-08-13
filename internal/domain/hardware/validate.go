@@ -45,6 +45,7 @@ func NormalizeAndValidate(input Snapshot) (Snapshot, error) {
 			(device.USBVendorID != "" && !usbIdentifier.MatchString(device.USBVendorID)) ||
 			(device.USBProductID != "" && !usbIdentifier.MatchString(device.USBProductID)) ||
 			(device.USBVendorID == "") != (device.USBProductID == "") ||
+			(device.ModemSerialNumber != "" && (!validLabel(device.ModemSerialNumber) || len(device.ModemSerialNumber) > 128)) ||
 			(device.USBSerialNumber != "" && (!validLabel(device.USBSerialNumber) || len(device.USBSerialNumber) > 128)) ||
 			(device.EquipmentIdentityFingerprint != "" && !fingerprintPattern.MatchString(device.EquipmentIdentityFingerprint)) ||
 			(device.USBSerialFingerprint != "" && !fingerprintPattern.MatchString(device.USBSerialFingerprint)) {

@@ -59,6 +59,73 @@ func TestDecodeDeliverPDUMultipartRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeDeliverPDUAccepts16BitConcatenationReference(t *testing.T) {
+	parts, err := Encode(repeatRune('长', 71))
+	if err != nil || len(parts) != 2 {
+		t.Fatalf("multipart fixture segments = %d, error = %v", len(parts), err)
+	}
+	const reference uint16 = 0x1234
+	decodedParts := make([]Segment, 0, len(parts))
+	for _, part := range parts {
+		if len(part.UserData) < 6 {
+			t.Fatal("multipart fixture has no UDH")
+		}
+		part.Reference = reference
+		part.UserData = append([]byte{
+			0x06, 0x08, 0x04, byte(reference >> 8), byte(reference & 0xff), byte(part.Total), byte(part.Part),
+		}, part.UserData[6:]...)
+		delivered, decodeErr := DecodeDeliverPDU(buildDeliverFixture(t, "+8613800138000", part))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if delivered.Segment.Reference != reference || delivered.Segment.Total != 2 || delivered.Segment.Part != part.Part {
+			t.Fatalf("16-bit concatenation envelope = %#v", delivered.Segment)
+		}
+		decodedParts = append(decodedParts, delivered.Segment)
+	}
+	body, err := Decode(decodedParts)
+	if err != nil || body != repeatRune('长', 71) {
+		t.Fatalf("16-bit multipart body length = %d, error = %v", len([]rune(body)), err)
+	}
+}
+
+func TestDecodeDeliverPDUAccepts16BitGSM7ConcatenationReference(t *testing.T) {
+	const text = "This is a GSM-7 multipart fixture. " +
+		"It is deliberately long enough to cross the single-message boundary while preserving extension characters ^{}[]. " +
+		"The second segment proves that a seven-byte 16-bit UDH uses zero padding bits."
+	parts, err := Encode(text)
+	if err != nil || len(parts) != 2 {
+		t.Fatalf("multipart fixture segments = %d, error = %v", len(parts), err)
+	}
+	const reference uint16 = 0x1234
+	decodedParts := make([]Segment, 0, len(parts))
+	for _, part := range parts {
+		if part.Encoding != EncodingGSM7 || len(part.UserData) < 6 {
+			t.Fatalf("unexpected multipart fixture = %#v", part)
+		}
+		septets, unpackErr := unpackSeptets(part.UserData[6:], part.UnitCount, 1)
+		if unpackErr != nil {
+			t.Fatal(unpackErr)
+		}
+		part.Reference = reference
+		part.UserData = append([]byte{
+			0x06, 0x08, 0x04, byte(reference >> 8), byte(reference & 0xff), byte(part.Total), byte(part.Part),
+		}, packSeptets(septets, 0)...)
+		delivered, decodeErr := DecodeDeliverPDU(buildDeliverFixture(t, "+8613800138000", part))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if delivered.Segment.Reference != reference || delivered.Segment.Total != 2 || delivered.Segment.Part != part.Part {
+			t.Fatalf("16-bit concatenation envelope = %#v", delivered.Segment)
+		}
+		decodedParts = append(decodedParts, delivered.Segment)
+	}
+	body, err := Decode(decodedParts)
+	if err != nil || body != text {
+		t.Fatalf("16-bit GSM-7 multipart body mismatch, error = %v", err)
+	}
+}
+
 func TestDecodeDeliverPDUAlphanumericOriginatingAddress(t *testing.T) {
 	parts, err := Encode("Your one-time code is 123456")
 	if err != nil {
@@ -144,7 +211,14 @@ func buildDeliverFixtureWithAddress(t *testing.T, address []byte, addressType by
 		dcs = 0x08
 		userDataLength = len(segment.UserData)
 	} else if segment.Total > 1 {
-		userDataLength += 7
+		if len(segment.UserData) < 1 {
+			t.Fatal("multipart fixture has no user-data header")
+		}
+		headerBytes := int(segment.UserData[0]) + 1
+		if headerBytes > len(segment.UserData) {
+			t.Fatal("multipart fixture has a truncated user-data header")
+		}
+		userDataLength += (headerBytes*8 + 6) / 7
 	}
 	tpdu := []byte{firstOctet, byte(addressLength), addressType}
 	tpdu = append(tpdu, address...)

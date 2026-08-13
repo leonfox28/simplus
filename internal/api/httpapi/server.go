@@ -2517,6 +2517,8 @@ func (server *Server) writeMessageError(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusUnprocessableEntity, openapi.ApiError{Code: "MESSAGE_LINE_UNSUPPORTED", Retryable: false})
 	case errors.Is(err, messageapp.ErrTransportUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MESSAGE_TRANSPORT_UNAVAILABLE", Retryable: true})
+	case errors.Is(err, messageapp.ErrTransportAmbiguous):
+		writeJSON(w, http.StatusConflict, openapi.ApiError{Code: "MESSAGE_TRANSPORT_AMBIGUOUS", Retryable: false})
 	case errors.Is(err, messageapp.ErrInventoryUnavailable):
 		server.logger.ErrorContext(r.Context(), "message inventory unavailable", "operation_id", operationID, "line_id", lineID, "error", err)
 		writeJSON(w, http.StatusServiceUnavailable, openapi.ApiError{Code: "MESSAGE_INVENTORY_UNAVAILABLE", Retryable: true})
@@ -2800,11 +2802,29 @@ func (server *Server) ReadManagedModemEquipmentIdentity(w http.ResponseWriter, r
 }
 
 func managedModemResponse(item modemdomain.View) openapi.ManagedModem {
+	if item.Cellular.State == "" {
+		item.Cellular = modemdomain.UnavailableCellularStatus()
+	}
+	registrations := make([]openapi.CellularRegistration, 0, len(item.Cellular.Registrations))
+	for _, registration := range item.Cellular.Registrations {
+		registrations = append(registrations, openapi.CellularRegistration{
+			Domain: openapi.CellularRegistrationDomain(registration.Domain), State: openapi.CellularRegistrationState(registration.State),
+		})
+	}
+	observedAt := ""
+	if !item.Cellular.ObservedAt.IsZero() {
+		observedAt = item.Cellular.ObservedAt.UTC().Format(time.RFC3339)
+	}
 	return openapi.ManagedModem{
 		Id: item.ID, DisplayName: item.DisplayName, Model: item.Model, SerialNumber: item.SerialNumber,
 		Transport: openapi.DeviceTransport(item.Transport), State: openapi.ManagedModemState(item.State),
 		Capabilities: hardwareCapabilitiesResponse(item.Capabilities), RfState: openapi.ManagedModemRFState(item.RFState),
-		SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence), AddedAt: item.AddedAt,
+		SimPresence: openapi.ManagedModemSIMPresence(item.SIMPresence), Cellular: openapi.ManagedModemCellularStatus{
+			State: openapi.CellularState(item.Cellular.State), ErrorCode: openapi.CellularErrorCode(item.Cellular.ErrorCode),
+			Registrations: registrations, OperatorName: item.Cellular.OperatorName, OperatorCode: item.Cellular.OperatorCode,
+			Rat: item.Cellular.RAT, SignalState: openapi.CellularSignalState(item.Cellular.SignalState),
+			SignalRssiDbm: item.Cellular.SignalRSSIDBm, ObservedAt: observedAt,
+		}, AddedAt: item.AddedAt,
 	}
 }
 

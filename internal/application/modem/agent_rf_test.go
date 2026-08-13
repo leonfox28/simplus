@@ -60,3 +60,30 @@ func TestAgentRFControllerKeepsHardwareBindingAndFencesInsideBackend(t *testing.
 		t.Fatalf("state=%q request=%#v error=%v", state, client.request, err)
 	}
 }
+
+func TestAgentRuntimeStatusNormalizesCurrentPLMN(t *testing.T) {
+	revision := strings.Repeat("a", 64)
+	client := &fakeAgentRFClient{snapshot: agentapi.Snapshot{
+		ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: "01234567-89ab-cdef-0123-456789abcdef",
+		Generation: 7, Revision: revision, Devices: []agentapi.DeviceReport{{ID: "usb-1-3", Generation: 7}},
+	}, probe: agentapi.ProbeResponse{
+		ProtocolVersion: agentapi.ProtocolVersion, AgentInstanceID: "01234567-89ab-cdef-0123-456789abcdef",
+		SnapshotGeneration: 7, SnapshotRevision: revision,
+		Devices: []agentapi.DeviceProbe{{
+			DeviceID: "usb-1-3", State: agentapi.ProbeStateComplete,
+			RF:  agentapi.RFObservation{State: agentapi.RFStateOn},
+			SIM: agentapi.SIMObservation{State: agentapi.SIMStatePresent, PrimaryLockState: agentapi.PrimaryLockReady},
+			Registrations: []agentapi.RegistrationObservation{
+				{Domain: agentapi.RegistrationDomainCS, State: agentapi.RegistrationNotRegistered},
+				{Domain: agentapi.RegistrationDomainPacket, State: agentapi.RegistrationNotRegistered},
+				{Domain: agentapi.RegistrationDomainEPS, State: agentapi.RegistrationRegisteredHome},
+			},
+			CurrentNetwork: agentapi.NetworkObservation{PLMN: "46001", RAT: agentapi.RATLTE},
+			SignalMetrics:  agentapi.SignalObservation{State: agentapi.SignalStateUnknown},
+		}},
+	}}
+	status, err := NewAgentRFController(client).Read(t.Context(), "agent-usb-1-3")
+	if err != nil || status.Cellular.OperatorCode != "460-01" || status.Cellular.State != domain.CellularRegisteredHome {
+		t.Fatalf("status=%#v error=%v", status, err)
+	}
+}

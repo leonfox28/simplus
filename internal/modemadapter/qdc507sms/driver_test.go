@@ -70,9 +70,30 @@ func qdc507Device() agentapi.DeviceReport {
 	}
 }
 
+func qdc507Target() modemadapter.SMSRuntimeTarget {
+	return modemadapter.SMSRuntimeTarget{Device: qdc507Device(), SubscriptionKey: strings.Repeat("a", 64)}
+}
+
 func newTranscriptDriver(t *testing.T, steps ...transcriptStep) (*Driver, *transcriptTransport) {
 	t.Helper()
-	transport := &transcriptTransport{t: t, steps: steps}
+	expanded := make([]transcriptStep, 0, len(steps)*2)
+	for _, step := range steps {
+		expanded = append(expanded, step)
+		if step.command == "AT+CMGF=0" {
+			expanded = append(expanded, transcriptStep{command: `AT+CPMS="SM","SM","SM"`, timeout: modeTimeout, lines: []string{"+CPMS: 1,20,1,20,1,20", "OK"}})
+		}
+	}
+	transport := &transcriptTransport{t: t, steps: expanded}
+	driver, err := NewDriver(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return driver, transport
+}
+
+func newExactTranscriptDriver(t *testing.T, steps ...transcriptStep) (*Driver, *transcriptTransport) {
+	t.Helper()
+	transport := &transcriptTransport{t: t, steps: append([]transcriptStep(nil), steps...)}
 	driver, err := NewDriver(transport)
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +103,52 @@ func newTranscriptDriver(t *testing.T, steps ...transcriptStep) (*Driver, *trans
 
 func modeStep() transcriptStep {
 	return transcriptStep{command: "AT+CMGF=0", timeout: modeTimeout, lines: []string{"OK"}}
+}
+
+func TestDriverRequiresBoundedQuectelCPMSWriteResponse(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		lines []string
+	}{
+		{name: "empty body", lines: []string{"OK"}},
+		{name: "missing counter", lines: []string{"+CPMS: 1,20,1,20,1", "OK"}},
+		{name: "used exceeds total", lines: []string{"+CPMS: 21,20,1,20,1,20", "OK"}},
+		{name: "negative", lines: []string{"+CPMS: -1,20,1,20,1,20", "OK"}},
+		{name: "overflow", lines: []string{"+CPMS: 1,65537,1,20,1,20", "OK"}},
+		{name: "integer overflow", lines: []string{"+CPMS: 1,999999999999999999999,1,20,1,20", "OK"}},
+		{name: "quoted read shape", lines: []string{`+CPMS: "SM",1,20,"SM",1,20,"SM",1,20`, "OK"}},
+		{name: "terminal error", lines: []string{"+CMS ERROR: 302"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			driver, transport := newExactTranscriptDriver(t,
+				modeStep(),
+				transcriptStep{command: `AT+CPMS="SM","SM","SM"`, timeout: modeTimeout, lines: test.lines},
+			)
+			if _, err := driver.List(t.Context(), qdc507Device()); err == nil {
+				t.Fatal("invalid CPMS response was accepted")
+			}
+			transport.assertDone()
+		})
+	}
+}
+
+func TestDriverAcceptsBoundedQuectelCPMSWriteResponse(t *testing.T) {
+	for _, response := range []string{
+		"+CPMS: 0,0,0,0,0,0",
+		"+CPMS: 0,65536,1,20,20,20",
+	} {
+		t.Run(response, func(t *testing.T) {
+			driver, transport := newExactTranscriptDriver(t,
+				modeStep(),
+				transcriptStep{command: `AT+CPMS="SM","SM","SM"`, timeout: modeTimeout, lines: []string{response, "OK"}},
+				transcriptStep{command: "AT+CMGL=4", timeout: listTimeout, lines: []string{"OK"}},
+			)
+			if messages, err := driver.List(t.Context(), qdc507Device()); err != nil || len(messages) != 0 {
+				t.Fatalf("messages=%#v error=%v", messages, err)
+			}
+			transport.assertDone()
+		})
+	}
 }
 
 func TestDriverReplaysBoundedListReadDeleteTranscript(t *testing.T) {
@@ -141,7 +208,7 @@ func TestDriverReportsPartialMultipartSubmissionWithoutBlindRetry(t *testing.T) 
 	}
 	steps := []transcriptStep{modeStep()}
 	for index, segment := range segments {
-		pdu, err := smscodec.EncodeSubmitPDU("10086", segment, segment.Reference+byte(index))
+		pdu, err := smscodec.EncodeSubmitPDU("10086", segment, byte(segment.Reference)+byte(index))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -15,8 +15,6 @@ import (
 
 var ErrStorageIndexReused = errors.New("QDC507 SMS storage index now contains a different message")
 
-// PDUDriver is the model-private boundary below the complete SMSAdapter. It
-// contains no caller-provided AT commands or device paths.
 type PDUDriver interface {
 	List(context.Context, agentapi.DeviceReport) ([]StoredPDU, error)
 	Read(context.Context, agentapi.DeviceReport, int) (StoredPDU, error)
@@ -29,7 +27,7 @@ type PDUDriver interface {
 // durable store is wired, a real tty transport exists, and authorized HIL has
 // been accepted.
 type Adapter struct {
-	modemadapter.QDC507
+	modemadapter.QDC507SMS
 	driver PDUDriver
 	store  StateStore
 	now    func() time.Time
@@ -47,41 +45,66 @@ func NewAdapter(driver PDUDriver, store StateStore) (*Adapter, error) {
 	return &Adapter{driver: driver, store: store, now: time.Now}, nil
 }
 
-func (adapter *Adapter) ListSMS(ctx context.Context, device agentapi.DeviceReport) ([]agentapi.SMSMessageReference, error) {
-	if err := adapter.ready(device); err != nil {
-		return nil, err
-	}
-	stored, err := adapter.driver.List(ctx, device)
+func (adapter *Adapter) ListSMS(ctx context.Context, target modemadapter.SMSRuntimeTarget) ([]agentapi.SMSMessageReference, error) {
+	return listSMS(ctx, adapter.driver, adapter.store, target)
+}
+
+func listSMS(ctx context.Context, driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget) ([]agentapi.SMSMessageReference, error) {
+	pending, err := collectInbound(ctx, driver, store, target)
 	if err != nil {
 		return nil, err
 	}
-	assembled, err := assembleInbound(device.ID, stored)
+	return inboundReferences(target.Device.ID, pending), nil
+}
+
+func collectInbound(ctx context.Context, driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget) ([]InboundRecord, error) {
+	_, pending, err := collectInboundWithStored(ctx, driver, store, target)
+	return pending, err
+}
+
+func collectInboundWithStored(ctx context.Context, driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget) ([]StoredPDU, []InboundRecord, error) {
+	if err := readyAdapter(driver, store, target); err != nil {
+		return nil, nil, err
+	}
+	stored, err := driver.List(ctx, target.Device)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	assembled, err := assembleInbound(target.SubscriptionKey, stored)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, message := range assembled {
-		if _, _, err := adapter.store.PutInbound(ctx, message); err != nil {
-			return nil, fmt.Errorf("persist QDC507 inbound SMS: %w", err)
+		if _, _, err := store.PutInbound(ctx, message); err != nil {
+			return nil, nil, fmt.Errorf("persist QDC507 inbound SMS: %w", err)
 		}
 	}
-	pending, err := adapter.store.ListInbound(ctx, device.ID)
+	pending, err := store.ListInbound(ctx, target.SubscriptionKey)
 	if err != nil {
-		return nil, fmt.Errorf("list QDC507 inbound SMS state: %w", err)
+		return nil, nil, fmt.Errorf("list QDC507 inbound SMS state: %w", err)
 	}
+	return stored, pending, nil
+}
+
+func inboundReferences(deviceID string, pending []InboundRecord) []agentapi.SMSMessageReference {
 	references := make([]agentapi.SMSMessageReference, 0, len(pending))
 	for _, message := range pending {
 		references = append(references, agentapi.SMSMessageReference{
-			MessageID: message.MessageID, DeviceID: message.DeviceID, Sender: message.Sender, ReceivedAt: message.ReceivedAt,
+			MessageID: message.MessageID, DeviceID: deviceID, Sender: message.Sender, ReceivedAt: message.ReceivedAt,
 		})
 	}
-	return references, nil
+	return references
 }
 
-func (adapter *Adapter) ReadSMS(ctx context.Context, device agentapi.DeviceReport, messageID string) (agentapi.SMSStoredMessage, error) {
-	if err := adapter.ready(device); err != nil {
+func (adapter *Adapter) ReadSMS(ctx context.Context, target modemadapter.SMSRuntimeTarget, messageID string) (agentapi.SMSStoredMessage, error) {
+	return readSMS(ctx, adapter.driver, adapter.store, target, messageID)
+}
+
+func readSMS(ctx context.Context, driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget, messageID string) (agentapi.SMSStoredMessage, error) {
+	if err := readyAdapter(driver, store, target); err != nil {
 		return agentapi.SMSStoredMessage{}, err
 	}
-	record, found, err := adapter.store.FindInbound(ctx, device.ID, messageID)
+	record, found, err := store.FindInbound(ctx, target.SubscriptionKey, messageID)
 	if err != nil {
 		return agentapi.SMSStoredMessage{}, fmt.Errorf("read QDC507 inbound SMS state: %w", err)
 	}
@@ -89,28 +112,42 @@ func (adapter *Adapter) ReadSMS(ctx context.Context, device agentapi.DeviceRepor
 		return agentapi.SMSStoredMessage{}, agentapi.ErrSMSMessageNotFound
 	}
 	return agentapi.SMSStoredMessage{
-		MessageID: record.MessageID, DeviceID: record.DeviceID, Sender: record.Sender,
+		MessageID: record.MessageID, DeviceID: target.Device.ID, Sender: record.Sender,
 		Body: record.Body, ReceivedAt: record.ReceivedAt,
 	}, nil
 }
 
-func (adapter *Adapter) SendSMS(ctx context.Context, device agentapi.DeviceReport, request agentapi.SMSSendRequest) (agentapi.SMSSubmission, error) {
-	if err := adapter.ready(device); err != nil {
+func (adapter *Adapter) SendSMS(ctx context.Context, target modemadapter.SMSRuntimeTarget, request agentapi.SMSSendRequest) (agentapi.SMSSubmission, error) {
+	if adapter == nil {
+		return agentapi.SMSSubmission{}, agentapi.ErrSMSUnsupported
+	}
+	return sendSMS(ctx, adapter.driver, adapter.store, adapter.currentTime, target, request)
+}
+
+func sendSMS(
+	ctx context.Context,
+	driver PDUDriver,
+	store StateStore,
+	now func() time.Time,
+	target modemadapter.SMSRuntimeTarget,
+	request agentapi.SMSSendRequest,
+) (agentapi.SMSSubmission, error) {
+	if err := readyAdapter(driver, store, target); err != nil {
 		return agentapi.SMSSubmission{}, err
 	}
-	if request.DeviceID != device.ID {
+	if request.DeviceID != target.Device.ID {
 		return agentapi.SMSSubmission{}, agentapi.ErrSMSRequestInvalid
 	}
-	digest := digestFields(device.ID, request.Destination, request.Body)
+	digest := digestFields(target.SubscriptionKey, request.Destination, request.Body)
 	accepted := operationRecord{
-		OperationID: request.OperationID, Kind: operationSend, RequestDigest: digest, State: operationAccepted,
+		OperationID: request.OperationID, SubscriptionKey: target.SubscriptionKey, Kind: operationSend, RequestDigest: digest, State: operationAccepted,
 	}
-	existing, replayed, err := adapter.store.PutOperation(ctx, accepted)
+	existing, replayed, err := store.PutOperation(ctx, accepted)
 	if err != nil {
 		return agentapi.SMSSubmission{}, fmt.Errorf("persist QDC507 SMS send operation: %w", err)
 	}
 	if replayed {
-		if existing.Kind != operationSend || existing.RequestDigest != digest {
+		if existing.SubscriptionKey != target.SubscriptionKey || existing.Kind != operationSend || existing.RequestDigest != digest {
 			return agentapi.SMSSubmission{}, agentapi.ErrSMSOperationConflict
 		}
 		switch existing.State {
@@ -123,55 +160,59 @@ func (adapter *Adapter) SendSMS(ctx context.Context, device agentapi.DeviceRepor
 		}
 	}
 
-	result, sendErr := adapter.driver.Send(ctx, device, request.Destination, request.Body)
+	result, sendErr := driver.Send(ctx, target.Device, request.Destination, request.Body)
 	if sendErr != nil {
 		var partial *SendFailure
 		uncertain := errors.Is(sendErr, ErrSendOutcomeUnknown) || (errors.As(sendErr, &partial) && partial.CompletedParts > 0)
 		if uncertain {
 			accepted.State = operationUnknown
-			if err := adapter.store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
+			if err := store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
 				return agentapi.SMSSubmission{}, errors.Join(agentapi.ErrSMSOutcomeUnknown, sendErr, err)
 			}
 			return agentapi.SMSSubmission{}, errors.Join(agentapi.ErrSMSOutcomeUnknown, sendErr)
 		}
-		if err := adapter.store.DeleteOperation(context.WithoutCancel(ctx), accepted); err != nil {
+		if err := store.DeleteOperation(context.WithoutCancel(ctx), accepted); err != nil {
 			return agentapi.SMSSubmission{}, errors.Join(agentapi.ErrSMSOutcomeUnknown, sendErr, err)
 		}
 		return agentapi.SMSSubmission{}, sendErr
 	}
 	if !validSendResult(result) {
-		return agentapi.SMSSubmission{}, adapter.terminalSendFailure(ctx, accepted, errors.New("QDC507 send returned invalid submitted parts"))
+		return agentapi.SMSSubmission{}, terminalSendFailure(ctx, store, accepted, errors.New("QDC507 send returned invalid submitted parts"))
 	}
 	submission := agentapi.SMSSubmission{
 		OperationID: request.OperationID,
 		MessageID:   outboundMessageID(request.OperationID, result),
-		SubmittedAt: adapter.currentTime(),
+		SubmittedAt: currentTime(now),
 	}
 	accepted.State = operationSucceeded
 	accepted.Submission = submission
-	if err := adapter.store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
+	if err := store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
 		return agentapi.SMSSubmission{}, errors.Join(agentapi.ErrSMSOutcomeUnknown, err)
 	}
 	return submission, nil
 }
 
-func (adapter *Adapter) AcknowledgeSMS(ctx context.Context, device agentapi.DeviceReport, request agentapi.SMSAcknowledgeRequest) (bool, error) {
-	if err := adapter.ready(device); err != nil {
+func (adapter *Adapter) AcknowledgeSMS(ctx context.Context, target modemadapter.SMSRuntimeTarget, request agentapi.SMSAcknowledgeRequest) (bool, error) {
+	return acknowledgeSMS(ctx, adapter.driver, adapter.store, target, request)
+}
+
+func acknowledgeSMS(ctx context.Context, driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget, request agentapi.SMSAcknowledgeRequest) (bool, error) {
+	if err := readyAdapter(driver, store, target); err != nil {
 		return false, err
 	}
-	if request.DeviceID != device.ID {
+	if request.DeviceID != target.Device.ID {
 		return false, agentapi.ErrSMSRequestInvalid
 	}
-	digest := digestFields(device.ID, request.MessageID)
+	digest := digestFields(target.SubscriptionKey, request.MessageID)
 	accepted := operationRecord{
-		OperationID: request.OperationID, Kind: operationAcknowledge, RequestDigest: digest, State: operationAccepted,
+		OperationID: request.OperationID, SubscriptionKey: target.SubscriptionKey, Kind: operationAcknowledge, RequestDigest: digest, State: operationAccepted,
 	}
-	existing, replayed, err := adapter.store.PutOperation(ctx, accepted)
+	existing, replayed, err := store.PutOperation(ctx, accepted)
 	if err != nil {
 		return false, fmt.Errorf("persist QDC507 SMS acknowledge operation: %w", err)
 	}
 	if replayed {
-		if existing.Kind != operationAcknowledge || existing.RequestDigest != digest {
+		if existing.SubscriptionKey != target.SubscriptionKey || existing.Kind != operationAcknowledge || existing.RequestDigest != digest {
 			return false, agentapi.ErrSMSOperationConflict
 		}
 		if existing.State == operationSucceeded {
@@ -182,16 +223,16 @@ func (adapter *Adapter) AcknowledgeSMS(ctx context.Context, device agentapi.Devi
 		}
 	}
 
-	record, found, err := adapter.store.FindInbound(ctx, device.ID, request.MessageID)
+	record, found, err := store.FindInbound(ctx, target.SubscriptionKey, request.MessageID)
 	if err != nil {
 		return false, fmt.Errorf("read QDC507 SMS acknowledge state: %w", err)
 	}
 	if !found {
-		return false, adapter.abandonAcknowledge(ctx, accepted, agentapi.ErrSMSMessageNotFound)
+		return false, abandonAcknowledge(ctx, store, accepted, agentapi.ErrSMSMessageNotFound)
 	}
 	if record.Acknowledged {
 		accepted.State = operationSucceeded
-		if err := adapter.store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
+		if err := store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
 			return false, fmt.Errorf("complete QDC507 SMS acknowledge replay: %w", err)
 		}
 		return true, nil
@@ -201,7 +242,7 @@ func (adapter *Adapter) AcknowledgeSMS(ctx context.Context, device agentapi.Devi
 		if record.Segments[index].Deleted {
 			continue
 		}
-		deleted, err := adapter.deleteInboundSegment(ctx, device, record.Segments[index])
+		deleted, err := deleteInboundSegment(ctx, driver, target.Device, record.Segments[index])
 		if err != nil {
 			return false, err
 		}
@@ -209,23 +250,23 @@ func (adapter *Adapter) AcknowledgeSMS(ctx context.Context, device agentapi.Devi
 			return false, errors.New("QDC507 SMS segment deletion was not confirmed")
 		}
 		record.Segments[index].Deleted = true
-		if err := adapter.store.UpdateInbound(context.WithoutCancel(ctx), record); err != nil {
+		if err := store.UpdateInbound(context.WithoutCancel(ctx), record); err != nil {
 			return false, fmt.Errorf("persist QDC507 SMS segment acknowledgement: %w", err)
 		}
 	}
 	record.Acknowledged = true
-	if err := adapter.store.UpdateInbound(context.WithoutCancel(ctx), record); err != nil {
+	if err := store.UpdateInbound(context.WithoutCancel(ctx), record); err != nil {
 		return false, fmt.Errorf("persist QDC507 SMS acknowledgement: %w", err)
 	}
 	accepted.State = operationSucceeded
-	if err := adapter.store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
+	if err := store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
 		return false, fmt.Errorf("complete QDC507 SMS acknowledge operation: %w", err)
 	}
 	return true, nil
 }
 
-func (adapter *Adapter) deleteInboundSegment(ctx context.Context, device agentapi.DeviceReport, segment InboundSegment) (bool, error) {
-	current, err := adapter.driver.Read(ctx, device, segment.Index)
+func deleteInboundSegment(ctx context.Context, driver PDUDriver, device agentapi.DeviceReport, segment InboundSegment) (bool, error) {
+	current, err := driver.Read(ctx, device, segment.Index)
 	if errors.Is(err, agentapi.ErrSMSMessageNotFound) {
 		return true, nil
 	}
@@ -235,14 +276,14 @@ func (adapter *Adapter) deleteInboundSegment(ctx context.Context, device agentap
 	if current.Index != segment.Index || sha256.Sum256(current.PDU) != segment.PDUDigest {
 		return false, ErrStorageIndexReused
 	}
-	deleteErr := adapter.driver.Delete(ctx, device, segment.Index)
+	deleteErr := driver.Delete(ctx, device, segment.Index)
 	if deleteErr == nil || errors.Is(deleteErr, agentapi.ErrSMSMessageNotFound) {
 		return true, nil
 	}
 	// A lost delete response is reconciled once by reading the fixed index. A
 	// still-matching PDU is left for an explicit retry; a different PDU is
 	// never deleted.
-	reconciled, readErr := adapter.driver.Read(ctx, device, segment.Index)
+	reconciled, readErr := driver.Read(ctx, device, segment.Index)
 	if errors.Is(readErr, agentapi.ErrSMSMessageNotFound) {
 		return true, nil
 	}
@@ -255,33 +296,41 @@ func (adapter *Adapter) deleteInboundSegment(ctx context.Context, device agentap
 	return false, deleteErr
 }
 
-func (adapter *Adapter) terminalSendFailure(ctx context.Context, accepted operationRecord, cause error) error {
+func terminalSendFailure(ctx context.Context, store StateStore, accepted operationRecord, cause error) error {
 	accepted.State = operationUnknown
-	if err := adapter.store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
+	if err := store.UpdateOperation(context.WithoutCancel(ctx), accepted); err != nil {
 		return errors.Join(agentapi.ErrSMSOutcomeUnknown, cause, err)
 	}
 	return errors.Join(agentapi.ErrSMSOutcomeUnknown, cause)
 }
 
-func (adapter *Adapter) abandonAcknowledge(ctx context.Context, accepted operationRecord, cause error) error {
-	if err := adapter.store.DeleteOperation(context.WithoutCancel(ctx), accepted); err != nil {
+func abandonAcknowledge(ctx context.Context, store StateStore, accepted operationRecord, cause error) error {
+	if err := store.DeleteOperation(context.WithoutCancel(ctx), accepted); err != nil {
 		return errors.Join(cause, err)
 	}
 	return cause
 }
 
-func (adapter *Adapter) ready(device agentapi.DeviceReport) error {
-	if adapter == nil || adapter.driver == nil || adapter.store == nil || device.ID == "" || device.Profile != agentapi.ProfileQDC507 {
+func readyAdapter(driver PDUDriver, store StateStore, target modemadapter.SMSRuntimeTarget) error {
+	if driver == nil || store == nil || target.Device.ID == "" || target.Device.Profile != agentapi.ProfileQDC507 ||
+		!subscriptionKeyPattern.MatchString(target.SubscriptionKey) {
 		return agentapi.ErrSMSUnsupported
 	}
 	return nil
 }
 
 func (adapter *Adapter) currentTime() time.Time {
-	if adapter.now == nil {
+	if adapter == nil {
 		return time.Now().UTC()
 	}
-	return adapter.now().UTC()
+	return currentTime(adapter.now)
+}
+
+func currentTime(now func() time.Time) time.Time {
+	if now == nil {
+		return time.Now().UTC()
+	}
+	return now().UTC()
 }
 
 func digestFields(fields ...string) [sha256.Size]byte {

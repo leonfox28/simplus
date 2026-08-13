@@ -25,7 +25,7 @@ const (
 
 type Segment struct {
 	Encoding  Encoding
-	Reference byte
+	Reference uint16
 	Part      int
 	Total     int
 	UnitCount int
@@ -115,7 +115,7 @@ func encodeGSM7(text string, tokens [][]byte) []Segment {
 	for index, part := range parts {
 		septets := flattenByteTokens(part)
 		segment := Segment{
-			Encoding: EncodingGSM7, Reference: reference, Part: index + 1, Total: len(parts), UnitCount: len(septets),
+			Encoding: EncodingGSM7, Reference: uint16(reference), Part: index + 1, Total: len(parts), UnitCount: len(septets),
 		}
 		if len(parts) == 1 {
 			segment.UserData = packSeptets(septets, 0)
@@ -154,7 +154,7 @@ func encodeUCS2(text string) []Segment {
 			data = append(concatenationHeader(reference, len(parts), index+1), data...)
 		}
 		segments = append(segments, Segment{
-			Encoding: EncodingUCS2, Reference: reference, Part: index + 1, Total: len(parts), UnitCount: len(units), UserData: data,
+			Encoding: EncodingUCS2, Reference: uint16(reference), Part: index + 1, Total: len(parts), UnitCount: len(units), UserData: data,
 		})
 	}
 	return segments
@@ -371,16 +371,73 @@ func segmentPayload(segment Segment) ([]byte, int, error) {
 	if len(segment.UserData) < 6 {
 		return nil, 0, errors.New("concatenated SMS is missing its UDH")
 	}
-	header := segment.UserData[:6]
-	if header[0] != 0x05 || header[1] != 0x00 || header[2] != 0x03 || header[3] != segment.Reference ||
-		int(header[4]) != segment.Total || int(header[5]) != segment.Part {
+	header, err := parseConcatenationHeader(segment.UserData)
+	if err != nil || header.reference != segment.Reference || header.total != segment.Total || header.part != segment.Part {
 		return nil, 0, errors.New("concatenated SMS UDH does not match its envelope")
 	}
 	padding := 0
 	if segment.Encoding == EncodingGSM7 {
-		padding = 1
+		headerSeptets := (header.bytes*8 + 6) / 7
+		padding = headerSeptets*7 - header.bytes*8
 	}
-	return segment.UserData[6:], padding, nil
+	return segment.UserData[header.bytes:], padding, nil
+}
+
+type concatenationHeaderInfo struct {
+	reference uint16
+	total     int
+	part      int
+	bytes     int
+}
+
+func parseConcatenationHeader(data []byte) (concatenationHeaderInfo, error) {
+	if len(data) < 2 {
+		return concatenationHeaderInfo{}, errors.New("concatenated SMS is missing its UDH")
+	}
+	headerBytes := int(data[0]) + 1
+	if headerBytes < 6 || headerBytes > len(data) {
+		return concatenationHeaderInfo{}, errors.New("concatenated SMS has an invalid UDH length")
+	}
+	var result concatenationHeaderInfo
+	found := false
+	for cursor := 1; cursor < headerBytes; {
+		if cursor+2 > headerBytes {
+			return concatenationHeaderInfo{}, errors.New("concatenated SMS has a truncated UDH element")
+		}
+		identifier, length := data[cursor], int(data[cursor+1])
+		cursor += 2
+		if cursor+length > headerBytes {
+			return concatenationHeaderInfo{}, errors.New("concatenated SMS has an invalid UDH element length")
+		}
+		var reference uint16
+		var total, part int
+		switch identifier {
+		case 0x00:
+			if length != 3 {
+				return concatenationHeaderInfo{}, errors.New("concatenated SMS has an invalid 8-bit reference element")
+			}
+			reference, total, part = uint16(data[cursor]), int(data[cursor+1]), int(data[cursor+2])
+		case 0x08:
+			if length != 4 {
+				return concatenationHeaderInfo{}, errors.New("concatenated SMS has an invalid 16-bit reference element")
+			}
+			reference = binary.BigEndian.Uint16(data[cursor : cursor+2])
+			total, part = int(data[cursor+2]), int(data[cursor+3])
+		default:
+			cursor += length
+			continue
+		}
+		if found || total < 2 || part < 1 || part > total {
+			return concatenationHeaderInfo{}, errors.New("concatenated SMS has an ambiguous concatenation element")
+		}
+		result = concatenationHeaderInfo{reference: reference, total: total, part: part, bytes: headerBytes}
+		found = true
+		cursor += length
+	}
+	if !found {
+		return concatenationHeaderInfo{}, errors.New("concatenated SMS UDH has no concatenation element")
+	}
+	return result, nil
 }
 
 func concatenationReference(text string, total int) byte {

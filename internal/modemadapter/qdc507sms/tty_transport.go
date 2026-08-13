@@ -47,10 +47,17 @@ func NewTTYTransport() *TTYTransport {
 }
 
 func (transport *TTYTransport) Command(ctx context.Context, endpoint, command string, timeout time.Duration) ([]string, error) {
+	if transport == nil {
+		return nil, ErrTTYUnsupported
+	}
+	return ttyCommand(ctx, transport.open, endpoint, command, timeout)
+}
+
+func ttyCommand(ctx context.Context, open serialSessionOpener, endpoint, command string, timeout time.Duration) ([]string, error) {
 	if err := validateTTYExchange(endpoint, command, timeout); err != nil {
 		return nil, err
 	}
-	session, err := transport.openSession(endpoint)
+	session, err := openTTYSession(open, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -62,17 +69,24 @@ func (transport *TTYTransport) Command(ctx context.Context, endpoint, command st
 	if err := session.Write(ctx, []byte(command+"\r"), remainingTTYTimeout(deadline)); err != nil {
 		return nil, fmt.Errorf("write QDC507 SMS AT command: %w", err)
 	}
-	return readTTYTerminal(ctx, session, command, deadline, nil)
+	return readTTYTerminal(ctx, session, command, "", deadline, nil)
 }
 
 func (transport *TTYTransport) Prompt(ctx context.Context, endpoint, command string, payload []byte, timeout time.Duration) ([]string, error) {
+	if transport == nil {
+		return nil, errors.Join(ErrPromptNotDispatched, ErrTTYUnsupported)
+	}
+	return ttyPrompt(ctx, transport.open, endpoint, command, payload, timeout)
+}
+
+func ttyPrompt(ctx context.Context, open serialSessionOpener, endpoint, command string, payload []byte, timeout time.Duration) ([]string, error) {
 	if err := validateTTYExchange(endpoint, command, timeout); err != nil {
 		return nil, errors.Join(ErrPromptNotDispatched, err)
 	}
 	if err := validateSubmitPayload(payload); err != nil {
 		return nil, errors.Join(ErrPromptNotDispatched, err)
 	}
-	session, err := transport.openSession(endpoint)
+	session, err := openTTYSession(open, endpoint)
 	if err != nil {
 		return nil, errors.Join(ErrPromptNotDispatched, err)
 	}
@@ -94,14 +108,22 @@ func (transport *TTYTransport) Prompt(ctx context.Context, endpoint, command str
 	if err := session.Write(ctx, payload, remainingTTYTimeout(deadline)); err != nil {
 		return nil, fmt.Errorf("write QDC507 SMS submit payload: %w", err)
 	}
-	return readTTYTerminal(ctx, session, "", deadline, prefix)
+	payloadEcho := string(payload[:len(payload)-1])
+	return readTTYTerminal(ctx, session, "", payloadEcho, deadline, prefix)
 }
 
 func (transport *TTYTransport) openSession(endpoint string) (serialSession, error) {
-	if transport == nil || transport.open == nil {
+	if transport == nil {
 		return nil, ErrTTYUnsupported
 	}
-	session, err := transport.open(endpoint)
+	return openTTYSession(transport.open, endpoint)
+}
+
+func openTTYSession(open serialSessionOpener, endpoint string) (serialSession, error) {
+	if open == nil {
+		return nil, ErrTTYUnsupported
+	}
+	session, err := open(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("open QDC507 SMS tty: %w", err)
 	}
@@ -152,7 +174,7 @@ func readTTYPrompt(ctx context.Context, session serialSession, command string, d
 		if err != nil {
 			return nil, nil, err
 		}
-		if lines, ok := ttyTerminalLines(buffer, command); ok {
+		if lines, ok := ttyTerminalLines(buffer, command, ""); ok {
 			return nil, lines, nil
 		}
 		if prompt := findTTYPrompt(buffer); prompt >= 0 {
@@ -165,13 +187,13 @@ func readTTYPrompt(ctx context.Context, session serialSession, command string, d
 	}
 }
 
-func readTTYTerminal(ctx context.Context, session serialSession, command string, deadline time.Time, initial []byte) ([]string, error) {
+func readTTYTerminal(ctx context.Context, session serialSession, command, payloadEcho string, deadline time.Time, initial []byte) ([]string, error) {
 	buffer := append([]byte(nil), initial...)
 	if len(buffer) > maxTTYResponseBytes {
 		return nil, ErrTTYResponseTooLarge
 	}
 	for {
-		if lines, ok := ttyTerminalLines(buffer, command); ok {
+		if lines, ok := ttyTerminalLines(buffer, command, payloadEcho); ok {
 			return lines, nil
 		}
 		chunk, err := readTTYChunk(ctx, session, deadline)
@@ -211,8 +233,8 @@ func appendTTYBounded(buffer, chunk []byte) ([]byte, error) {
 	return append(buffer, chunk...), nil
 }
 
-func ttyTerminalLines(buffer []byte, command string) ([]string, bool) {
-	lines := splitTTYLines(buffer, command)
+func ttyTerminalLines(buffer []byte, command, payloadEcho string) ([]string, bool) {
+	lines := splitTTYLines(buffer, command, payloadEcho)
 	for index, line := range lines {
 		if line == "OK" || line == "ERROR" || strings.HasPrefix(line, "+CME ERROR:") || strings.HasPrefix(line, "+CMS ERROR:") {
 			return lines[:index+1], true
@@ -221,13 +243,18 @@ func ttyTerminalLines(buffer []byte, command string) ([]string, bool) {
 	return nil, false
 }
 
-func splitTTYLines(buffer []byte, command string) []string {
+func splitTTYLines(buffer []byte, command, payloadEcho string) []string {
 	text := strings.ReplaceAll(string(buffer), "\r", "\n")
 	parts := strings.Split(text, "\n")
 	lines := make([]string, 0, len(parts))
+	payloadEchoSkipped := false
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" || part == command {
+			continue
+		}
+		if !payloadEchoSkipped && payloadEcho != "" && strings.TrimSuffix(part, string(rune(0x1a))) == payloadEcho {
+			payloadEchoSkipped = true
 			continue
 		}
 		lines = append(lines, part)

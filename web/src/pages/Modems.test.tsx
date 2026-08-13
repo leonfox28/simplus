@@ -16,7 +16,12 @@ describe('Modems safety workflows', () => {
       if (url.pathname === '/api/v1/modems' && request.method === 'GET') return json({ modems: [{
         id: 'modem_AAAAAAAAAAAAAAAAAAAAAA', displayName: '测试模组', model: '', serialNumber: 'SYNTHETIC-001',
         transport: 'usb', state: 'online', capabilities: { ...noCapabilities, simAccess: true, rfControl: true },
-        rfState: 'unknown', simPresence: 'present', addedAt: '2026-08-07T00:00:00Z',
+        rfState: 'unknown', simPresence: 'present', cellular: {
+          state: 'searching', errorCode: 'CELLULAR_NOT_REGISTERED', registrations: [
+            { domain: 'cs', state: 'searching' }, { domain: 'packet', state: 'not-registered' }, { domain: 'eps', state: 'searching' },
+          ], operatorName: 'Synthetic Carrier', operatorCode: '001-01', rat: 'lte', signalState: 'measured', signalRssiDbm: -73,
+          observedAt: '2026-08-07T00:00:01Z',
+        }, addedAt: '2026-08-07T00:00:00Z',
       }] })
       if (url.pathname.endsWith('/equipment-identity')) return json({ imei: '123456789012345' })
       if (url.pathname === '/api/v1/modem-candidates') return json({ candidates: [{
@@ -29,7 +34,10 @@ describe('Modems safety workflows', () => {
     const { queryClient } = renderPage(<Modems />)
     const modemID = 'modem_AAAAAAAAAAAAAAAAAAAAAA'
     const rf = await screen.findByTestId(`rf-toggle-${modemID}`)
+    expect(screen.getAllByText('SYNTHETIC-001').length).toBeGreaterThan(0)
     expect(screen.getAllByText('读取失败').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('正在搜网').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Synthetic Carrier · LTE/).length).toBeGreaterThan(0)
     expect(rf).toBeDisabled()
     fireEvent.click(screen.getByTestId(`imei-toggle-${modemID}`))
     await waitFor(() => expect(screen.getByTestId(`imei-value-${modemID}`)).toHaveTextContent('123456789012345'))
@@ -41,6 +49,30 @@ describe('Modems safety workflows', () => {
     expect(screen.queryByText(/eUICC/i)).not.toBeInTheDocument()
     expect(requests.filter((request) => new URL(request.url).pathname === '/api/v1/euicc')).toHaveLength(0)
     await waitFor(() => expect(requests.filter((request) => request.method === 'POST' && new URL(request.url).pathname === '/api/v1/modems')).toHaveLength(0))
+  })
+
+  it('shows unavailable when the current modem serial observation is empty', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      const url = new URL(request.url)
+      if (url.pathname === '/api/v1/modems' && request.method === 'GET') return json({ modems: [{
+        id: 'modem_BBBBBBBBBBBBBBBBBBBBBB', displayName: '无序列号模组', model: 'Synthetic', serialNumber: '',
+        transport: 'usb', state: 'online', capabilities: { ...noCapabilities, simAccess: true, rfControl: true },
+        rfState: 'unknown', simPresence: 'present',
+        cellular: {
+          state: 'searching', errorCode: 'CELLULAR_NOT_REGISTERED', registrations: [
+            { domain: 'cs', state: 'searching' }, { domain: 'packet', state: 'not-registered' }, { domain: 'eps', state: 'searching' },
+          ], operatorName: 'Synthetic Carrier', operatorCode: '001-01', rat: 'lte', signalState: 'measured', signalRssiDbm: -73,
+          observedAt: '2026-08-07T00:00:01Z',
+        },
+        addedAt: '2026-08-07T00:00:00Z',
+      }] })
+      throw new Error(`unexpected ${request.method} ${url.pathname}`)
+    })
+
+    renderPage(<Modems />)
+
+    expect((await screen.findAllByText('未提供')).length).toBeGreaterThan(0)
   })
 
   it.each([

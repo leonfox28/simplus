@@ -59,7 +59,7 @@ func TestEncodeSubmitPDUMultipartKeepsUDHAndLimits(t *testing.T) {
 					t.Fatal(err)
 				}
 				if pdu.Bytes[1]&0x40 == 0 || pdu.UserDataSize > 140 || !slices.Equal(segment.UserData[:6], []byte{
-					0x05, 0x00, 0x03, segment.Reference, byte(segment.Total), byte(segment.Part),
+					0x05, 0x00, 0x03, byte(segment.Reference), byte(segment.Total), byte(segment.Part),
 				}) {
 					t.Fatalf("multipart PDU = %#v segment = %#v", pdu, segment)
 				}
@@ -80,5 +80,13 @@ func TestEncodeSubmitPDURejectsInvalidInput(t *testing.T) {
 	corrupt.UserData = slices.Clone(corrupt.UserData[:len(corrupt.UserData)-1])
 	if _, err := EncodeSubmitPDU("10086", corrupt, 0); err == nil {
 		t.Fatal("corrupt GSM7 payload was accepted")
+	}
+	multipart, err := Encode(strings.Repeat("a", 161))
+	if err != nil || len(multipart) != 2 {
+		t.Fatalf("multipart fixture = %#v, error = %v", multipart, err)
+	}
+	multipart[0].Reference = 256
+	if _, err := EncodeSubmitPDU("10086", multipart[0], 0); err == nil {
+		t.Fatal("16-bit outbound concatenation reference was accepted")
 	}
 }

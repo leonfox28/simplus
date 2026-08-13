@@ -33,6 +33,9 @@ func EncodeSubmitPDU(destination string, segment Segment, messageReference byte)
 	if segment.Total == 1 && (segment.Part != 1 || segment.Reference != 0) {
 		return SubmitPDU{}, errors.New("single-part SMS has an invalid concatenation envelope")
 	}
+	if segment.Total > 1 && segment.Reference > 255 {
+		return SubmitPDU{}, errors.New("outbound SMS requires an 8-bit concatenation reference")
+	}
 	firstOctet := byte(0x01) // SMS-SUBMIT with no validity period.
 	dataCodingScheme := byte(0)
 	userDataLength := 0

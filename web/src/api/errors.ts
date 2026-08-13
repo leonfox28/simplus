@@ -52,6 +52,8 @@ const codeMessages: Record<string, string> = {
   PAGE_CURSOR_INVALID: '分页位置已失效，请重新加载列表。',
   REQUEST_INVALID: '提交内容不符合要求，请检查后重试。',
   SMS_SEND_OUTCOME_UNKNOWN: '发送结果暂不确定，请刷新历史，切勿立即重复发送。',
+  MESSAGE_TRANSPORT_AMBIGUOUS: '该线路匹配到多个短信路径，系统已拒绝选择。',
+  MESSAGE_TRANSPORT_UNAVAILABLE: '该线路选定的短信路径当前不可用，不会自动切换到其他路径。',
   VOWIFI_UNAVAILABLE: 'Host VoWiFi 运行状态暂不可用。',
 }
 
