@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~262 | Active |
+| `journal-1.md` | ~285 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-08-14 | Audit layer boundaries and retire native deployment | `0ca25d4`, `7013707` | `main` |
 | 11 | 2026-08-14 | Line phone number observations | `97b06e5` | `main` |
 | 10 | 2026-08-13 | 清理 QDC507 HIL 并接入模块序列号 | `5cc4214` | `main` |
 | 9 | 2026-08-13 | QDC507 原生蜂窝短信 | `5cc4214` | `main` |

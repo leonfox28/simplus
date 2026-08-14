@@ -260,3 +260,26 @@ Added typed QDC507 subscriber-number observation, propagated it through Agent an
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Audit layer boundaries and retire native deployment
+
+**Date**: 2026-08-14
+**Task**: Audit layer boundaries and retire native deployment
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Completed repository-wide layer-boundary audit, removed the unsupported native Debian production path, strengthened Compose host conflict checks, synchronized docs/specs, and preserved legacy private state for explicit follow-up.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0ca25d4` | (see git log) |
+| `7013707` | (see git log) |
+
+### Status
+
+[OK] **Completed**
