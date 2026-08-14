@@ -1,13 +1,12 @@
-# Docker Compose 部署与原生过渡
+# Docker Compose 生产部署
 
 ## 当前状态
 
-Simplus 的目标生产形态是 Docker Compose，并保持 `simplusd`、`simplus-agent`、
+Docker Compose 是 Simplus 唯一受支持的生产部署方式，并保持 `simplusd`、`simplus-agent`、
 `simplus-netd` 三个权限边界。容器定义、镜像构建、宿主准备、数据初始化、typed
 healthcheck 和发布 workflow 已进入仓库；开发 VM 已完成真实硬件容器业务 HIL，但
-clean Debian VM 生命周期尚未验收，因此当前仍属于可审查的部署候选。原生 systemd
-安装路径在 clean-VM 验收前继续保留，
-但两套运行态不得同时占用模组或管理端口。
+clean Debian VM 生命周期尚未验收，因此当前仍属于可审查的部署候选，而不是稳定发布
+版本。
 
 三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发 VM 完成
 smoke；该证据验证镜像、权限、netd preflight、bootstrap、Web 登录和数据保留重建，
@@ -17,8 +16,8 @@ Host VoWiFi 注册和单段自号码短信回环 HIL；该证据没有请求 RF 
 其他收件人互通、电话或 clean-VM 生命周期证据。
 
 容器部署创建全新实例，数据位于 Compose 文件旁的 `./data`，不会读取或迁移原生
-`/var/lib/simplus`。需要保留旧数据时先留在原生安装中，不要手工复制数据库或运行
-目录到容器。
+`/var/lib/simplus`。需要保留旧数据时应将它与 Compose 数据分开保存，不要手工复制
+数据库或运行目录到容器；仓库不提供自动迁移或恢复推断。
 
 ## 支持边界
 
@@ -56,7 +55,8 @@ Agent 容器启动后从型号 Adapter registry 取得白名单 ID，并只写�
 
 宿主检查会拒绝 rootless/userns、过旧 Compose、缺失的 `new_id` 和符号链接数据目录。
 发现 ModemManager 运行时只给出警告，不会停止或改写它；若它占用目标串口，Agent
-会 fail closed。
+会 fail closed。检查还会拒绝仍在运行或已启用的遗留 Simplus systemd 服务或本机开发
+Agent，避免它们在当前或下次启动时与 Compose 争用模组、端口或运行对象。
 
 ## 启动全新实例
 
@@ -77,8 +77,8 @@ docker compose logs bootstrap
 ```
 
 `SIMPLUS_DEVICE_GID` 必须等于宿主 ttyUSB 节点所属组的数字 GID；Debian 默认
-`dialout` 为 20。如果原生 production 服务或开发 Agent 已运行，应先明确停止它们，
-再启动 Compose；安装流程不会替用户操作宿主服务。
+`dialout` 为 20。如果遗留 production 服务或开发 Agent 已运行或启用，应先明确停止并
+禁用它们，再启动 Compose；宿主准备和检查脚本不会替用户操作其他服务。
 
 `data-init` 创建并固定：
 
@@ -88,9 +88,9 @@ docker compose logs bootstrap
 ```
 
 Agent 在这个私有目录下固定使用 `qdc507-sms/` 保存 QDC507 v2 SMS recovery ledger；container
-entrypoint 通过 `--state-root /var/lib/simplus-agent/qdc507-sms` 传入，原生 unit 使用对应
-`StateDirectory` 子目录。缺失/不安全目录、schema 不兼容或 store/adapter 构造失败会阻止 Agent
-启动，不能退化为不带恢复状态的短信发送。该目录与 WAL/SHM 都是私有运行数据，不应复制进仓库。
+entrypoint 通过 `--state-root /var/lib/simplus-agent/qdc507-sms` 传入。缺失/不安全目录、
+schema 不兼容或 store/adapter 构造失败会阻止 Agent 启动，不能退化为不带恢复状态的
+短信发送。该目录与 WAL/SHM 都是私有运行数据，不应复制进仓库。
 
 全新数据目录还会获得 netd 镜像中固定并校验过摘要的 Mihomo core。后续重建不会覆盖
 当前 core；管理员仍可在后台按既有的官方 release 校验流程升级。镜像所含 GPL-3.0
@@ -158,15 +158,14 @@ netd 启动时创建临时 namespace/veth/nft/XFRM 探针并立即清理。探�
 - Mihomo/VoWiFi 不可用：先确认预装或后台升级的 core 有效，并选择有效订阅/出口，再按
   [`troubleshooting.md`](troubleshooting.md) 的稳定状态检查。
 
-## 原生安装过渡
+## 遗留原生状态边界
 
-容器 HIL 验收前，现有 Debian bundle 仍可作为回退：
+仓库不再提供原生 Debian production bundle、安装器或卸载器。遗留 `/var/lib/simplus`
+等私有状态不会被 Compose 读取、迁移或删除；需要恢复时必须先取得明确授权，并使用独立、
+经过审查的恢复方案，不能把旧数据库或运行目录直接复制到 `./data`。
 
-```bash
-scripts/release/build-debian-bundle.sh "$PWD/.dev/release/debian"
-sudo .dev/release/debian/install-debian.sh
-```
-
-它安装三个 systemd 服务和由 `dpkg` 管理的 `simplus-strongswan-plugins`。该路径不会
-与容器共享数据；切换运行方式前必须先停止另一套 Agent/netd/app。容器验收完成后，
-原生 production 安装器将退出默认发布，本机开发用的受限 `simplus-agent-dev` 不受影响。
+`check-container-host.sh` 仍会拒绝正在运行或已启用的遗留 `simplus-ml307a-bind`、
+`simplus-agent`、`simplus-netd`、`simplusd` systemd 服务以及 `simplus-agent-dev`。这项
+fail-closed 检查用于避免当前或重启后的资源争用，不表示原生 production 仍受支持。本机
+Linux 开发和受限的 `simplus-agent-dev` HIL 工作流继续由
+[`development.md`](development.md) 维护。

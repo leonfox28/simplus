@@ -152,8 +152,8 @@ make container-config CONTAINER_IMAGE_TAG=dev
 该过程生成 `simplus-control`、`simplus-agent` 和 `simplus-netd`，不会生成 dev image。
 Compose 真实启动会访问 host USB/sysfs 并为 netd 创建网络对象，必须先按
 [`installation.md`](installation.md) 完成宿主准备，并停止本机 `simplus-agent-dev`
-及原生 production 服务。单纯构建或 `docker compose config` 不执行 RF、SIM AKA、
-VoWiFi、短信或电话动作。
+及遗留 production 服务，同时禁用对应 unit，避免它们在重启后争用资源。单纯构建或
+`docker compose config` 不执行 RF、SIM AKA、VoWiFi、短信或电话动作。
 
 基础镜像使用仓库固定的 Go/Node/Debian tag 与 manifest digest。正式 tag workflow
 只发布 `linux/amd64` GHCR 镜像，并把 strongSwan 插件 Debian 包、对应源码及镜像内
@@ -171,7 +171,7 @@ make build-vowifi-hil
 bash scripts/dev/test-simplus-simaka-c.sh
 ```
 
-正式 bundle 只安装经过锁定输入构建和验证的 `simplus-strongswan-plugins` 包；HIL
+production netd 镜像只安装经过锁定输入构建和验证的 `simplus-strongswan-plugins` 包；HIL
 主机不现场编译插件，也不接受手工 source/build tree。一次性 runner 只接受内部固定
 路径和类型化输入；节点配置必须为 root-owned mode `0600`，不得打印或提交。
 
@@ -185,4 +185,4 @@ bash scripts/dev/test-simplus-simaka-c.sh
 - 原始 HIL 与逐次排错记录应进入仓库外的私有记录系统；
 - 公开兼容性结论只更新 [`compatibility.md`](compatibility.md)；
 - 准备公开提交前运行 `make check-docs`，并遵守 [`privacy-and-publication.md`](privacy-and-publication.md)；
-- 正式安装和升级使用 release bundle，不从开发目录复制运行文件。
+- 正式安装和升级使用固定 tag 的 Compose 镜像，不从开发目录复制运行文件。

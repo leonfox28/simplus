@@ -210,7 +210,7 @@ Read the target before running it:
 | `make dev-hardware` / `dev-hardware-lan` | Starts the hardware backend. Startup alone does not authorize clicking RF or communication actions; LAN exposure remains trusted-network only. |
 | `make build-vowifi-hil` and protocol fixture tests | Build/test only; they do not authorize a real runner. |
 | `scripts/dev/run-ml307a-vowifi-hil.sh`, Compose hardware startup, real messaging/calls/RF/eUICC | Controlled side effects; require an approved plan, exact target/preconditions, and explicit authorization. |
-| `scripts/release/prepare-container-host.sh` or install/uninstall flows | Host mutation, not HIL-0; require deployment authorization and rollback understanding. |
+| `scripts/release/prepare-container-host.sh` | Host mutation, not HIL-0; requires deployment authorization and rollback understanding. Native production install/uninstall flows are retired. |
 
 `docs/development.md` is the operational source for current command meanings.
 If a target's behavior changes, update that document and this classification
@@ -222,7 +222,8 @@ Before an approved side-effecting action:
 
 - restate the exact action, target model/Line, expected external effect, and
   stop condition;
-- confirm no competing native/container Agent owns the modem or ports;
+- confirm no active or enabled legacy production/development Agent competes
+  with the container Agent for the modem or ports;
 - use the narrow typed runner and current adapter evidence; never substitute a
   model, interface, path, or command from memory;
 - start with a fixture and, when useful, fixed HIL-0 state confirmation;

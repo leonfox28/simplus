@@ -11,7 +11,7 @@ Use the owner already declared by `docs/README.md`:
 | `docs/plans/active/mvp.md` | The sole active cross-layer execution plan, progress, next product work, and plan-level acceptance |
 | `docs/handoff.zh-CN.md` | Sanitized current implementation/evidence handoff; it is a status summary, not a new source of scope or architecture |
 | `docs/development.md` | Native Linux setup, validation, Simulator, container-build distinction, HIL-0 commands, and controlled HIL entry points |
-| `docs/installation.md` | Current Compose candidate support, host preparation, lifecycle, privilege/data boundaries, and native-production transition |
+| `docs/installation.md` | Compose-only production support, host preparation, lifecycle, privilege/data boundaries, evidence limits, and legacy-state boundary |
 | `docs/compatibility.md` | Public capability matrix, Designed/Fixture/HIL-0/HIL/Runtime evidence, and explicit unverified boundaries |
 | `docs/troubleshooting.md` | Stable public error codes, fact layers, safe diagnostic order, and permitted support material |
 | `docs/privacy-and-publication.md` | Public/private record boundary and publication procedure |
@@ -101,9 +101,11 @@ public active plan or accepted ADR when a lasting project decision changes.
 
 - Put reproducible native development and safe command meanings in
   `docs/development.md`; keep private host paths and one-off recovery steps out.
-- Put production install/lifecycle facts in `docs/installation.md`; distinguish
-  implemented contract, development-VM smoke, clean-VM Runtime, and hardware
-  HIL.
+- Put production install/lifecycle facts in `docs/installation.md`; keep Docker
+  Compose as the sole supported production path and distinguish implemented
+  contract, development-VM smoke, pending clean-VM Runtime, and hardware HIL.
+  Legacy native state may be described as an unsupported preservation/recovery
+  boundary, never as a second installer or automatic migration path.
 - Put only sanitized evidence summaries with explicit levels in
   `docs/compatibility.md`. A fixture, endpoint, or successful build does not
   imply HIL/Runtime.

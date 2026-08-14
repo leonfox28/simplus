@@ -185,6 +185,23 @@ func TestDockerfileHasOnlyProductionRuntimeTargets(t *testing.T) {
 	}
 }
 
+func TestContainerHostCheckRejectsActiveOrEnabledLegacyServices(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "release", "check-container-host.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{
+		"for service in simplus-ml307a-bind.service simplus-agent.service simplus-netd.service simplusd.service simplus-agent-dev.service",
+		`systemctl is-active --quiet "$service" || systemctl is-enabled --quiet "$service"`,
+		"active or enabled; stop and disable the legacy/development service explicitly before starting Compose",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("container host check is missing legacy-service conflict contract %q", required)
+		}
+	}
+}
+
 func TestNetdImagePinsMihomoAndReleaseSource(t *testing.T) {
 	dockerfile, err := os.ReadFile(filepath.Join(repositoryRoot(t), "Dockerfile"))
 	if err != nil {

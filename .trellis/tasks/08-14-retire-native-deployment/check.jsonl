@@ -1,0 +1,9 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Verify the final source preserves the three-image privilege boundary, registry-only driver write and legacy-service conflict checks."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Verify the repair did not remove native development or container-required strongSwan packaging."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Verify no hardware/HIL action was used and no arbitrary VID/PID/path surface was introduced."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Check canonical docs, active plan and ADR status are synchronized without duplicated or unsupported claims."}
+{"file":"docs/decisions/0021-container-production-deployment.md","reason":"Confirm the implementation note follows the accepted decision and does not rewrite historical evidence."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Apply targeted-to-broad validation, trusted fixture and no-hardware testing rules to the retirement change."}
+{"file":".github/workflows/strongswan-plugins.yml","reason":"Check deleted native paths are removed while plugin package build triggers and job remain intact."}
+{"file":"scripts/release/check-container-host.sh","reason":"Confirm legacy native units still fail the container host preflight despite removal of the installer/uninstaller."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review that documentation, CI, release scripts and container runtime all reflect one production deployment owner."}

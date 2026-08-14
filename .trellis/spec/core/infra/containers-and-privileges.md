@@ -2,6 +2,10 @@
 
 ## Production Shape
 
+Docker Compose is the sole supported production deployment path. Native Linux
+development and `simplus-agent-dev` remain separate development/HIL workflows;
+there is no native production bundle, installer, or uninstaller.
+
 `Dockerfile` has three production runtime targets:
 
 - `control`: `simplusd`, `simplusctl`, and built Web assets, running as
@@ -85,21 +89,110 @@ never copy them into docs, fixtures, commands, or issue output.
 
 ## Host and Lifecycle Boundary
 
-The current Compose deployment candidate is scoped to Debian 13/amd64 with
-rootful Docker, Compose 2.24+, and no userns remap. Clean-VM lifecycle Runtime
-evidence is still pending (`docs/installation.md` and
-`docs/compatibility.md`), so do not present that scope as completed production
-support. `scripts/release/check-container-host.sh` checks the candidate
-boundary, existing native-service conflicts, `option1/new_id`, Docker, and the
-data path. `scripts/release/prepare-container-host.sh` is a root mutation: it
-configures module loading and loads `option`, though it does not write a USB
-ID. Run it only with explicit deployment authorization.
+The Compose deployment candidate is scoped to Debian 13/amd64 with rootful
+Docker, Compose 2.24+, and no userns remap. Clean-VM lifecycle Runtime evidence
+is still pending (`docs/installation.md` and `docs/compatibility.md`), so do not
+present it as a stable release. `scripts/release/check-container-host.sh`
+checks that boundary, active or enabled legacy/development service conflicts,
+`option1/new_id`, Docker, and the data path.
+`scripts/release/prepare-container-host.sh` is a root mutation: it configures
+module loading and loads `option`, though it does not write a USB ID. Run it
+only with explicit deployment authorization.
 
 `make container-build` builds the three images and `make container-config`
 renders Compose. Starting Compose maps host devices and creates runtime
 network objects; it is deployment/HIL-adjacent and is not authorized merely by
-a request to lint or build container files. Native production and Compose must
-not concurrently own the same modem or ports (`docs/installation.md`).
+a request to lint or build container files. The host check must reject an
+active or enabled legacy production unit or `simplus-agent-dev` before Compose
+can own the modem and ports (`docs/installation.md`).
+
+## Scenario: Container-only production and legacy service exclusion
+
+### 1. Scope / Trigger
+
+Apply this contract when changing production deployment commands, host
+preflight, release scripts, service ownership, or the Agent's dynamic USB ID
+registration path.
+
+### 2. Signatures
+
+- Host preparation: `sudo bash scripts/release/prepare-container-host.sh`.
+- Read-only preflight: `bash scripts/release/check-container-host.sh <deployment-root>`.
+- Container-only driver registration: `simplus-agent register-option-driver`,
+  invoked by `containers/agent-entrypoint.sh`.
+- No supported native production bundle/build/install/uninstall command exists.
+
+### 3. Contracts
+
+- Compose is the only production deployment owner; native Go/Node development,
+  Simulator and `simplus-agent-dev` do not become production alternatives.
+- Host preparation may install the fixed `option` module-load configuration and
+  run `modprobe option`; it never writes a USB ID.
+- Host preflight rejects any active **or enabled**
+  `simplus-ml307a-bind.service`, `simplus-agent.service`,
+  `simplus-netd.service`, `simplusd.service`, or
+  `simplus-agent-dev.service`. Checking only current activity is insufficient
+  because an enabled unit can reclaim the resource after reboot.
+- The Agent container obtains every dynamic ID from
+  `modemadapter.DefaultRegistry().USBSerialIDs()` and writes only the fixed
+  mapped `option1/new_id` attribute. No Web, Compose, environment, flag, or
+  caller supplies a VID/PID or path.
+- Legacy private `/var/lib` state is neither inspected, migrated nor deleted by
+  Compose. Its existence does not restore native production support.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| service-conflict check reaches a legacy/development unit that is active or enabled | preflight fails and names the unit; caller must stop and disable it |
+| unit absent, or both inactive and disabled | the service-conflict check passes; earlier host checks remain authoritative |
+| `option1/new_id` absent, non-root-owned or not owner-writable | preflight fails; do not widen the sysfs mount |
+| rootless/userns, old Compose, symlink data path or unsupported host | preflight fails with the bounded host reason |
+| registry contains zero, invalid or duplicate dynamic IDs | Agent registration fails before runtime startup |
+| sysfs write returns `EEXIST` | treat only that condition as already registered |
+| any other registration write/open/close failure | Agent registration fails non-zero |
+
+### 5. Good / Base / Bad Cases
+
+- Good: supported rootful host, no active/enabled conflicting unit and fixed
+  sysfs point -> preflight passes; the Agent can then attempt registry-backed
+  registration and its remaining entrypoint checks.
+- Base: preserved legacy private data exists but every legacy unit is inactive
+  and disabled -> preflight does not read that state, and an authorized Compose
+  start creates/uses only its own deployment-root `./data`.
+- Bad: revive a model-specific shell writer, accept a caller path/VID/PID, or
+  check only `systemctl is-active` and allow an enabled unit to return on boot.
+
+### 6. Tests Required
+
+- `TestContainerHostCheckRejectsActiveOrEnabledLegacyServices` asserts the
+  complete service set, active-or-enabled condition, and fail-closed message.
+- Container contract tests assert the single writable sysfs bind, Agent
+  no-network boundary, and entrypoint runtime/state contracts.
+- Agent/registry tests assert ID validation, copied-result immutability,
+  registry-owned selection, the exact fixed path, `EEXIST` handling, and
+  failure of other write errors.
+- `make check-container-files`, documentation checks, and a stale-reference
+  scan protect shell syntax and the absence of native production entry points.
+
+### 7. Wrong vs Correct
+
+Wrong: check only current activity, or restore a model-specific host writer:
+
+```bash
+systemctl is-active --quiet "$service" && exit 1
+printf 'vendor product\n' >/sys/bus/usb-serial/drivers/option1/new_id
+```
+
+Correct: reject current and next-boot owners, then leave ID selection to the
+fixed container command:
+
+```bash
+if systemctl is-active --quiet "$service" || systemctl is-enabled --quiet "$service"; then
+  exit 1
+fi
+simplus-agent register-option-driver
+```
 
 ## Verification
 

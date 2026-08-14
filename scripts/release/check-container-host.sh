@@ -48,9 +48,9 @@ if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ModemMana
   printf 'warning: ModemManager is active; stop or exclude it if Simplus reports serial-port contention\n' >&2
 fi
 if command -v systemctl >/dev/null 2>&1; then
-  for service in simplus-agent.service simplus-netd.service simplusd.service simplus-agent-dev.service; do
-    if systemctl is-active --quiet "$service"; then
-      fail "$service is active; stop the native service explicitly before starting Compose"
+  for service in simplus-ml307a-bind.service simplus-agent.service simplus-netd.service simplusd.service simplus-agent-dev.service; do
+    if systemctl is-active --quiet "$service" || systemctl is-enabled --quiet "$service"; then
+      fail "$service is active or enabled; stop and disable the legacy/development service explicitly before starting Compose"
     fi
   done
 fi

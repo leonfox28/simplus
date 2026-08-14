@@ -1,6 +1,6 @@
 # Simplus 当前开发交接
 
-> 更新：2026-08-13
+> 更新：2026-08-14
 >
 > 状态：V1 管理面、Vite/React Query 前端、持久模组/线路层、Host VoWiFi/SMS over IMS 与 QDC507 原生蜂窝短信纵切已完成；生产 Docker Compose 已在 Debian 13 开发 VM 完成三镜像构建和隔离 smoke，clean-VM 生命周期验收尚待完成。
 
@@ -16,9 +16,9 @@
 - 概览、模组、线路、短信、语音、Mihomo、通知和系统设置页面；
 - 通知页保留企业微信/飞书手工 Webhook，并已增加飞书中国版最小权限应用的一键绑定：
   短期 URL 等待授权，只向授权用户私聊，测试成功后才加密持久化；解绑只删除本地绑定；
-- production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / bootstrap` 编排全新实例；原生 Debian bundle 和三个 systemd 服务在 clean-VM 生命周期验收前保留为回退，二者不共享数据也不能同时运行；
+- production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / bootstrap` 编排全新实例，并且是唯一受支持的 production 部署方式；clean-VM 生命周期验收仍待完成；
 - Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布；netd 镜像安装该包和 Debian runtime，不要求用户或普通开发者提供 strongSwan 源码树；
-- 全新容器实例由 bootstrap 生成随机管理员密码；原生安装器保持相同语义，升级不覆盖凭据。
+- 全新容器实例由 bootstrap 生成随机管理员密码，升级和重建不覆盖凭据。
 
 ### 容器部署候选
 
@@ -98,7 +98,7 @@
 - 动态 IMS Home Domain 已在一张无可用 ISIM 应用的真实 SIM 上完成只读 HIL-0，确认会读取 EF_AD 后派生；两位/三位 MNC 组合另有 Fixture。真实 Host VoWiFi 业务 HIL 仍只覆盖首个已验证运营商的接入 profile，ePDG FQDN、IKE responder identity 和远端选择尚未通用化；
 - Mihomo 配置中的协议字段、URL-Test 或普通 UDP 成功不能替代目标业务的真实 UDP/ePDG 探针；
 - 项目只面向可信 LAN，不应直接暴露到公网。
-- 新 strongSwan 插件包已经通过静态包内容与可复现输入验证；切换到 `dpkg` 管理后的 clean-VM 安装、升级、卸载和完整 bundle smoke 尚待补充，不能沿用旧裸 `.so` 安装证据代替。
+- strongSwan 插件包已经通过静态包内容与可复现输入验证，并由 netd 镜像通过 `dpkg` 安装；clean-VM Compose 生命周期仍待补充，不能沿用旧原生 bundle 或裸 `.so` 安装证据代替。
 - 容器的 network namespace、固定 UID/socket peer credential 和 capability 边界已有
   隔离 Fixture smoke，真实设备映射、Mihomo、Host VoWiFi 和单段自号码短信回环已有
   独立容器 HIL；仍没有 clean-VM 生命周期证据，也不能把自回环外推为其他收件人互通。

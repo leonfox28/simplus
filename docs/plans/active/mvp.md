@@ -174,9 +174,9 @@
 - [x] 将 Simplus SIM AKA bridge 移入同仓库独立 GPL-2.0-or-later 组件，保持与根项目 PolyForm 许可边界；
 - [x] 为 Debian 13/amd64 锁定精确 strongSwan source、运行 ABI `.deb`、下载地址与 SHA-256，不读取主机安装树作为隐式构建输入；
 - [x] 在普通用户的临时 source tree/sysroot 中构建 Simplus bridge 与上游 `p-cscf`，产出由 `dpkg` 管理的 `simplus-strongswan-plugins` 包；
-- [x] 同时生成包含全部锁定输入的对应源码归档、摘要和机器可读 manifest；bundle 安装/卸载不再复制裸 `.so`，也不再接受人工 source/build 路径；
+- [x] 同时生成包含全部锁定输入的对应源码归档、摘要和机器可读 manifest；netd 镜像只通过 `dpkg` 安装该包，不再复制裸 `.so`，也不再接受人工 source/build 路径；
 - [x] 增加独立 CI 与包级验证，检查导出构造符、动态依赖、固定 runpath、文件权限、ABI 元数据、manifest 和对应源码完整性；
-- [ ] 在新的 Debian 13/amd64 clean VM 上补充 `dpkg` 安装、升级、卸载与完整 bundle smoke；ARM64 和其他发行版仍需各自锁、原生构建及安装证据。
+- [ ] 在新的 Debian 13/amd64 clean VM 上补充插件包构建/校验、netd 镜像安装与 Compose 生命周期 smoke；ARM64 和其他发行版仍需各自锁、对应架构构建及镜像证据。
 
 ## Milestone 26：容器化生产部署
 
@@ -206,7 +206,7 @@
   或触发业务动作；
 - [x] 经逐次授权完成当前开发 VM 容器中的 Mihomo 国家出口、Host VoWiFi 注册与
   单段自号码短信回环 HIL；过程没有请求 RF 写入，并独立于既有 systemd Runtime
-  证据。原生 production 安装器继续保留到 clean-VM 生命周期验收完成。
+  证据。Compose 现为唯一受支持的 production 部署方式，clean-VM 生命周期验收仍待完成。
 
 ## Milestone 20：公开源码准备
 
@@ -251,9 +251,8 @@
 6. ARM64、其他发行版、签名包和供应链发布材料。
 7. QDC507 的稳定设备身份读取与 `ManagedModem` 添加，以及与真实 `RFControlAdapter` 实现一致的能力证据；在专项只读/写入 HIL 前不得复制 ML307A 命令或降低稳定身份要求。
 8. 将 ePDG FQDN、IKE responder identity 和远端选择从当前已验证运营商接入 profile 中解耦，并分别完成其他运营商 HIL；动态 IMS Home Domain 本身不能作为多运营商兼容证据。
-9. 完成 Milestone 26 的 clean-VM 生命周期验收，再从默认发布中移除原生 production
-   安装路径；ARM64、rootless/userns、Podman、Docker Desktop 与 SELinux 发行版仍需
-   独立设计和证据。
+9. 完成 Milestone 26 的 clean-VM Compose 生命周期验收；ARM64、rootless/userns、
+   Podman、Docker Desktop 与 SELinux 发行版仍需独立设计和证据。
 
 每项真实副作用都需要独立设计、最小实现、明确授权和与风险相称的 HIL；Web/API 不得暴露任意 AT/QMI、设备路径、网络命令或配置路径。
 

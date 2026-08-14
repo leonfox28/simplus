@@ -1,0 +1,9 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Defines the production Compose shape, exact Agent sysfs ownership, host checks and legacy native-service conflict boundary that must remain fail closed."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Separates native development from production containers and protects the strongSwan package/build inputs that remain required."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Constrains validation to non-HIL source checks and protects the registry-backed typed device boundary."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Identifies canonical owners for deployment status, installation, ADRs, active plans and public evidence claims."}
+{"file":"docs/decisions/0021-container-production-deployment.md","reason":"Already decides that Compose becomes the sole production deployment after container HIL and preserves native development separately."}
+{"file":"docs/installation.md","reason":"Canonical operational guide currently advertises the obsolete native fallback and must become container-only without overstating evidence."}
+{"file":"docs/architecture.md","reason":"Normative production process map still describes the native systemd fallback and must align with the selected deployment owner."}
+{"file":".github/workflows/strongswan-plugins.yml","reason":"Contains path filters for obsolete bundle/install scripts while the underlying plugin package job remains required by containers."}
+{"file":"scripts/release/check-container-host.sh","reason":"Must remain and continue rejecting legacy native-service contention after native installation tooling is removed."}

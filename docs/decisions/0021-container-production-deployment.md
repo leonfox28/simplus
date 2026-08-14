@@ -3,6 +3,15 @@
 - 状态：Accepted
 - 日期：2026-08-06
 
+## 实施状态（2026-08-14）
+
+第 8 项约定的容器业务 HIL 条件已经满足，仓库已退出原生 Debian production bundle、
+安装器、卸载器与型号专用驱动绑定脚本；Docker Compose 现为唯一受支持的 production
+部署方式。本次退出不提升证据等级：clean Debian VM 的完整安装、升级、停止和卸载生命
+周期仍待验收，不能沿用旧原生 systemd 的 Runtime 结论。遗留私有 `/var/lib` 状态不被
+读取、迁移或删除；本机原生 Go/Node 开发、受限 `simplus-agent-dev` HIL 和 QDC507 原生
+蜂窝短信含义均不受影响。
+
 ## 背景
 
 原生 Debian bundle 会在宿主安装 Simplus 二进制、三个 systemd 服务、strongSwan

@@ -11,9 +11,6 @@ on:
       - scripts/dev/build-strongswan-p-cscf-plugin.sh
       - scripts/dev/test-simplus-simaka-c.sh
       - scripts/dev/test-strongswan-plugins-package.sh
-      - scripts/release/build-debian-bundle.sh
-      - scripts/release/install-debian.sh
-      - scripts/release/uninstall-debian.sh
       - Makefile
   pull_request:
     paths:
@@ -24,9 +21,6 @@ on:
       - scripts/dev/build-strongswan-p-cscf-plugin.sh
       - scripts/dev/test-simplus-simaka-c.sh
       - scripts/dev/test-strongswan-plugins-package.sh
-      - scripts/release/build-debian-bundle.sh
-      - scripts/release/install-debian.sh
-      - scripts/release/uninstall-debian.sh
       - Makefile
   workflow_dispatch:
 

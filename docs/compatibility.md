@@ -67,9 +67,11 @@ SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信�
 - 管理界面以 React、Vite、React Router、直接 Ant Design 和 TanStack Query 为唯一前端栈；
 - 页面通过鉴权 HTTP 读取权威快照和提交 mutation；同源 SSE 只发送有界资源失效与新短信/来电提示，断线后通过 HTTP 收敛；
 - 移动端使用响应式布局和抽屉导航，桌面端保持常驻侧边栏；
-- Debian `linux/amd64` bundle、全新初始化、升级、默认保留数据卸载和显式 purge 已有自动化或 smoke 证据；
+- Docker Compose 是唯一受支持的 production 部署方式；旧原生 Debian bundle 的历史 smoke
+  不构成当前部署支持或 Runtime 证据；
 - Debian 13/amd64 的 `simplus-strongswan-plugins` 已从锁定 source/runtime ABI 输入完成普通用户构建，并自动验证 Debian 包身份、依赖范围、导出构造符、动态依赖、固定 runpath、权限、ABI 元数据、SHA-256 manifest 与对应源码完整性；这是包级 Fixture 证据，不是 ePDG/IMS 运行证据；
-- 新的 `dpkg` 插件安装路径尚未在 clean VM 完成完整 bundle 安装、升级和卸载 smoke；旧版手工复制插件的 smoke 不能替代该项；
+- netd 镜像通过 `dpkg` 安装该插件包；clean VM 上完整 Compose 安装、升级和卸载 smoke
+  仍待完成，旧原生 bundle 或手工复制插件的 smoke 不能替代该项；
 - Docker Compose production 已有三镜像构建定义、固定 UID/Unix socket、Agent 无网络与
   单一 sysfs 写点、netd bridge/capability/preflight、bind-mounted 私有数据、幂等管理员
   bootstrap、固定摘要 Mihomo seed 及其对应源码 release workflow；YAML 权限 contract、

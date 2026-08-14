@@ -10,10 +10,12 @@ These guides apply to `Makefile`, root toolchain/version files, `Dockerfile`,
 and infrastructure-focused workflows/tests. Product code still follows the
 backend or Web package guides.
 
-Daily development is native Linux worktree development. Production is a
-three-image Docker Compose candidate, while real hardware and Host VoWiFi
-validation remain separately authorized evidence paths. This distinction is
-defined in `docs/development.md`, `docs/installation.md`, and
+Daily development is native Linux worktree development. The three-image Docker
+Compose shape is the sole supported production deployment path, although it
+remains a deployment candidate rather than a stable release until clean-VM
+lifecycle evidence is complete. Real hardware and Host VoWiFi validation remain
+separately authorized evidence paths. This distinction is defined in
+`docs/development.md`, `docs/installation.md`, and
 `docs/decisions/0021-container-production-deployment.md`.
 
 ## Pre-Development Checklist

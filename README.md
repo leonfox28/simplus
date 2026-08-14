@@ -20,8 +20,8 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 
 容器部署已经在 Debian 13/amd64 开发虚拟机完成镜像构建、隔离 smoke、真实模组发现、
 Mihomo、Host VoWiFi 和单段自号码短信回环验证；clean Debian 虚拟机上的完整安装、升级
-与卸载生命周期仍待验收。因此当前 Compose 仍属于部署候选，而不是稳定发布版本。原生
-systemd 安装仅作为过渡回退保留，不能与容器同时占用模组或管理端口。
+与卸载生命周期仍待验收。因此 Docker Compose 是唯一受支持的生产部署方式，但当前仍
+属于部署候选，而不是稳定发布版本。
 
 ## 当前能力
 
@@ -85,7 +85,7 @@ docker compose up -d
 ```
 
 完整的宿主要求、权限模型、生命周期、更新方式和故障处理见
-[Docker Compose 部署与原生过渡](docs/installation.md)。
+[Docker Compose 生产部署](docs/installation.md)。
 
 ## 本地开发
 

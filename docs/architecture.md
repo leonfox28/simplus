@@ -27,7 +27,7 @@ production 以 Docker Compose 保留三个进程/镜像的权限分离；它不�
 首次容器部署是新实例，不猜测迁移原生 `/var/lib`。宿主只持有 Docker、内核与开机
 加载的 USB serial `option` 模块，边界见 [`0021`](decisions/0021-container-production-deployment.md)。
 当前开发 VM 的真实容器 HIL 已覆盖 Mihomo、Host VoWiFi 和单段自号码短信回环；
-clean-VM 生命周期验收完成前，原生 systemd production 路径仍作为过渡回退保留。
+Docker Compose 是唯一受支持的 production 部署方式，但 clean-VM 生命周期验收仍待完成。
 Web 运行时已经按
 [`0022`](decisions/0022-vite-react-query-web-runtime.md) 原子迁移到
 Vite/React Router/TanStack Query，并直接使用 Ant Design。旧 Umi/Pro 构建输入、运行时
@@ -195,8 +195,8 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 Host VoWiFi 运行时继续依赖 netd 的 Debian 13 镜像提供的 `charon-systemd`、`libcharon`、
 `libsimaka` 与 `eap-aka`。Simplus 自有的 SIM AKA bridge 是同仓库内独立的
 GPL-2.0-or-later 组件；它与 strongSwan 上游 `p-cscf` 插件只在发布流水线中
-编译成 `simplus-strongswan-plugins` Debian 包。普通 Go/Web 开发、bundle 安装
-和服务运行都不接收或查找 strongSwan source/build tree，也不手工复制裸 `.so`。
+编译成 `simplus-strongswan-plugins` Debian 包。普通 Go/Web 开发、netd 镜像构建
+和容器运行都不接收或查找人工指定的 strongSwan source/build tree，也不手工复制裸 `.so`。
 
 插件构建必须从发行版/架构专用锁取得精确 Debian source 和运行 ABI 输入，校验
 SHA-256 后在临时 source tree 与 sysroot 中以普通用户完成。二进制记录精确 source
