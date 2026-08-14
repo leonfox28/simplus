@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "08-14-retire-native-deployment"
+    "08-14-retire-native-deployment",
+    "08-14-move-background-policy-to-application"
   ],
   "parent": null,
   "relatedFiles": [],

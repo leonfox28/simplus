@@ -20,6 +20,142 @@ The HTTP layer follows the same rule. Interfaces such as `Messenger`,
 `internal/api/httpapi/server.go` express handler needs and keep concrete
 assembly in `cmd/simplusd/main.go`.
 
+## Scenario: Background coordination and realtime invalidation
+
+### 1. Scope / Trigger
+
+Apply this contract whenever an executable starts a polling or long-polling
+loop whose result determines notification intent, realtime invalidation,
+attention metadata, retry policy, or other business meaning. The executable
+owns construction, configured intervals, goroutine lifetime, shutdown and
+operational log rendering. The owning application package owns result
+interpretation, event/topic selection, side-effect ordering and retry state.
+
+### 2. Signatures
+
+The current SMS coordinator in `internal/application/messaging` consumes:
+
+```go
+type InboundSyncer interface {
+    SyncInbound(context.Context) (InboundSyncResult, error)
+}
+type NotificationSender interface {
+    Notify(context.Context, string, string) error
+}
+type RealtimePublisher interface {
+    Publish([]realtime.Topic, realtime.Attention)
+}
+
+func NewSyncCoordinator(InboundSyncer, NotificationSender, RealtimePublisher) (*SyncCoordinator, error)
+func (*SyncCoordinator) Run(context.Context, time.Duration, func(SyncReport))
+```
+
+The Agent change coordinator in `internal/application/inventory` consumes a
+separate smallest source instead of widening the Snapshot/Probe `AgentClient`:
+
+```go
+type AgentChangeSource interface {
+    Snapshot(context.Context, bool) (agentapi.Snapshot, error)
+    Changes(context.Context, string, uint64, int) (agentapi.ChangeResponse, error)
+}
+type AgentChangePublisher interface {
+    Publish([]realtime.Topic, realtime.Attention)
+}
+
+func NewAgentChangeCoordinator(AgentChangeSource, AgentChangePublisher) (*AgentChangeCoordinator, error)
+func (*AgentChangeCoordinator) Run(context.Context, func(AgentChangeReport))
+```
+
+`SyncReport` carries the typed result, synchronization error, notification
+error and durable-change decision. `AgentChangeReport` carries operation
+`snapshot | changes` plus the source error. These reports let
+`cmd/simplusd` preserve operational logs without importing `slog` into the
+application coordinators.
+
+### 3. Contracts
+
+- SMS runs once immediately. Each `SyncInbound` call is bounded to 20 seconds.
+  `Persisted`, `AlreadyKnown`, `OutboundSent`, `OutboundFailed` or
+  `OutboundUnconfirmed` publishes `messages`; acknowledgement-only counters do
+  not. Only `Persisted > 0` attaches `sms.received` attention.
+- Newly persisted inbound SMS invokes notification event `sms.received` with
+  the bounded summary text, using a 15-second context detached from parent
+  cancellation. The coordinator publishes `notifications` after the attempt,
+  including when delivery fails. Only the synchronization error selects retry;
+  notification failure is report-only for scheduling.
+- SMS intervals below one second normalize to two seconds. Synchronization
+  failure begins at `max(15s, interval*4)`, doubles to five minutes and resets
+  after a successful synchronization. Partial durable results are still
+  published/notified before the error selects retry.
+- Agent watching starts with `Snapshot(ctx, false)` and calls `Changes` with
+  the current instance ID, generation and 25-second wait. Explicit changes and
+  instance/generation differences after reconnect publish exactly
+  `inventory`, `modems`, and `lines`, without attention.
+- Agent retry starts at one second, doubles to 30 seconds and resets after a
+  successful change response. Cancellation stops pending retry waits. The
+  coordinator publishes no snapshot/device payload through realtime.
+- Each coordinator owns its consumer interfaces even though the concrete
+  `realtime.Hub` implements both structurally. Do not replace them with a
+  generic background framework, catch-all event bus or concrete Hub field.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Any required SMS coordinator dependency is nil | `ErrSyncCoordinatorConfiguration`; do not start the loop |
+| Any required Agent coordinator dependency is nil | `ErrAgentChangeCoordinatorConfiguration`; do not start the loop |
+| SMS result is partial and synchronization also errors | publish/notify all durable progress, report the error, then use retry delay |
+| SMS result contains only acknowledgement counters | no realtime publication or notification |
+| Notification delivery fails after persisted SMS | report notification error, still publish `notifications`; a successful sync keeps normal interval |
+| Agent initial snapshot fails | report operation `snapshot`, wait with bounded retry, retain prior successful snapshot |
+| Agent long-poll fails | report operation `changes`, reconnect with bounded retry |
+| Reconnected instance or generation differs | publish Inventory/Modems/Lines once before resuming long-poll |
+| Parent context is cancelled | stop pending interval/retry waits promptly and cancel in-flight sync/Agent source contexts; an already-started notification remains detached but bounded by its 15-second deadline |
+
+### 5. Good / Base / Bad Cases
+
+- Good: SMS persists a new inbound record and returns a partial transport
+  error; the coordinator publishes Messages with attention, attempts the
+  notification, publishes Notifications, reports the error and then backs off.
+- Base: Agent long-poll returns unchanged state; update the current snapshot,
+  reset retry and continue without publishing.
+- Bad: `cmd/simplusd` branches on `InboundSyncResult`, constructs notification
+  text, maps Agent changes to topics, or owns exponential-backoff helpers.
+
+### 6. Tests Required
+
+- `messaging/sync_coordinator_test.go`: required dependencies, exact
+  sync→Messages→notification→Notifications order, detached/bounded notification
+  context, partial progress plus error, acknowledgement-only behavior,
+  notification-error retry isolation, retry reset/cap and cancellation.
+- `inventory/change_coordinator_test.go`: non-probing snapshot and exact
+  long-poll arguments, explicit change, instance restart, generation change,
+  unchanged reconnect, typed failure reporting, retry reset/cap and
+  cancellation.
+- `cmd/simplusd` tests retain executable-only helpers; focused ownership scans
+  must find no command-local SMS/Agent topic mapping or backoff functions.
+- Run the coordinator packages and `cmd/simplusd` under `go test -race`, then
+  run the supported `./cmd/... ./internal/...` test/vet scope.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: composition root owns business/event policy.
+result, err := messages.SyncInbound(ctx)
+if result.Persisted > 0 {
+    hub.Publish([]realtime.Topic{realtime.TopicMessages}, realtime.AttentionSMSReceived)
+}
+
+// Correct: application coordinator owns policy through narrow ports.
+coordinator, err := messaging.NewSyncCoordinator(messages, notifications, hub)
+if err != nil {
+    logger.Error("SMS synchronization coordinator configuration failed", "error", err)
+    _ = stores.Close()
+    return 1
+}
+go coordinator.Run(ctx, smsInterval, logSyncReport)
+```
+
 ## Stable Business Identity and Runtime Resolution
 
 Persisted configuration is not the same as live hardware observation.

@@ -278,9 +278,45 @@ func run() int {
 			return 2
 		}
 	}
-	go runSMSSync(ctx, messageService, notificationService, realtimeHub, logger, 2*time.Second)
+	smsSyncCoordinator, err := messaging.NewSyncCoordinator(messageService, notificationService, realtimeHub)
+	if err != nil {
+		logger.Error("SMS synchronization coordinator configuration failed", "error", err)
+		_ = stores.Close()
+		return 1
+	}
+	var agentChangeCoordinator *inventory.AgentChangeCoordinator
 	if hardwareAgentClient != nil {
-		go runAgentChanges(ctx, hardwareAgentClient, realtimeHub, logger)
+		agentChangeCoordinator, err = inventory.NewAgentChangeCoordinator(hardwareAgentClient, realtimeHub)
+		if err != nil {
+			logger.Error("hardware Agent change coordinator configuration failed", "error", err)
+			_ = stores.Close()
+			return 1
+		}
+	}
+	go smsSyncCoordinator.Run(ctx, 2*time.Second, func(report messaging.SyncReport) {
+		if report.SyncError != nil {
+			logger.Warn("SMS synchronization failed", "error", report.SyncError)
+		}
+		if report.DurableChange {
+			logger.Info("SMS synchronization completed",
+				"inbound_persisted", report.Result.Persisted, "inbound_already_known", report.Result.AlreadyKnown,
+				"inbound_acknowledged", report.Result.Acknowledged, "outbound_sent", report.Result.OutboundSent,
+				"outbound_failed", report.Result.OutboundFailed, "outbound_unconfirmed", report.Result.OutboundUnconfirmed,
+				"outbound_reports_acknowledged", report.Result.OutboundReportsAcknowledged)
+		}
+		if report.NotificationError != nil {
+			logger.Warn("inbound SMS notification failed", "error", report.NotificationError)
+		}
+	})
+	if agentChangeCoordinator != nil {
+		go agentChangeCoordinator.Run(ctx, func(report inventory.AgentChangeReport) {
+			switch report.Operation {
+			case inventory.AgentChangeSnapshot:
+				logger.Warn("hardware Agent snapshot watch initialization failed", "error", report.Error)
+			case inventory.AgentChangeWatch:
+				logger.Warn("hardware Agent change watch failed", "error", report.Error)
+			}
+		})
 	}
 	apiServer := httpapi.New(health.New(stores, cfg.Runtime.Backend), setupService, inventoryService, logger, authService, messageService, contactService)
 	apiServer = httpapi.WithManagedModems(apiServer, managedModemService)
@@ -389,167 +425,6 @@ func run() int {
 		exitCode = 1
 	}
 	return exitCode
-}
-
-func runSMSSync(ctx context.Context, messages *messaging.Service, notifications *notificationapp.Service,
-	publisher *realtime.Hub, logger *slog.Logger, interval time.Duration) {
-	if interval < time.Second {
-		interval = 2 * time.Second
-	}
-	sync := func() bool {
-		syncCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		result, err := messages.SyncInbound(syncCtx)
-		cancel()
-		changed := publishSMSSyncResult(publisher, result)
-		if err != nil {
-			logger.Warn("SMS synchronization failed", "error", err)
-		}
-		if !changed {
-			return err == nil
-		}
-		logger.Info("SMS synchronization completed",
-			"inbound_persisted", result.Persisted, "inbound_already_known", result.AlreadyKnown,
-			"inbound_acknowledged", result.Acknowledged, "outbound_sent", result.OutboundSent,
-			"outbound_failed", result.OutboundFailed, "outbound_unconfirmed", result.OutboundUnconfirmed,
-			"outbound_reports_acknowledged", result.OutboundReportsAcknowledged)
-		if result.Persisted == 0 {
-			return err == nil
-		}
-		deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-		defer cancelDelivery()
-		if err := notifications.Notify(deliveryCtx, "sms.received", fmt.Sprintf("[Simplus] 收到 %d 条新短信", result.Persisted)); err != nil {
-			logger.Warn("inbound SMS notification failed", "error", err)
-		}
-		publisher.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
-		return err == nil
-	}
-	retryDelay := time.Duration(0)
-	for {
-		if sync() {
-			retryDelay = 0
-		} else {
-			retryDelay = nextSMSSyncRetryDelay(retryDelay, interval)
-		}
-		delay := interval
-		if retryDelay > 0 {
-			delay = retryDelay
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return
-		case <-timer.C:
-		}
-	}
-}
-
-func publishSMSSyncResult(publisher *realtime.Hub, result messaging.InboundSyncResult) bool {
-	if result.Persisted == 0 && result.AlreadyKnown == 0 && result.OutboundSent == 0 &&
-		result.OutboundFailed == 0 && result.OutboundUnconfirmed == 0 {
-		return false
-	}
-	attention := realtime.Attention("")
-	if result.Persisted > 0 {
-		attention = realtime.AttentionSMSReceived
-	}
-	publisher.Publish([]realtime.Topic{realtime.TopicMessages}, attention)
-	return true
-}
-
-type agentChangeSource interface {
-	Snapshot(context.Context, bool) (agentapi.Snapshot, error)
-	Changes(context.Context, string, uint64, int) (agentapi.ChangeResponse, error)
-}
-
-func runAgentChanges(ctx context.Context, source agentChangeSource, publisher *realtime.Hub, logger *slog.Logger) {
-	const watchSeconds = 25
-	var previous agentapi.Snapshot
-	retryDelay := time.Second
-	for ctx.Err() == nil {
-		snapshot, err := source.Snapshot(ctx, false)
-		if err != nil {
-			logger.Warn("hardware Agent snapshot watch initialization failed", "error", err)
-			if !waitForContext(ctx, retryDelay) {
-				return
-			}
-			retryDelay = nextAgentRetryDelay(retryDelay)
-			continue
-		}
-		if previous.AgentInstanceID != "" && (snapshot.AgentInstanceID != previous.AgentInstanceID || snapshot.Generation != previous.Generation) {
-			publisher.Publish([]realtime.Topic{realtime.TopicInventory, realtime.TopicModems, realtime.TopicLines}, "")
-		}
-		previous = snapshot
-		for ctx.Err() == nil {
-			change, changeErr := source.Changes(ctx, snapshot.AgentInstanceID, snapshot.Generation, watchSeconds)
-			if changeErr != nil {
-				logger.Warn("hardware Agent change watch failed", "error", changeErr)
-				break
-			}
-			snapshot = change.Snapshot
-			previous = snapshot
-			retryDelay = time.Second
-			if change.Changed {
-				publisher.Publish([]realtime.Topic{realtime.TopicInventory, realtime.TopicModems, realtime.TopicLines}, "")
-			}
-		}
-		if !waitForContext(ctx, retryDelay) {
-			return
-		}
-		retryDelay = nextAgentRetryDelay(retryDelay)
-	}
-}
-
-func nextAgentRetryDelay(previous time.Duration) time.Duration {
-	if previous < time.Second {
-		return time.Second
-	}
-	if previous >= 30*time.Second {
-		return 30 * time.Second
-	}
-	previous *= 2
-	if previous > 30*time.Second {
-		return 30 * time.Second
-	}
-	return previous
-}
-
-func waitForContext(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-func nextSMSSyncRetryDelay(previous, interval time.Duration) time.Duration {
-	const minimumRetry = 15 * time.Second
-	const maximumRetry = 5 * time.Minute
-	if interval < 2*time.Second {
-		interval = 2 * time.Second
-	}
-	if previous <= 0 {
-		previous = minimumRetry
-		if interval*4 > previous {
-			previous = interval * 4
-		}
-	} else if previous < maximumRetry/2 {
-		previous *= 2
-	} else {
-		previous = maximumRetry
-	}
-	if previous > maximumRetry {
-		return maximumRetry
-	}
-	return previous
 }
 
 func mihomoControllerAddress(managementAddress string) (string, error) {

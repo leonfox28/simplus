@@ -1,0 +1,6 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Check the completed Go change against the backend ownership map and full quality gate."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Verify cmd/simplusd contains construction, lifecycle and logging only after the extraction."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Verify all new dependencies are mandatory, narrow, consumer-owned ports with no concrete lower-layer construction."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify exact durable-change topics, SMS attention and privacy-bounded SSE semantics are unchanged."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check deterministic co-located tests cover failure, partial progress, retry, cancellation and concurrency-sensitive behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace both coordinator call chains end to end and ensure V-02 was removed rather than relocated."}

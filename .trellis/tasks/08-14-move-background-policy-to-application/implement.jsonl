@@ -1,0 +1,6 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Load the backend ownership map, pre-development checklist and validation entry points for the affected Go packages."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Place business policy in application packages while keeping cmd/simplusd limited to composition and lifecycle."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Define the two coordinators through the smallest consumer-owned typed ports and preserve side-effect ordering."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Preserve realtime topic/attention privacy and the required application/background publication tests."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Use co-located deterministic fake-port tests, cancellation coverage and the targeted-to-broad validation ladder."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check the complete cmd to application to typed Agent/realtime data flow instead of moving the skip elsewhere."}

@@ -7,8 +7,8 @@ runtime or domain that owns it:
 
 | Path | Current owner and evidence |
 | --- | --- |
-| `cmd/` | Per-binary flag parsing, dependency construction, lifecycle, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, and HTTP; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
-| `internal/application/` | Domain use-case services and consumer-owned ports. `internal/application/messaging/service.go` owns its repository, Line source, sender, and inbox contracts; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
+| `cmd/` | Per-binary flag parsing, dependency construction, lifecycle, operational log rendering, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, HTTP and application-owned background coordinators; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
+| `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports. `internal/application/messaging/service.go` owns its repository, Line source, sender, and inbox contracts; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
 | `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/` defines normalized topology; `internal/domain/pagination/` owns shared opaque cursor validation/encoding. |
 | `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, and generated OpenAPI server implementation (`internal/api/httpapi/server.go`). |
 | `api/` and `internal/api/openapi/` | `api/openapi.yaml` is the public API source; `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml` define Go generation; `internal/api/openapi/generated.go` is output. |
@@ -22,7 +22,8 @@ runtime or domain that owns it:
 - Keep `cmd/**` as the composition root. New business decisions belong in an
   application or domain package, even when only one binary currently calls
   them. `cmd/simplusd/main.go` demonstrates the intended assembly: it selects
-  the backend, builds narrow services, and injects them into `httpapi.Server`.
+  the backend, builds narrow services/coordinators, starts their lifecycle,
+  renders operational reports, and injects services into `httpapi.Server`.
 - Put an interface next to its consumer when it represents that consumer's
   needs. The small interfaces at the top of
   `internal/api/httpapi/server.go` and
