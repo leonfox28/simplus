@@ -283,3 +283,25 @@ Completed repository-wide layer-boundary audit, removed the unsupported native D
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Move background policy into application coordinators
+
+**Date**: 2026-08-14
+**Task**: Move background policy into application coordinators
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Resolved audit V-02 by moving SMS synchronization and Agent change semantics from cmd/simplusd into application-owned coordinators with narrow ports, preserving realtime, notification, retry and cancellation behavior, and adding deterministic race-tested coverage plus executable backend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `024cbfb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
