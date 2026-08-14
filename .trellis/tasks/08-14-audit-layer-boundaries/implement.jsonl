@@ -1,0 +1,9 @@
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Defines composition-root exceptions, package ownership, generated boundaries and the prohibition on concrete lower-layer implementations in application services."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Defines consumer-owned typed ports, stable business identity, Agent/model isolation and the expected application-to-hardware dependency direction."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Defines OpenAPI ownership, bounded HTTP and Unix protocol surfaces, fixed typed operations and forbidden arbitrary command/path payloads."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Defines the typed device chain, allowed hardware/runtime owners, no-debug-escape-hatch rule and the no-HIL safety boundary for this audit."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Defines the separately licensed product C component, locked strongSwan inputs, build-helper ownership and packaging verification contract."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Defines the browser-to-generated-client-to-HTTP architecture and the rule that Web code exposes only typed business APIs."}
+{"file":".trellis/spec/web/frontend/directory-structure.md","reason":"Defines ownership of pages, API runtime, generated clients and the prohibition on direct Fetch/EventSource calls from pages."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Defines generated payload ownership, runtime validation and the prohibition on duplicated or cast network contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Provides the neighbor-only contract and full-flow tracing checklist used to distinguish leaks from valid boundary conversions."}

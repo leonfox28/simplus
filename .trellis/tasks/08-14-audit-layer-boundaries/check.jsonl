@@ -1,0 +1,10 @@
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Independently verify package ownership, composition-root treatment, generated exclusions and concrete implementation leaks."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Challenge every reported application, Line, Agent and model boundary conclusion against the executable typed-port contract."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify public and Unix protocol surfaces contain only bounded typed operations and no arbitrary command or path seam."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Apply source-backed evidence standards, false-positive checks and safe validation rules without turning hardware into a test dependency."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Verify modem/device protocol ownership, approval boundaries, privacy constraints and absence of prohibited runtime actions."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Verify the product-owned strongSwan C component, locked upstream input, plugin build helpers and Debian packaging boundary."}
+{"file":".trellis/spec/web/frontend/directory-structure.md","reason":"Verify every Web page/runtime boundary and direct Fetch/EventSource classification."}
+{"file":".trellis/spec/web/frontend/type-safety.md","reason":"Verify generated contract ownership and absence of duplicated/cast payload boundaries in handwritten Web code."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Use the prescribed architectural regression searches and treat search results as supporting evidence rather than verdicts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check that the final report traces complete flows, validation owners and neighbor boundaries rather than relying on directory names."}
