@@ -327,3 +327,25 @@ Resolved audit V-03 by replacing hidden Setup store assertions and concrete secu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: Make Mihomo supervisor composition explicit
+
+**Date**: 2026-08-15
+**Task**: Make Mihomo supervisor composition explicit
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Resolved audit V-04 by moving local/socket Mihomo supervisor selection into cmd/simplusd, requiring a validated typed application dependency, replacing process-launching application tests with a fake, and recording the executable boundary contract. Independent review and safe race, Go, lint, docs, and ownership checks passed without runtime or hardware actions.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ffbc69b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
