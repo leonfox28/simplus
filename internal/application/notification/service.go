@@ -1,21 +1,14 @@
 package notification
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +18,53 @@ import (
 var channelIDPattern = regexp.MustCompile(`^channel_[A-Za-z0-9_-]{22}$`)
 var ErrChannelInvalid = errors.New("notification channel request is invalid")
 var ErrChannelNotFound = errors.New("notification channel not found")
+var ErrDependenciesInvalid = errors.New("notification dependencies are invalid")
+var ErrWebhookResultInvalid = errors.New("notification webhook delivery result is invalid")
 var allowedEvents = map[string]struct{}{"sms.received": {}, "sms.failed": {}, "call.incoming": {}, "call.missed": {}, "system.degraded": {}}
+
+const (
+	WebhookURLByteLimit       = 4096
+	WebhookHintByteLimit      = 255
+	WebhookSigningSecretLimit = 512
+	WebhookMessageRuneLimit   = 4000
+)
+
+type WebhookProvider string
+
+const (
+	WebhookProviderWeCom  WebhookProvider = "wecom"
+	WebhookProviderFeishu WebhookProvider = "feishu"
+)
+
+type WebhookTarget struct {
+	URL  string
+	Hint string
+}
+
+type WebhookDeliveryRequest struct {
+	Provider      WebhookProvider
+	URL           string
+	SigningSecret string
+	Message       string
+	Timestamp     int64
+}
+
+type WebhookDeliveryOutcome string
+
+const (
+	WebhookDelivered     WebhookDeliveryOutcome = "delivered"
+	WebhookNetworkFailed WebhookDeliveryOutcome = "network_failed"
+	WebhookRejected      WebhookDeliveryOutcome = "rejected"
+)
+
+type WebhookDeliveryResult struct {
+	Outcome WebhookDeliveryOutcome
+}
+
+type WebhookPort interface {
+	ValidateTarget(WebhookProvider, string) (WebhookTarget, error)
+	Deliver(context.Context, WebhookDeliveryRequest) (WebhookDeliveryResult, error)
+}
 
 type Store interface {
 	ListNotificationChannels(context.Context) ([]domain.Channel, error)
@@ -38,6 +77,11 @@ type SecretCipher interface {
 	Encrypt(string, []byte) ([]byte, error)
 	Decrypt(string, []byte) ([]byte, error)
 }
+type Dependencies struct {
+	Store    Store
+	Secrets  SecretCipher
+	Webhooks WebhookPort
+}
 type ChannelView struct {
 	ID, Provider, DisplayName, DeliveryMode, TargetType string
 	WebhookHint, LastDeliveryStatus, LastErrorCode      string
@@ -48,18 +92,40 @@ type ChannelView struct {
 type Service struct {
 	Store           Store
 	Secrets         SecretCipher
-	Client          *http.Client
+	Webhooks        WebhookPort
 	Now             func() time.Time
 	FeishuRegistrar FeishuRegistrar
 	FeishuMessenger FeishuMessenger
 	binding         *bindingController
 }
 
-func New(store Store, secrets SecretCipher) *Service {
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("notification webhook redirects are not allowed")
-	}}
-	return &Service{Store: store, Secrets: secrets, Client: client, Now: time.Now, binding: newBindingController()}
+func New(dependencies Dependencies) (*Service, error) {
+	if notificationDependencyMissing(dependencies.Store) {
+		return nil, fmt.Errorf("%w: store is required", ErrDependenciesInvalid)
+	}
+	if notificationDependencyMissing(dependencies.Secrets) {
+		return nil, fmt.Errorf("%w: secret cipher is required", ErrDependenciesInvalid)
+	}
+	if notificationDependencyMissing(dependencies.Webhooks) {
+		return nil, fmt.Errorf("%w: webhook port is required", ErrDependenciesInvalid)
+	}
+	return &Service{
+		Store: dependencies.Store, Secrets: dependencies.Secrets, Webhooks: dependencies.Webhooks,
+		Now: time.Now, binding: newBindingController(),
+	}, nil
+}
+
+func notificationDependencyMissing(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 func (s *Service) List(ctx context.Context) ([]ChannelView, error) {
 	items, err := s.Store.ListNotificationChannels(ctx)
@@ -73,21 +139,25 @@ func (s *Service) List(ctx context.Context) ([]ChannelView, error) {
 	return result, nil
 }
 func (s *Service) Create(ctx context.Context, provider, name, webhook, signingSecret string, enabled bool, events []string) (ChannelView, error) {
-	provider, name, parsed, events, err := validateInput(provider, name, webhook, events)
+	provider, name, events, err := validateInput(provider, name, events)
 	if err != nil {
 		return ChannelView{}, err
+	}
+	target, err := s.Webhooks.ValidateTarget(WebhookProvider(provider), webhook)
+	if err != nil || !validWebhookTarget(target) {
+		return ChannelView{}, ErrChannelInvalid
 	}
 	id, err := newChannelID()
 	if err != nil {
 		return ChannelView{}, err
 	}
-	webhookCipher, err := s.Secrets.Encrypt(secretLabel(id, "webhook"), []byte(parsed.String()))
+	webhookCipher, err := s.Secrets.Encrypt(secretLabel(id, "webhook"), []byte(target.URL))
 	if err != nil {
 		return ChannelView{}, err
 	}
 	var signingCipher []byte
 	if signingSecret != "" {
-		if provider != "feishu" || len(signingSecret) > 512 {
+		if provider != string(WebhookProviderFeishu) || len(signingSecret) > WebhookSigningSecretLimit {
 			return ChannelView{}, ErrChannelInvalid
 		}
 		signingCipher, err = s.Secrets.Encrypt(secretLabel(id, "signing"), []byte(signingSecret))
@@ -96,7 +166,7 @@ func (s *Service) Create(ctx context.Context, provider, name, webhook, signingSe
 		}
 	}
 	now := s.Now().UTC()
-	item := domain.Channel{ID: id, Provider: provider, DeliveryMode: domain.DeliveryModeWebhook, DisplayName: name, WebhookCiphertext: webhookCipher, WebhookHint: parsed.Hostname(), SigningSecretCiphertext: signingCipher, Enabled: enabled, EventKinds: events, LastDeliveryStatus: "never", CreatedAt: now, UpdatedAt: now}
+	item := domain.Channel{ID: id, Provider: provider, DeliveryMode: domain.DeliveryModeWebhook, DisplayName: name, WebhookCiphertext: webhookCipher, WebhookHint: target.Hint, SigningSecretCiphertext: signingCipher, Enabled: enabled, EventKinds: events, LastDeliveryStatus: "never", CreatedAt: now, UpdatedAt: now}
 	if err := s.Store.UpsertNotificationChannel(ctx, item); err != nil {
 		return ChannelView{}, err
 	}
@@ -121,19 +191,19 @@ func (s *Service) Update(ctx context.Context, id, provider, name, webhook, signi
 	item.DisplayName, item.Enabled, item.EventKinds, item.UpdatedAt = name, enabled, events, s.Now().UTC()
 	switch item.DeliveryMode {
 	case "", domain.DeliveryModeWebhook:
-		parsed, parseErr := validateWebhook(provider, chooseWebhook(webhook, item.WebhookHint))
-		if parseErr != nil && webhook != "" {
-			return ChannelView{}, parseErr
-		}
 		if webhook != "" {
-			item.WebhookCiphertext, err = s.Secrets.Encrypt(secretLabel(id, "webhook"), []byte(parsed.String()))
+			target, validationErr := s.Webhooks.ValidateTarget(WebhookProvider(provider), webhook)
+			if validationErr != nil || !validWebhookTarget(target) {
+				return ChannelView{}, ErrChannelInvalid
+			}
+			item.WebhookCiphertext, err = s.Secrets.Encrypt(secretLabel(id, "webhook"), []byte(target.URL))
 			if err != nil {
 				return ChannelView{}, err
 			}
-			item.WebhookHint = parsed.Hostname()
+			item.WebhookHint = target.Hint
 		}
 		if signingSecret != "" {
-			if provider != "feishu" || len(signingSecret) > 512 {
+			if provider != string(WebhookProviderFeishu) || len(signingSecret) > WebhookSigningSecretLimit {
 				return ChannelView{}, ErrChannelInvalid
 			}
 			item.SigningSecretCiphertext, err = s.Secrets.Encrypt(secretLabel(id, "signing"), []byte(signingSecret))
@@ -153,18 +223,6 @@ func (s *Service) Update(ctx context.Context, id, provider, name, webhook, signi
 	}
 	return view(item), nil
 }
-func chooseWebhook(raw, hint string) string {
-	if raw != "" {
-		return raw
-	}
-	return "https://" + hint + placeholderPath(hint)
-}
-func placeholderPath(host string) string {
-	if host == "qyapi.weixin.qq.com" {
-		return "/cgi-bin/webhook/send?key=placeholder"
-	}
-	return "/open-apis/bot/v2/hook/placeholder"
-}
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if !channelIDPattern.MatchString(id) {
 		return ErrChannelInvalid
@@ -182,7 +240,7 @@ func (s *Service) Test(ctx context.Context, id string) (ChannelView, error) {
 	return s.deliverOne(ctx, id, "Simplus 通知渠道测试成功")
 }
 func (s *Service) Notify(ctx context.Context, event, message string) error {
-	if _, ok := allowedEvents[event]; !ok || message == "" || len([]rune(message)) > 4000 {
+	if _, ok := allowedEvents[event]; !ok || message == "" || len([]rune(message)) > WebhookMessageRuneLimit {
 		return ErrChannelInvalid
 	}
 	items, err := s.Store.ListNotificationChannels(ctx)
@@ -234,33 +292,42 @@ func (s *Service) deliverWebhook(ctx context.Context, item domain.Channel, messa
 		}
 		signing = string(secret)
 	}
-	body, err := deliveryBody(item.Provider, message, signing, s.Now().Unix())
-	if err != nil {
-		return view(item), err
+	request := WebhookDeliveryRequest{
+		Provider: WebhookProvider(item.Provider), URL: string(webhookBytes), SigningSecret: signing,
+		Message: message, Timestamp: s.Now().Unix(),
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, string(webhookBytes), bytes.NewReader(body))
-	if err != nil {
-		return view(item), err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", "Simplus")
-	response, err := s.Client.Do(request)
+	result, err := s.Webhooks.Deliver(ctx, request)
 	now := s.Now().UTC()
-	if err != nil {
+	switch result.Outcome {
+	case WebhookDelivered:
+		if err != nil {
+			return view(item), ErrWebhookResultInvalid
+		}
+		if err := s.Store.RecordNotificationDelivery(ctx, item.ID, "success", "", now); err != nil {
+			return view(item), err
+		}
+		item.LastDeliveryAt, item.LastDeliveryStatus, item.LastErrorCode = now, "success", ""
+		return view(item), nil
+	case WebhookNetworkFailed:
+		if err == nil {
+			return view(item), ErrWebhookResultInvalid
+		}
 		_ = s.Store.RecordNotificationDelivery(ctx, item.ID, "failed", "DELIVERY_NETWORK_FAILED", now)
 		return view(item), err
-	}
-	defer response.Body.Close()
-	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10+1))
-	if readErr != nil || len(responseBody) > 64<<10 || response.StatusCode < 200 || response.StatusCode >= 300 || !deliverySucceeded(item.Provider, responseBody) {
+	case WebhookRejected:
+		if err == nil {
+			return view(item), ErrWebhookResultInvalid
+		}
 		_ = s.Store.RecordNotificationDelivery(ctx, item.ID, "failed", "DELIVERY_REJECTED", now)
-		return view(item), errors.New("notification provider rejected delivery")
-	}
-	if err := s.Store.RecordNotificationDelivery(ctx, item.ID, "success", "", now); err != nil {
 		return view(item), err
+	case "":
+		if err != nil {
+			return view(item), err
+		}
+		return view(item), ErrWebhookResultInvalid
+	default:
+		return view(item), ErrWebhookResultInvalid
 	}
-	item.LastDeliveryAt, item.LastDeliveryStatus, item.LastErrorCode = now, "success", ""
-	return view(item), nil
 }
 
 func (s *Service) deliverFeishuApp(ctx context.Context, item domain.Channel, message string) (ChannelView, error) {
@@ -291,68 +358,21 @@ func (s *Service) deliverFeishuApp(ctx context.Context, item domain.Channel, mes
 	item.LastDeliveryAt, item.LastDeliveryStatus, item.LastErrorCode = now, "success", ""
 	return view(item), nil
 }
-func deliveryBody(provider, message, secret string, timestamp int64) ([]byte, error) {
-	switch provider {
-	case "wecom":
-		return json.Marshal(map[string]any{"msgtype": "text", "text": map[string]string{"content": message}})
-	case "feishu":
-		payload := map[string]any{"msg_type": "text", "content": map[string]string{"text": message}}
-		if secret != "" {
-			text := strconv.FormatInt(timestamp, 10)
-			mac := hmac.New(sha256.New, []byte(text+"\n"+secret))
-			payload["timestamp"] = text
-			payload["sign"] = base64.StdEncoding.EncodeToString(mac.Sum(nil))
-		}
-		return json.Marshal(payload)
-	default:
-		return nil, ErrChannelInvalid
-	}
-}
-func deliverySucceeded(provider string, body []byte) bool {
-	var response struct {
-		ErrCode *int `json:"errcode"`
-		Code    *int `json:"code"`
-	}
-	if json.Unmarshal(body, &response) != nil {
-		return false
-	}
-	if provider == "wecom" {
-		return response.ErrCode != nil && *response.ErrCode == 0
-	}
-	return response.Code != nil && *response.Code == 0
-}
-func validateInput(provider, name, rawWebhook string, events []string) (string, string, *url.URL, []string, error) {
+func validateInput(provider, name string, events []string) (string, string, []string, error) {
 	provider, name = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(name)
-	if provider != "wecom" && provider != "feishu" {
-		return "", "", nil, nil, ErrChannelInvalid
+	if provider != string(WebhookProviderWeCom) && provider != string(WebhookProviderFeishu) {
+		return "", "", nil, ErrChannelInvalid
 	}
 	name, events, err := validateSettings(name, events)
 	if err != nil {
-		return "", "", nil, nil, err
+		return "", "", nil, err
 	}
-	parsed, err := validateWebhook(provider, rawWebhook)
-	if err != nil {
-		return "", "", nil, nil, err
-	}
-	return provider, name, parsed, events, nil
+	return provider, name, events, nil
 }
 
-func validateWebhook(provider, rawWebhook string) (*url.URL, error) {
-	parsed, err := url.Parse(strings.TrimSpace(rawWebhook))
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Fragment != "" {
-		return nil, ErrChannelInvalid
-	}
-	switch provider {
-	case "wecom":
-		if parsed.Hostname() != "qyapi.weixin.qq.com" || parsed.Path != "/cgi-bin/webhook/send" || parsed.Query().Get("key") == "" {
-			return nil, ErrChannelInvalid
-		}
-	case "feishu":
-		if parsed.Hostname() != "open.feishu.cn" || !strings.HasPrefix(parsed.Path, "/open-apis/bot/v2/hook/") || strings.TrimPrefix(parsed.Path, "/open-apis/bot/v2/hook/") == "" || parsed.RawQuery != "" {
-			return nil, ErrChannelInvalid
-		}
-	}
-	return parsed, nil
+func validWebhookTarget(target WebhookTarget) bool {
+	return target.URL != "" && len(target.URL) <= WebhookURLByteLimit &&
+		target.Hint != "" && len(target.Hint) <= WebhookHintByteLimit
 }
 
 func validateSettings(name string, events []string) (string, []string, error) {

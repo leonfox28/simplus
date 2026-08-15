@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-15-extract-notification-delivery-ports/research.md","reason":"Independently verify the current V-05 call chain is closed without changing preserved semantics."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Verify concrete HTTP/provider behavior and assembly reside in the intended owners."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify public/Feishu/legacy Webhook behavior and privacy remain compatible."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Verify ciphertext labels/data and schema remain unchanged."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Verify synthetic tests, credential-safe errors and full safe validation ladder."}

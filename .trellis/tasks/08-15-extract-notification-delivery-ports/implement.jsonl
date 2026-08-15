@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/08-15-extract-notification-delivery-ports/research.md","reason":"Curated current V-05 call chain, exact compatibility semantics, test gaps and planning conclusions."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go dependency direction and pre-development checklist."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Application consumer ports, concrete adapter placement, cmd assembly and test ownership."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Legacy Webhook compatibility and Feishu binding/public privacy contracts."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Existing Webhook/signing ciphertext ownership and no-migration constraint."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Synthetic provider transport, privacy and targeted-to-broad validation requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer request/result and validation ownership checklist."}

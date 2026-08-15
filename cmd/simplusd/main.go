@@ -33,6 +33,7 @@ import (
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/config"
 	"github.com/leonfox28/simplus/internal/control"
+	"github.com/leonfox28/simplus/internal/notificationwebhook"
 	"github.com/leonfox28/simplus/internal/security/password"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
@@ -216,7 +217,15 @@ func run() int {
 		}
 	}
 	realtimeHub := realtime.NewHub()
-	notificationService := notificationapp.New(stores, secretKeyring)
+	webhookClient := notificationwebhook.NewClient()
+	notificationService, err := notificationapp.New(notificationapp.Dependencies{
+		Store: stores, Secrets: secretKeyring, Webhooks: webhookClient,
+	})
+	if err != nil {
+		logger.Error("notification dependency configuration failed", "error", err)
+		_ = stores.Close()
+		return 1
+	}
 	feishuClient := notificationapp.NewFeishuClient()
 	notificationService.ConfigureFeishuBinding(ctx, feishuClient, feishuClient, func() {
 		realtimeHub.Publish([]realtime.Topic{realtime.TopicNotifications}, "")

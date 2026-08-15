@@ -8,6 +8,7 @@ import (
 	"time"
 
 	app "github.com/leonfox28/simplus/internal/application/notification"
+	"github.com/leonfox28/simplus/internal/notificationwebhook"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
 	"github.com/leonfox28/simplus/internal/storage/sqlite"
 )
@@ -39,7 +40,10 @@ func TestChannelCredentialsAreEncryptedInSQLiteAndOmittedFromViews(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := app.New(stores, keyring)
+	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	created, err := service.Create(ctx, "feishu", "Alerts", "https://open.feishu.cn/open-apis/bot/v2/hook/super-secret-hook", "super-secret-signing", true, []string{"system.degraded"})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +76,10 @@ func TestFeishuAppCredentialsAreIndependentlyEncryptedAndOmittedFromViews(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := app.New(stores, keyring)
+	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	service.ConfigureFeishuBinding(ctx, integrationRegistrar{}, integrationMessenger{}, nil)
 	if _, err := service.StartFeishuBinding(ctx); err != nil {
 		t.Fatal(err)

@@ -22,7 +22,8 @@
     "08-14-retire-native-deployment",
     "08-14-move-background-policy-to-application",
     "08-14-make-setup-dependencies-explicit",
-    "08-15-inject-mihomo-supervisor-explicitly"
+    "08-15-inject-mihomo-supervisor-explicitly",
+    "08-15-extract-notification-delivery-ports"
   ],
   "parent": null,
   "relatedFiles": [],

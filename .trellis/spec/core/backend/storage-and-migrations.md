@@ -129,9 +129,18 @@ Persist only the business data the feature contract allows:
 - Runtime Host VoWiFi state stores desired intent; live network/protocol facts
   remain owned by `simplus-netd` (`docs/architecture.md`).
 - Secret storage is mixed today and must be described precisely. Notification
-  webhook/signing secrets use `internal/security/secretbox/` through
-  `internal/application/notification/service.go`, while administrator
-  passwords are stored only as Argon2id hashes produced by
+  legacy Webhook URLs and optional signing secrets use
+  `internal/security/secretbox/` through the labels
+  `notification-channel:v1:<channel-id>:webhook` and
+  `notification-channel:v1:<channel-id>:signing` owned by
+  `internal/application/notification/service.go`. Create/replacement Update
+  persist the adapter-normalized URL ciphertext plus a hostname-only public
+  hint; empty URL and signing-secret Update inputs preserve their current
+  ciphertexts, and empty URL input also preserves the hint. Delivery keeps
+  plaintext only for the current call and passes it through one bounded
+  in-memory adapter request, while `internal/notificationwebhook` owns no Store
+  or ciphertext. This boundary refactor requires no migration or re-encryption.
+  Administrator passwords are stored only as Argon2id hashes produced by
   `internal/security/password/argon2id.go`. Setup Local CA private keys are
   encrypted with fixed domain-separated labels through a Setup-owned
   `SecretProtector`; `cmd/simplusd` injects the concrete instance secretbox,

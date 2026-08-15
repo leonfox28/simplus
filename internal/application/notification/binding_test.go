@@ -36,6 +36,12 @@ func (function messengerFunc) SendText(ctx context.Context, result FeishuRegistr
 	return function(ctx, result, message)
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
 type failingUpsertStore struct{ *memoryStore }
 
 func (store failingUpsertStore) UpsertNotificationChannel(context.Context, domain.Channel) error {
@@ -44,7 +50,7 @@ func (store failingUpsertStore) UpsertNotificationChannel(context.Context, domai
 
 func TestFeishuBindingTestsBeforePersistingAndSupportsAppDelivery(t *testing.T) {
 	store := &memoryStore{}
-	service := New(store, testCipher{})
+	service := newTestService(t, store)
 	now := time.Date(2026, 8, 11, 1, 2, 3, 0, time.UTC)
 	service.Now = func() time.Time { return now }
 	result := FeishuRegistrationResult{AppID: "cli_synthetic", AppSecret: "synthetic-secret", OpenID: "ou_synthetic", TenantBrand: "feishu"}
@@ -136,7 +142,7 @@ func TestFeishuBindingCancelAndFailuresNeverPersist(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			store := &memoryStore{}
-			service := New(store, testCipher{})
+			service := newTestService(t, store)
 			now := time.Now().UTC()
 			service.ConfigureFeishuBinding(context.Background(), registrarFake{
 				begin: func(context.Context) (FeishuRegistration, error) {
@@ -157,7 +163,7 @@ func TestFeishuBindingCancelAndFailuresNeverPersist(t *testing.T) {
 	}
 
 	store := &memoryStore{}
-	service := New(store, testCipher{})
+	service := newTestService(t, store)
 	blocked := make(chan struct{})
 	messengerCalls := 0
 	service.ConfigureFeishuBinding(context.Background(), registrarFake{
@@ -186,7 +192,7 @@ func TestFeishuBindingCancelAndFailuresNeverPersist(t *testing.T) {
 
 func TestFeishuBindingPersistenceFailureDoesNotCreateChannel(t *testing.T) {
 	memory := &memoryStore{}
-	service := New(failingUpsertStore{memory}, testCipher{})
+	service := newTestService(t, failingUpsertStore{memory})
 	now := time.Now().UTC()
 	service.ConfigureFeishuBinding(context.Background(), registrarFake{
 		begin: func(context.Context) (FeishuRegistration, error) {
@@ -208,7 +214,7 @@ func TestFeishuBindingPersistenceFailureDoesNotCreateChannel(t *testing.T) {
 func TestFeishuBindingProcessCancellationStopsWaitingAndTestingWithoutPersistence(t *testing.T) {
 	t.Run("waiting", func(t *testing.T) {
 		store := &memoryStore{}
-		service := New(store, testCipher{})
+		service := newTestService(t, store)
 		processCtx, cancelProcess := context.WithCancel(context.Background())
 		pollStarted := make(chan struct{})
 		service.ConfigureFeishuBinding(processCtx, registrarFake{
@@ -233,14 +239,14 @@ func TestFeishuBindingProcessCancellationStopsWaitingAndTestingWithoutPersistenc
 		if state.ErrorCode != BindingErrorProviderFailed || len(store.channels) != 0 {
 			t.Fatalf("state = %#v, channels = %d", state, len(store.channels))
 		}
-		if restarted := New(&memoryStore{}, testCipher{}).FeishuBindingStatus(); restarted.State != BindingStateIdle {
+		if restarted := newTestService(t, &memoryStore{}).FeishuBindingStatus(); restarted.State != BindingStateIdle {
 			t.Fatalf("restarted state = %#v", restarted)
 		}
 	})
 
 	t.Run("testing", func(t *testing.T) {
 		store := &memoryStore{}
-		service := New(store, testCipher{})
+		service := newTestService(t, store)
 		processCtx, cancelProcess := context.WithCancel(context.Background())
 		testStarted := make(chan struct{})
 		service.ConfigureFeishuBinding(processCtx, registrarFake{
@@ -325,7 +331,7 @@ func TestFeishuBindingAcceptsCurrentOpaqueBeginResponse(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(beginBody))}, nil
 	})}
 
-	service := New(&memoryStore{}, testCipher{})
+	service := newTestService(t, &memoryStore{})
 	service.ConfigureFeishuBinding(context.Background(), client, messengerFunc(func(context.Context, FeishuRegistrationResult, string) error {
 		t.Fatal("messenger called before authorization")
 		return nil

@@ -447,6 +447,201 @@ if err != nil {
 }
 ```
 
+## Scenario: Typed legacy Webhook delivery port
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `internal/application/notification`, the
+legacy enterprise WeChat/Feishu bot Webhook protocol, notification Service
+construction, delivery outcome persistence, or the concrete client assembled
+in `cmd/simplusd`. The application owns channel/event/secret/state policy. The
+`internal/notificationwebhook` adapter owns fixed target and wire behavior.
+
+Feishu application registration/private-message delivery remains the separate
+`FeishuRegistrar`/`FeishuMessenger` path. Do not merge it into the legacy
+Webhook adapter or use this seam to create a generic HTTP provider.
+
+### 2. Signatures
+
+The application owns the bounded port vocabulary:
+
+```go
+type WebhookProvider string
+
+const (
+    WebhookProviderWeCom  WebhookProvider = "wecom"
+    WebhookProviderFeishu WebhookProvider = "feishu"
+)
+
+type WebhookTarget struct { URL, Hint string }
+
+type WebhookDeliveryRequest struct {
+    Provider      WebhookProvider
+    URL           string
+    SigningSecret string
+    Message       string
+    Timestamp     int64
+}
+
+type WebhookDeliveryOutcome string
+
+const (
+    WebhookDelivered      WebhookDeliveryOutcome = "delivered"
+    WebhookNetworkFailed  WebhookDeliveryOutcome = "network_failed"
+    WebhookRejected       WebhookDeliveryOutcome = "rejected"
+)
+
+type WebhookDeliveryResult struct { Outcome WebhookDeliveryOutcome }
+
+type WebhookPort interface {
+    ValidateTarget(WebhookProvider, string) (WebhookTarget, error)
+    Deliver(context.Context, WebhookDeliveryRequest) (WebhookDeliveryResult, error)
+}
+
+type Dependencies struct {
+    Store    Store
+    Secrets  SecretCipher
+    Webhooks WebhookPort
+}
+
+func New(Dependencies) (*Service, error)
+```
+
+`ErrDependenciesInvalid` is the stable constructor error;
+`ErrWebhookResultInvalid` marks a contradictory/unknown adapter result. The
+concrete `notificationwebhook.Client` structurally implements `WebhookPort`,
+is constructed by `NewClient() *Client`, and owns the exact stable sentinels
+`ErrTargetInvalid`, `ErrRequestInvalid`, `ErrNetworkFailed`, and
+`ErrProviderRejected`.
+
+### 3. Contracts
+
+- Store, Secrets and Webhooks are mandatory. Nil and typed-nil dependencies
+  wrap `ErrDependenciesInvalid`; no hidden HTTP client/default is constructed.
+- The port carries only a supported provider, one URL, optional signing
+  secret, bounded text and Unix timestamp. It exposes no method, header, raw
+  body, redirect, retry, proxy or general HTTP option. The normalized URL is at
+  most 4096 bytes, public hint at most 255 bytes, signing secret at most 512
+  bytes and message at most 4000 runes.
+- Create and non-empty URL Update call `ValidateTarget`, accept only a nonempty
+  bounded normalized URL plus hostname-only hint, then encrypt the URL and
+  persist its ciphertext with the plaintext hostname-only hint. An empty
+  Update URL preserves the prior URL ciphertext and hint; an empty signing
+  secret preserves the prior signing-secret ciphertext.
+- The Service owns the unchanged labels
+  `notification-channel:v1:<channel-id>:webhook` and
+  `notification-channel:v1:<channel-id>:signing`, decrypts only for the
+  current call, and never logs or returns plaintext credentials.
+- Before every delivery, the adapter validates again and executes the returned
+  normalized `WebhookTarget.URL`—never the original unchecked string.
+- Target validation trims surrounding whitespace and preserves the
+  `url.Parse`/`URL.String` normalization used by legacy rows: HTTPS, no
+  userinfo or fragment; `url.Hostname()` equals the supported official
+  hostname; WeCom uses exact `/cgi-bin/webhook/send` with nonempty `key` and
+  preserves extra query values; Feishu uses a nonempty
+  `/open-apis/bot/v2/hook/` suffix and no query. Existing explicit ports remain
+  accepted.
+- The concrete client has a 15-second timeout, refuses redirects, POSTs
+  `application/json` with `User-Agent: Simplus`, emits the existing WeCom
+  `msgtype=text`/`text.content` and Feishu
+  `msg_type=text`/`content.text` shapes, reads at most 64 KiB plus one byte, and
+  requires HTTP 2xx plus explicit numeric `errcode=0`/`code=0`. Optional
+  Feishu signing uses the decimal Unix timestamp and
+  `base64(HMAC-SHA256(key=timestamp+"\n"+secret, message=""))` formula.
+- Target/request/network/rejection failures return exact stable adapter
+  sentinels. Raw parse/request/transport/redirect/read/status/provider errors,
+  URLs, keys, signing secrets and response bodies are never wrapped or returned
+  across the port.
+- `cmd/simplusd` constructs `notificationwebhook.NewClient`, injects it through
+  `notification.Dependencies`, and on configuration failure logs a bounded
+  error, closes stores and exits non-zero before later assembly.
+- This introduces no provider feature and changes no OpenAPI, SQLite schema,
+  ciphertext format/labels, public error mapping, event kind or Feishu
+  application-channel behavior.
+
+### 4. Validation & Error Matrix
+
+| Condition | Application result and state |
+| --- | --- |
+| missing/typed-nil Store, Secrets or Webhooks | constructor returns nil and wraps `ErrDependenciesInvalid` |
+| invalid provider/target during Create or replacement Update | `ErrChannelInvalid`; no persisted row/ciphertext change |
+| empty Update target | preserve existing URL ciphertext and hostname hint |
+| empty Update signing secret | preserve existing signing-secret ciphertext |
+| adapter preflight returns zero outcome plus error | return the bounded error; no delivery record |
+| `delivered` plus nil | persist `success / ""`; persistence failure remains visible |
+| `network_failed` plus error | best-effort persist `failed / DELIVERY_NETWORK_FAILED`; return primary error |
+| `rejected` plus error | best-effort persist `failed / DELIVERY_REJECTED`; return primary error |
+| delivered plus error, failure outcome plus nil, zero plus nil, or unknown outcome | `ErrWebhookResultInvalid`; do not invent a status |
+| Webhook/signing decryption fails | no adapter call and no delivery record |
+| redirect, transport or context failure returned by `http.Client.Do` | credential-safe `network_failed`; never expose the attempted URL |
+| request construction fails before `http.Client.Do` | zero outcome plus credential-safe `ErrRequestInvalid`; no delivery record |
+| non-2xx, read/size/JSON/missing/nonzero provider code | credential-safe `rejected`; never expose response content |
+
+Failure-record persistence remains secondary and is deliberately ignored after
+an external failure. A successful external delivery followed by success-state
+persistence failure returns the store error and is not automatically retried.
+
+### 5. Good / Base / Bad Cases
+
+- Good: the Service decrypts one stored Feishu bot target/signing secret,
+  passes a bounded request, receives `delivered`, persists success and exposes
+  only the hostname hint.
+- Base: a network failure returns one exact stable adapter error; the Service
+  records the existing network-failure code while no credential appears in
+  logs, errors or views.
+- Bad: the Service builds provider JSON, sets HTTP headers, calls
+  `http.Client.Do`, branches on raw response fields, or accepts a port carrying
+  caller-selected method/headers/body.
+
+### 6. Tests Required
+
+- `internal/application/notification/service_test.go` uses a recording fake
+  port for missing/typed-nil construction; normalized target persistence;
+  decrypted provider/URL/signing/message/timestamp handoff; event filtering;
+  success/network/rejected/preflight/contradictory/unknown outcomes; ignored
+  failure-state write errors; and visible success-state write errors.
+- `internal/notificationwebhook/client_test.go` uses synthetic transports only
+  and proves both payload/signature shapes, exact headers, URL normalization,
+  explicit-port/extra-query compatibility, representative rejected
+  target/input classes, exact bounds, per-delivery revalidation,
+  redirects/transport/read/size/status/JSON/missing/nonzero code handling and
+  no external request for preflight errors.
+- Credential privacy tests compare exact returned sentinels/error strings, not
+  only `errors.Is`: a `%w` wrapper may satisfy `errors.Is` while leaking a URL,
+  key, secret, redirect target or provider body in `Error()`.
+- Existing notification SQLite integration, Feishu binding, HTTP and storage
+  tests remain green. Run notification/adapter/cmd under `go test -race`, then
+  the supported `./cmd/... ./internal/...` test/vet/lint and generated-drift
+  scope.
+- Focused scans find no `net/http`, provider payload/signing functions or
+  official target/path literals in `notification/service.go`, and no
+  storage/event/state policy import in `internal/notificationwebhook`.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: application owns concrete Webhook protocol and can leak URL errors.
+response, err := service.Client.Do(request)
+if err != nil {
+    return fmt.Errorf("deliver webhook: %w", err)
+}
+
+// Correct: application owns outcome policy through a bounded port.
+result, err := service.Webhooks.Deliver(ctx, WebhookDeliveryRequest{
+    Provider: provider, URL: decryptedURL, SigningSecret: decryptedSecret,
+    Message: message, Timestamp: service.Now().Unix(),
+})
+switch result.Outcome {
+case WebhookNetworkFailed:
+    _ = service.Store.RecordNotificationDelivery(
+        ctx, channelID, "failed", "DELIVERY_NETWORK_FAILED", service.Now().UTC(),
+    )
+    return err
+case WebhookRejected:
+    // Persist DELIVERY_REJECTED with the same best-effort rule.
+}
+```
+
 ## Stable Business Identity and Runtime Resolution
 
 Persisted configuration is not the same as live hardware observation.

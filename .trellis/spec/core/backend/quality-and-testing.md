@@ -44,6 +44,11 @@ Tests live beside the package and prove the owning contract:
   numeric value drives a limit check. Turn each observed boundary into a
   synthetic fixture and include exact-limit, limit-plus-one, default,
   conflict, and architecture/overflow cases where numeric conversion occurs.
+- When testing credential-safe provider errors, require the exact stable
+  sentinel/error text and separately scan every private marker out of
+  `Error()`. `errors.Is` alone is insufficient because a `%w` wrapper can both
+  match the expected sentinel and leak a URL, key, secret, redirect target or
+  provider body in the rendered error.
 
 Use deterministic clocks/readers or small fakes already exposed by the service
 when exact IDs/timestamps matter. Keep fixture identities synthetic and within
