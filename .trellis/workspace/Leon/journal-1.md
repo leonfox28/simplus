@@ -305,3 +305,25 @@ Resolved audit V-02 by moving SMS synchronization and Agent change semantics fro
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: Make Setup dependencies explicit
+
+**Date**: 2026-08-15
+**Task**: Make Setup dependencies explicit
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Resolved audit V-03 by replacing hidden Setup store assertions and concrete security/filesystem defaults with explicit application-owned dependencies and values, moving production adapter assembly into cmd/simplusd, preserving the fixed instance key path and active Setup behavior, and adding deterministic integration/race coverage plus backend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d66860f` | (see git log) |
+
+### Status
+
+[OK] **Completed**

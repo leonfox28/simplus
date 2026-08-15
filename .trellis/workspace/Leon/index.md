@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
-- **Last Active**: 2026-08-14
+- **Total Sessions**: 14
+- **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~307 | Active |
+| `journal-1.md` | ~329 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-08-15 | Make Setup dependencies explicit | `d66860f` | `main` |
 | 13 | 2026-08-14 | Move background policy into application coordinators | `024cbfb` | `main` |
 | 12 | 2026-08-14 | Audit layer boundaries and retire native deployment | `0ca25d4`, `7013707` | `main` |
 | 11 | 2026-08-14 | Line phone number observations | `97b06e5` | `main` |
