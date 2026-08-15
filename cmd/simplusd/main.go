@@ -29,7 +29,6 @@ import (
 	modemapp "github.com/leonfox28/simplus/internal/application/modem"
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	"github.com/leonfox28/simplus/internal/application/realtime"
-	"github.com/leonfox28/simplus/internal/application/setup"
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/config"
@@ -66,15 +65,22 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(cfg.Storage.DataRoot, "db"))
+	databaseRoot := filepath.Join(cfg.Storage.DataRoot, "db")
+	stores, err := sqlitestore.OpenSet(ctx, databaseRoot)
 	if err != nil {
 		logger.Error("database initialization failed", "error", err)
 		return 1
 	}
 
-	setupService := setup.New(stores, stores)
+	instanceSecretKeyPath := filepath.Join(databaseRoot, ".simplus-secrets-key-v1")
+	setupService, err := newSetupService(stores, instanceSecretKeyPath)
+	if err != nil {
+		logger.Error("Setup dependency configuration failed", "error", err)
+		_ = stores.Close()
+		return 1
+	}
 	authService := auth.NewService(stores, stores, password.NewDefaultHasher())
-	secretKeyring, err := secretbox.Open(filepath.Join(cfg.Storage.DataRoot, "db", ".simplus-secrets-key-v1"))
+	secretKeyring, err := secretbox.Open(instanceSecretKeyPath)
 	if err != nil {
 		logger.Error("instance secret key initialization failed", "error", err)
 		_ = stores.Close()

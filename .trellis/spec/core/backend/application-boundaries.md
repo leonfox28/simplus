@@ -156,6 +156,163 @@ if err != nil {
 go coordinator.Run(ctx, smsInterval, logSyncReport)
 ```
 
+## Scenario: Explicit Setup dependencies and concrete adapter assembly
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `internal/application/setup`, any Setup
+constructor caller, the instance secret-key path, private-directory validation,
+password hashing, or Local CA generation. Setup owns its state machine,
+validation and side-effect ordering. The `cmd/simplusd` composition root owns
+which concrete SQLite, password, filesystem, secretbox and certificate
+implementations satisfy those needs.
+
+Setup is an active OpenAPI/HTTP/Web flow. Do not delete or simplify it as part
+of a dependency repair, and do not put concrete defaults back into the
+application package for caller convenience.
+
+### 2. Signatures
+
+The application constructor accepts named dependencies and returns a stable
+configuration error:
+
+```go
+type Dependencies struct {
+    StateStore            StateStore
+    AuthorizationStore    AuthorizationStore
+    AdministratorStore    AdministratorStore
+    PasswordHasher        PasswordHasher
+    StorageStore          StorageStore
+    DirectoryPreparer     DirectoryPreparer
+    ManagementTLSStore    ManagementTLSStore
+    SecretProtectorOpener SecretProtectorOpener
+    LocalCAGenerator      LocalCAGenerator
+    HardwareReviewStore   HardwareReviewStore
+    CompletionStore       CompletionStore
+    Random                io.Reader
+    Now                   func() time.Time
+}
+
+func New(Dependencies) (*Service, error)
+```
+
+Filesystem and certificate adapters translate into application-owned values:
+
+```go
+type DirectoryIdentity struct {
+    Path string
+    Device, Inode uint64
+}
+type DirectoryPreparer func(string) (DirectoryIdentity, error)
+
+type LocalCABundle struct {
+    CACertificatePEM, CAPrivateKeyPEM       []byte
+    LeafCertificatePEM, LeafPrivateKeyPEM   []byte
+    RootFingerprint                         string
+    LeafNotAfter                            time.Time
+    SANs                                    []string
+}
+type LocalCAGenerator func(time.Time, []string) (LocalCABundle, error)
+```
+
+`cmd/simplusd/setup.go:newSetupService(*sqlite.Set, instanceSecretKeyPath)` is
+the production assembly seam. `main.go` derives the path argument from its
+configured database root; no separate API, environment variable or request
+field selects the Setup key path.
+
+### 3. Contracts
+
+- `StateStore` is mandatory. Other nil fields explicitly mean that capability
+  is unavailable and existing method-level configuration errors remain
+  authoritative. A StateStore-only service is a valid narrow fixture for
+  Setup/ready-state gates.
+- AdministratorStore/PasswordHasher, StorageStore/DirectoryPreparer, and
+  SecretProtectorOpener/LocalCAGenerator are all-or-none pairs. The Local CA
+  pair additionally requires ManagementTLSStore. `New` wraps
+  `ErrDependenciesInvalid` for every invalid shape; it never discovers roles
+  by asserting another dependency's dynamic type.
+- Nil `Random` and `Now` select `crypto/rand.Reader` and `time.Now`. Bootstrap
+  and session lifetimes remain ten and thirty minutes. Tests inject these
+  seams through `Dependencies`, not by assigning private Service fields.
+- Production assigns the same SQLite Set separately to every persistence role,
+  selects `password.NewDefaultHasher`, translates all three directory identity
+  fields, and translates all seven Local CA bundle fields.
+- `databaseRoot/.simplus-secrets-key-v1` is derived once in `cmd/simplusd` and
+  used by both the lazy Setup SecretProtector opener and the existing instance
+  keyring. `setup.Dependencies` carries no key-path field, and production
+  exposes no independent key-path selector.
+- Local CA mode retains the exact encryption labels
+  `management-tls-ca-private-key-v1` and
+  `management-tls-leaf-private-key-v1`. After both encryptions succeed, Setup
+  clears both plaintext key buffers before calling `ConfigureManagementTLS`
+  with the same `managementtls.Configuration` fields. Directory device/inode
+  range and completion preflight checks are unchanged.
+- This constructor refactor changes no OpenAPI, HTTP error, cookie, generated
+  source, SQLite schema/data, cryptographic format, certificate lifetime,
+  setup transition or Web behavior.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| StateStore missing | constructor returns `ErrDependenciesInvalid` |
+| Exactly one of AdministratorStore / PasswordHasher present | constructor returns `ErrDependenciesInvalid` |
+| Exactly one of StorageStore / DirectoryPreparer present | constructor returns `ErrDependenciesInvalid` |
+| Exactly one of SecretProtectorOpener / LocalCAGenerator present | constructor returns `ErrDependenciesInvalid` |
+| Local CA pair present without ManagementTLSStore | constructor returns `ErrDependenciesInvalid` |
+| Optional capability absent and its operation is called | existing bounded “not configured” error; never panic or infer a fallback |
+| StateStore-only dependency set | valid Service; Status/gates work, unrelated mutations remain unavailable |
+| Production dependency set incomplete | `cmd/simplusd` logs Setup dependency configuration failure, closes stores and exits non-zero |
+| LocalCAGenerator returns an error | existing `ErrHTTPSRequestInvalid` mapping; no key/certificate persistence |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `cmd/simplusd` passes explicit roles and adapters, Setup receives only
+  application values, and Local CA private keys are encrypted/cleared before
+  the unchanged configuration is persisted.
+- Base: an HTTP test needs only ready-state gating and constructs
+  `setup.New(setup.Dependencies{StateStore: fixedState})`; no SQLite concrete
+  capabilities appear implicitly.
+- Bad: `setup.New(store, store)` type-asserts the first store into hidden roles,
+  imports secretbox/filesystem/managementcert, or assembles a key path inside
+  the application package.
+
+### 6. Tests Required
+
+- `internal/application/setup/service_test.go`: missing StateStore, each incomplete
+  pair, Local CA without TLS, valid State-only and full dependency shapes;
+  deterministic clock/random injection and adapter fakes with no private-field
+  assignment.
+- Setup behavior tests: exact directory identity persistence/range checks,
+  Local CA bundle-to-configuration mapping, exact SecretProtector labels and
+  ciphertext mapping, plaintext private-key clearing after both encryptions
+  succeed, session lifetimes, hardware review and completion preflight.
+- `cmd/simplusd/setup_test.go`: a temporary SQLite Set is accepted by the full
+  production assembly and constructing the Service does not eagerly open the
+  lazy Setup secret protector.
+- Control and HTTP tests: explicit exercised/full dependencies preserve
+  bootstrap, session, Setup endpoint and ready-state-gate behavior.
+- Focused scans find no concrete security/storage import, StateStore role
+  assertion or private Service-field injection in application Setup; run the
+  affected packages under `go test -race`, then the supported
+  `./cmd/... ./internal/...` test/vet scope.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: application construction selects hidden implementations by dynamic type.
+setupService := setup.New(stores, stores)
+
+// Correct: the executable composition root supplies every production role.
+instanceSecretKeyPath := filepath.Join(databaseRoot, ".simplus-secrets-key-v1")
+setupService, err := newSetupService(stores, instanceSecretKeyPath)
+if err != nil {
+    logger.Error("Setup dependency configuration failed", "error", err)
+    _ = stores.Close()
+    return 1
+}
+```
+
 ## Stable Business Identity and Runtime Resolution
 
 Persisted configuration is not the same as live hardware observation.

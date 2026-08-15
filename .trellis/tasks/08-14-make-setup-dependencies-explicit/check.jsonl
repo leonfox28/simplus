@@ -1,0 +1,7 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Check the completed multi-package Go change against the backend ownership and full quality gate."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Verify application Setup owns only ports/policy and cmd/simplusd owns all production concrete assembly."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Verify explicit dependency validation, application-owned result types and fail-closed optional capabilities."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Verify no storage/schema/path/secret persistence behavior drift or new database opening path was introduced."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify Setup endpoint/state/error/privacy behavior remains unchanged at HTTP and generated boundaries."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check constructor, composition, failure, integration, race and privacy-safe synthetic coverage."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the final dependency graph end to end and ensure V-03 was removed rather than relocated."}

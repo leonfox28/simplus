@@ -21,10 +21,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/leonfox28/simplus/internal/domain/managementtls"
-	"github.com/leonfox28/simplus/internal/security/managementcert"
-	"github.com/leonfox28/simplus/internal/security/password"
-	"github.com/leonfox28/simplus/internal/security/secretbox"
-	storagefs "github.com/leonfox28/simplus/internal/storage/filesystem"
 )
 
 const (
@@ -53,6 +49,7 @@ var (
 	ErrHTTPSConfirmationInvalid    = errors.New("setup HTTPS confirmation is invalid")
 	ErrHardwareReviewInvalid       = errors.New("setup hardware review is invalid or incomplete")
 	ErrSetupPreflightFailed        = errors.New("final setup preflight failed")
+	ErrDependenciesInvalid         = errors.New("setup dependencies are invalid")
 )
 
 type StateStore interface {
@@ -81,7 +78,13 @@ type StorageStore interface {
 	ReadSetupStorage(context.Context) (string, string, uint64, uint64, uint64, uint64, bool, error)
 }
 
-type DirectoryPreparer func(string) (storagefs.DirectoryIdentity, error)
+type DirectoryIdentity struct {
+	Path   string
+	Device uint64
+	Inode  uint64
+}
+
+type DirectoryPreparer func(string) (DirectoryIdentity, error)
 
 type ManagementTLSStore interface {
 	ConfigureManagementTLS(context.Context, managementtls.Configuration) error
@@ -94,7 +97,18 @@ type SecretProtector interface {
 }
 
 type SecretProtectorOpener func() (SecretProtector, error)
-type LocalCAGenerator func(time.Time, []string) (managementcert.Bundle, error)
+
+type LocalCABundle struct {
+	CACertificatePEM   []byte
+	CAPrivateKeyPEM    []byte
+	LeafCertificatePEM []byte
+	LeafPrivateKeyPEM  []byte
+	RootFingerprint    string
+	LeafNotAfter       time.Time
+	SANs               []string
+}
+
+type LocalCAGenerator func(time.Time, []string) (LocalCABundle, error)
 
 type HardwareReviewStore interface {
 	ConfirmSetupHardware(context.Context, string, int, int, time.Time) error
@@ -103,6 +117,22 @@ type HardwareReviewStore interface {
 
 type CompletionStore interface {
 	CompleteInitialSetup(context.Context, string, time.Time) (bool, error)
+}
+
+type Dependencies struct {
+	StateStore            StateStore
+	AuthorizationStore    AuthorizationStore
+	AdministratorStore    AdministratorStore
+	PasswordHasher        PasswordHasher
+	StorageStore          StorageStore
+	DirectoryPreparer     DirectoryPreparer
+	ManagementTLSStore    ManagementTLSStore
+	SecretProtectorOpener SecretProtectorOpener
+	LocalCAGenerator      LocalCAGenerator
+	HardwareReviewStore   HardwareReviewStore
+	CompletionStore       CompletionStore
+	Random                io.Reader
+	Now                   func() time.Time
 }
 
 var (
@@ -215,37 +245,48 @@ type Service struct {
 	mutationMu          sync.Mutex
 }
 
-func New(stateStore StateStore, authorization AuthorizationStore) *Service {
+func New(dependencies Dependencies) (*Service, error) {
+	if dependencies.StateStore == nil {
+		return nil, fmt.Errorf("%w: StateStore is required", ErrDependenciesInvalid)
+	}
+	if (dependencies.AdministratorStore == nil) != (dependencies.PasswordHasher == nil) {
+		return nil, fmt.Errorf("%w: AdministratorStore and PasswordHasher must be configured together", ErrDependenciesInvalid)
+	}
+	if (dependencies.StorageStore == nil) != (dependencies.DirectoryPreparer == nil) {
+		return nil, fmt.Errorf("%w: StorageStore and DirectoryPreparer must be configured together", ErrDependenciesInvalid)
+	}
+	if (dependencies.SecretProtectorOpener == nil) != (dependencies.LocalCAGenerator == nil) {
+		return nil, fmt.Errorf("%w: SecretProtectorOpener and LocalCAGenerator must be configured together", ErrDependenciesInvalid)
+	}
+	if dependencies.ManagementTLSStore == nil && dependencies.SecretProtectorOpener != nil {
+		return nil, fmt.Errorf("%w: Local CA dependencies require ManagementTLSStore", ErrDependenciesInvalid)
+	}
+	random := dependencies.Random
+	if random == nil {
+		random = rand.Reader
+	}
+	now := dependencies.Now
+	if now == nil {
+		now = time.Now
+	}
 	service := &Service{
-		stateStore:       stateStore,
-		authorization:    authorization,
-		random:           rand.Reader,
-		now:              time.Now,
-		bootstrapTimeout: 10 * time.Minute,
-		sessionTimeout:   30 * time.Minute,
+		stateStore:          dependencies.StateStore,
+		authorization:       dependencies.AuthorizationStore,
+		administrator:       dependencies.AdministratorStore,
+		passwordHasher:      dependencies.PasswordHasher,
+		storage:             dependencies.StorageStore,
+		prepareDirectory:    dependencies.DirectoryPreparer,
+		managementTLS:       dependencies.ManagementTLSStore,
+		openSecretProtector: dependencies.SecretProtectorOpener,
+		generateLocalCA:     dependencies.LocalCAGenerator,
+		hardwareReview:      dependencies.HardwareReviewStore,
+		completionStore:     dependencies.CompletionStore,
+		random:              random,
+		now:                 now,
+		bootstrapTimeout:    10 * time.Minute,
+		sessionTimeout:      30 * time.Minute,
 	}
-	if administrator, ok := stateStore.(AdministratorStore); ok {
-		service.administrator = administrator
-		service.passwordHasher = password.NewDefaultHasher()
-	}
-	if storage, ok := stateStore.(StorageStore); ok {
-		service.storage = storage
-		service.prepareDirectory = storagefs.PreparePrivateDirectory
-		service.openSecretProtector = func() (SecretProtector, error) {
-			return secretbox.Open(filepath.Join(storage.SetupDataRoot(), ".simplus-secrets-key-v1"))
-		}
-	}
-	if managementTLSStore, ok := stateStore.(ManagementTLSStore); ok {
-		service.managementTLS = managementTLSStore
-		service.generateLocalCA = managementcert.GenerateLocalCA
-	}
-	if hardwareReview, ok := stateStore.(HardwareReviewStore); ok {
-		service.hardwareReview = hardwareReview
-	}
-	if completionStore, ok := stateStore.(CompletionStore); ok {
-		service.completionStore = completionStore
-	}
-	return service
+	return service, nil
 }
 
 func (service *Service) Status(ctx context.Context) (Status, error) {
@@ -457,6 +498,9 @@ func (service *Service) ProvisionAdministrator(ctx context.Context, input Admini
 func (service *Service) BeginAdministratorSetup(ctx context.Context) (SessionGrant, error) {
 	if service == nil || service.authorization == nil {
 		return SessionGrant{}, fmt.Errorf("setup authorization store is not configured")
+	}
+	if service.administrator == nil {
+		return SessionGrant{}, fmt.Errorf("initial administrator setup is not configured")
 	}
 	service.mutationMu.Lock()
 	defer service.mutationMu.Unlock()

@@ -35,6 +35,7 @@ import (
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
 	vowifidomain "github.com/leonfox28/simplus/internal/domain/vowifi"
 	"github.com/leonfox28/simplus/internal/security/password"
+	storagefs "github.com/leonfox28/simplus/internal/storage/filesystem"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
 )
 
@@ -230,6 +231,60 @@ func newTestInventory() *inventory.Service {
 	return inventory.NewSimulator()
 }
 
+type testSetupSecretProtector struct{}
+
+func (testSetupSecretProtector) Encrypt(label string, plaintext []byte) ([]byte, error) {
+	return append([]byte(label+":"), plaintext...), nil
+}
+
+func newStatusSetupService(t *testing.T, store setupapp.StateStore) *setupapp.Service {
+	t.Helper()
+	service, err := setupapp.New(setupapp.Dependencies{StateStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func newFullSetupService(t *testing.T, stores *sqlitestore.Set) *setupapp.Service {
+	t.Helper()
+	service, err := setupapp.New(setupapp.Dependencies{
+		StateStore:         stores,
+		AuthorizationStore: stores,
+		AdministratorStore: stores,
+		PasswordHasher:     password.NewDefaultHasher(),
+		StorageStore:       stores,
+		DirectoryPreparer: func(path string) (setupapp.DirectoryIdentity, error) {
+			identity, err := storagefs.PreparePrivateDirectory(path)
+			if err != nil {
+				return setupapp.DirectoryIdentity{}, err
+			}
+			return setupapp.DirectoryIdentity{Path: identity.Path, Device: identity.Device, Inode: identity.Inode}, nil
+		},
+		ManagementTLSStore: stores,
+		SecretProtectorOpener: func() (setupapp.SecretProtector, error) {
+			return testSetupSecretProtector{}, nil
+		},
+		LocalCAGenerator: func(now time.Time, sans []string) (setupapp.LocalCABundle, error) {
+			return setupapp.LocalCABundle{
+				CACertificatePEM:   []byte("test-ca-certificate"),
+				CAPrivateKeyPEM:    []byte("test-ca-private-key"),
+				LeafCertificatePEM: []byte("test-leaf-certificate"),
+				LeafPrivateKeyPEM:  []byte("test-leaf-private-key"),
+				RootFingerprint:    strings.Repeat("a", 64),
+				LeafNotAfter:       now.Add(90 * 24 * time.Hour),
+				SANs:               append([]string(nil), sans...),
+			}, nil
+		},
+		HardwareReviewStore: stores,
+		CompletionStore:     stores,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 const testBusinessLineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
 
 type testBusinessLineSource struct{ source *inventory.Service }
@@ -248,16 +303,18 @@ func (source testBusinessLineSource) Topology(ctx context.Context) (inventory.To
 	return topology, nil
 }
 
-func newTestHandler(store health.StateStore, inventoryService *inventory.Service) http.Handler {
+func newTestHandler(t *testing.T, store health.StateStore, inventoryService *inventory.Service) http.Handler {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return withTestAdministratorSession(Router(New(health.New(store, "simulator"), setupapp.New(store, nil), inventoryService, logger, acceptingAuthenticator{}, nil)))
+	return withTestAdministratorSession(Router(New(health.New(store, "simulator"), newStatusSetupService(t, store), inventoryService, logger, acceptingAuthenticator{}, nil)))
 }
 
-func newAuthorizedTestHandler(stores *sqlitestore.Set) http.Handler {
+func newAuthorizedTestHandler(t *testing.T, stores *sqlitestore.Set) http.Handler {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return withTestAdministratorSession(Router(New(
 		health.New(stores, "simulator"),
-		setupapp.New(stores, stores),
+		newFullSetupService(t, stores),
 		inventory.NewSimulator(),
 		logger,
 		acceptingAuthenticator{},
@@ -271,7 +328,7 @@ func TestLineEgressHTTPContractUsesTypedCountryBinding(t *testing.T) {
 		ListenerPort: 20157, Ready: true, ReadinessReason: "READY",
 	}}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(health.New(fixedStateStore("ready"), "simulator"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
+	server := New(health.New(fixedStateStore("ready"), "simulator"), newStatusSetupService(t, fixedStateStore("ready")), newTestInventory(), logger, acceptingAuthenticator{}, nil)
 	hub := realtime.NewHub()
 	subscription := hub.Subscribe()
 	defer subscription.Close()
@@ -323,7 +380,7 @@ func TestManagedModemHTTPContractSeparatesCandidatesAndAddedRecords(t *testing.T
 		}},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(health.New(fixedStateStore("ready"), "hardware"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
+	server := New(health.New(fixedStateStore("ready"), "hardware"), newStatusSetupService(t, fixedStateStore("ready")), newTestInventory(), logger, acceptingAuthenticator{}, nil)
 	handler := withTestAdministratorSession(Router(WithManagedModems(server, manager)))
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/modems", nil)
@@ -404,7 +461,7 @@ func TestManagedLineHTTPContractUsesStableIdentityAndOpaqueCandidates(t *testing
 		}},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(health.New(fixedStateStore("ready"), "hardware"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
+	server := New(health.New(fixedStateStore("ready"), "hardware"), newStatusSetupService(t, fixedStateStore("ready")), newTestInventory(), logger, acceptingAuthenticator{}, nil)
 	handler := withTestAdministratorSession(Router(WithManagedLines(server, manager)))
 
 	request := func(method, target, body string) *httptest.ResponseRecorder {
@@ -465,7 +522,7 @@ func TestVoWiFiHTTPContractListsAndMutatesOnlyTypedState(t *testing.T) {
 		PhoneNumber:   "+447700900123",
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(health.New(fixedStateStore("ready"), "hardware"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
+	server := New(health.New(fixedStateStore("ready"), "hardware"), newStatusSetupService(t, fixedStateStore("ready")), newTestInventory(), logger, acceptingAuthenticator{}, nil)
 	handler := withTestAdministratorSession(Router(WithVoWiFi(server, manager)))
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/vowifi-lines", nil)
@@ -497,7 +554,7 @@ func TestVoWiFiActivationRequiresCSRF(t *testing.T) {
 	lineID := testBusinessLineID
 	manager := &testVoWiFiManager{state: vowifidomain.State{LineID: lineID}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := New(health.New(fixedStateStore("ready"), "hardware"), setupapp.New(fixedStateStore("ready"), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil)
+	server := New(health.New(fixedStateStore("ready"), "hardware"), newStatusSetupService(t, fixedStateStore("ready")), newTestInventory(), logger, acceptingAuthenticator{}, nil)
 	handler := Router(WithVoWiFi(server, manager))
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/vowifi-lines/"+lineID+"/activate", nil)
 	request.Host = "127.0.0.1:8080"
@@ -516,7 +573,7 @@ func TestSystemHealthStartsFailClosedAndUninitialized(t *testing.T) {
 	}
 	defer stores.Close()
 
-	handler := newTestHandler(stores, inventory.NewSimulator())
+	handler := newTestHandler(t, stores, inventory.NewSimulator())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/health", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -555,7 +612,7 @@ func TestSetupStatusExposesBootstrapBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	handler := newAuthorizedTestHandler(stores)
+	handler := newAuthorizedTestHandler(t, stores)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -585,12 +642,12 @@ func TestBootstrapExchangeCreatesOneTimePersistentSetupSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	setupService := setupapp.New(stores, stores)
+	setupService := newFullSetupService(t, stores)
 	grant, err := setupService.GenerateBootstrap(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newAuthorizedTestHandler(stores)
+	handler := newAuthorizedTestHandler(t, stores)
 
 	consume := func() *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/setup/bootstrap", strings.NewReader(`{"bootstrapCode":"`+grant.Code+`"}`))
@@ -631,7 +688,7 @@ func TestBootstrapExchangeCreatesOneTimePersistentSetupSession(t *testing.T) {
 	resumedRequest.Host = "127.0.0.1:8080"
 	resumedRequest.AddCookie(cookie)
 	resumedResponse := httptest.NewRecorder()
-	newAuthorizedTestHandler(stores).ServeHTTP(resumedResponse, resumedRequest)
+	newAuthorizedTestHandler(t, stores).ServeHTTP(resumedResponse, resumedRequest)
 	if resumedResponse.Code != http.StatusOK {
 		t.Fatalf("resume status = %d, body = %s", resumedResponse.Code, resumedResponse.Body.String())
 	}
@@ -658,12 +715,12 @@ func TestSetupAdministratorRequiresSessionAndPersistsArgon2idCredential(t *testi
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	setupService := setupapp.New(stores, stores)
+	setupService := newFullSetupService(t, stores)
 	grant, err := setupService.GenerateBootstrap(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newAuthorizedTestHandler(stores)
+	handler := newAuthorizedTestHandler(t, stores)
 	bootstrapRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/bootstrap", strings.NewReader(`{"bootstrapCode":"`+grant.Code+`"}`))
 	bootstrapRequest.Host = "127.0.0.1:8080"
 	bootstrapRequest.Header.Set("Content-Type", "application/json")
@@ -799,7 +856,7 @@ func TestSetupAdministratorRequiresSessionAndPersistsArgon2idCredential(t *testi
 }
 
 func TestBusinessAPIsStayLockedUntilSetupCompletes(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationUninitialized), inventory.NewSimulator())
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationUninitialized), inventory.NewSimulator())
 	for _, path := range []string{"/api/v1/inventory", "/api/v1/lines"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Host = "127.0.0.1:8080"
@@ -820,7 +877,7 @@ func TestBusinessAPIsStayLockedUntilSetupCompletes(t *testing.T) {
 }
 
 func TestSetupStatusReturnsStableErrorCode(t *testing.T) {
-	handler := newTestHandler(failingStateStore{}, newTestInventory())
+	handler := newTestHandler(t, failingStateStore{}, newTestInventory())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -859,7 +916,7 @@ func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 	authService := authapp.NewService(stores, stores, password.NewDefaultHasher())
 	handler := Router(New(
 		health.New(stores, "simulator"),
-		setupapp.New(stores, stores),
+		newFullSetupService(t, stores),
 		inventory.NewSimulator(),
 		logger,
 		authService,
@@ -926,7 +983,7 @@ func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 }
 
 func TestInventoryReturnsDynamicDeviceAndLineSummaries(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), newTestInventory())
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationReady), newTestInventory())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/inventory", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -977,7 +1034,7 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := Router(New(
-		health.New(stores, "simulator"), setupapp.New(stores, stores), inventoryService,
+		health.New(stores, "simulator"), newFullSetupService(t, stores), inventoryService,
 		logger, acceptingAuthenticator{}, messagingService,
 	))
 	body := `{"operationId":"operation-0123456789abcdef","lineId":"line_AQEBAQEBAQEBAQEBAQEBAQ","destination":"+8613800138000","body":"HTTP simulator message"}`
@@ -1223,7 +1280,7 @@ func TestContactsCRUDUsesBusinessAuthCSRFAndDurableStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	raw := Router(New(health.New(stores, "simulator"), setupapp.New(stores, stores), inventory.NewSimulator(), logger, acceptingAuthenticator{}, nil, contacts))
+	raw := Router(New(health.New(stores, "simulator"), newFullSetupService(t, stores), inventory.NewSimulator(), logger, acceptingAuthenticator{}, nil, contacts))
 
 	unauthorized := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/contacts", nil)
@@ -1285,7 +1342,7 @@ func TestSimulatorCallHTTPFlowRejectsEmergencyAndPersistsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := withTestAdministratorSession(Router(WithCalls(New(health.New(stores, "simulator"), setupapp.New(stores, stores), lines, logger, acceptingAuthenticator{}, nil), service)))
+	handler := withTestAdministratorSession(Router(WithCalls(New(health.New(stores, "simulator"), newFullSetupService(t, stores), lines, logger, acceptingAuthenticator{}, nil), service)))
 	post := func(path, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		request.Host = "127.0.0.1:8080"
@@ -1344,7 +1401,7 @@ func TestSimulatorCallHTTPFlowRejectsEmergencyAndPersistsHistory(t *testing.T) {
 }
 
 func TestHardwareTopologyReturnsRelationalResourceModel(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), newTestInventory())
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationReady), newTestInventory())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/hardware/topology", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -1369,7 +1426,7 @@ func TestHardwareTopologyReturnsRelationalResourceModel(t *testing.T) {
 }
 
 func TestInventoryReturnsStableErrorCode(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), nil)
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationReady), nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/inventory", nil)
 	request.Host = "127.0.0.1:8080"
 	response := httptest.NewRecorder()
@@ -1388,7 +1445,7 @@ func TestInventoryReturnsStableErrorCode(t *testing.T) {
 }
 
 func TestSystemHealthReturnsStableErrorCode(t *testing.T) {
-	handler := newTestHandler(failingStateStore{}, newTestInventory())
+	handler := newTestHandler(t, failingStateStore{}, newTestInventory())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/health", nil)
 	request.Host = "localhost:8080"
 	response := httptest.NewRecorder()
@@ -1469,7 +1526,7 @@ func TestEventStreamAuthenticatesFlushesAndCarriesOnlyBoundedHints(t *testing.T)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := WithRealtime(New(
 		health.New(fixedStateStore(setupapp.InstallationReady), "simulator"),
-		setupapp.New(fixedStateStore(setupapp.InstallationReady), nil),
+		newStatusSetupService(t, fixedStateStore(setupapp.InstallationReady)),
 		newTestInventory(), logger, acceptingAuthenticator{}, nil,
 	), hub)
 	testServer := httptest.NewServer(Router(server))
@@ -1565,7 +1622,7 @@ func TestEventStreamRejectsMissingSessionAndClosesWhenSessionExpires(t *testing.
 	authenticator := &expiringAuthenticator{}
 	server := WithRealtime(New(
 		health.New(fixedStateStore(setupapp.InstallationReady), "simulator"),
-		setupapp.New(fixedStateStore(setupapp.InstallationReady), nil),
+		newStatusSetupService(t, fixedStateStore(setupapp.InstallationReady)),
 		newTestInventory(), logger, authenticator, nil,
 	), hub)
 	server.realtimeHeartbeat = 5 * time.Millisecond
@@ -1661,7 +1718,7 @@ func TestTrustedLANAuthorityValidation(t *testing.T) {
 }
 
 func TestRouterReturnsStableRoutingErrors(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), newTestInventory())
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationReady), newTestInventory())
 	for _, test := range []struct {
 		method string
 		path   string
@@ -1690,7 +1747,7 @@ func TestRouterReturnsStableRoutingErrors(t *testing.T) {
 }
 
 func TestRouterRejectsUntrustedHostHeader(t *testing.T) {
-	handler := newTestHandler(fixedStateStore(setupapp.InstallationReady), newTestInventory())
+	handler := newTestHandler(t, fixedStateStore(setupapp.InstallationReady), newTestInventory())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/health", nil)
 	request.Host = "attacker.example:8080"
 	response := httptest.NewRecorder()
@@ -1727,7 +1784,7 @@ func TestFeishuBindingRouterRequiresAuthAndCSRFUsesNoStoreAndHidesCredentials(t 
 		VerificationURL: "https://accounts.feishu.cn/synthetic-verification",
 		ExpiresAt:       time.Date(2026, 8, 11, 5, 0, 0, 0, time.UTC),
 	}}
-	server := WithNotifications(New(health.New(fixedStateStore(setupapp.InstallationReady), "simulator"), setupapp.New(fixedStateStore(setupapp.InstallationReady), nil), newTestInventory(), logger, acceptingAuthenticator{}, nil), manager)
+	server := WithNotifications(New(health.New(fixedStateStore(setupapp.InstallationReady), "simulator"), newStatusSetupService(t, fixedStateStore(setupapp.InstallationReady)), newTestInventory(), logger, acceptingAuthenticator{}, nil), manager)
 	raw := Router(server)
 
 	unauthorized := httptest.NewRequest(http.MethodGet, "/api/v1/notification-channel-bindings/feishu", nil)

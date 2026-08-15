@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "08-14-retire-native-deployment",
-    "08-14-move-background-policy-to-application"
+    "08-14-move-background-policy-to-application",
+    "08-14-make-setup-dependencies-explicit"
   ],
   "parent": null,
   "relatedFiles": [],

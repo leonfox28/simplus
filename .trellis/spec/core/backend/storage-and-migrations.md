@@ -132,10 +132,14 @@ Persist only the business data the feature contract allows:
   webhook/signing secrets use `internal/security/secretbox/` through
   `internal/application/notification/service.go`, while administrator
   passwords are stored only as Argon2id hashes produced by
-  `internal/security/password/argon2id.go`. Mihomo subscription URLs are a
-  current exception: `internal/application/mihomo/subscriptions.go` writes
-  `url_plaintext` in the private core database and migrates the older encrypted
-  field to plaintext;
+  `internal/security/password/argon2id.go`. Setup Local CA private keys are
+  encrypted with fixed domain-separated labels through a Setup-owned
+  `SecretProtector`; `cmd/simplusd` injects the concrete instance secretbox,
+  and SQLite persists the resulting ciphertext fields in the core
+  `management_tls` configuration.
+  Mihomo subscription URLs are a current exception:
+  `internal/application/mihomo/subscriptions.go` writes `url_plaintext` in the
+  private core database and migrates the older encrypted field to plaintext;
   `internal/application/mihomo/subscriptions_integration_test.go` explicitly
   protects that behavior. Do not claim universal at-rest encryption, log or
   publish any of these values, or change their storage contract without an

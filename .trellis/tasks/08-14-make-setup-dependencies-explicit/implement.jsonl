@@ -1,0 +1,7 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Load the backend ownership map, pre-development checklist and validation entry points for Setup/cmd/storage changes."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Keep concrete adapter selection in cmd/simplusd and consumer-owned ports in internal/application/setup."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Apply explicit narrow dependency ports, stable application values and fail-closed constructor behavior."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Preserve SQLite Set ownership, directory security and sensitive key/password persistence contracts without migration."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Preserve the active Setup HTTP state machine, stable errors and secret/privacy boundaries while changing only assembly."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Use deterministic fakes/temp storage, co-located tests and targeted-to-broad safe validation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace cmd composition through Setup ports to concrete filesystem/security adapters and ensure the bypass is removed."}

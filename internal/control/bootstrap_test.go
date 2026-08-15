@@ -10,8 +10,26 @@ import (
 
 	"github.com/leonfox28/simplus/internal/application/setup"
 	"github.com/leonfox28/simplus/internal/control"
+	"github.com/leonfox28/simplus/internal/security/password"
 	"github.com/leonfox28/simplus/internal/storage/sqlite"
 )
+
+func newBootstrapSetupService(t *testing.T, stores *sqlite.Set, withAdministrator bool) *setup.Service {
+	t.Helper()
+	dependencies := setup.Dependencies{
+		StateStore:         stores,
+		AuthorizationStore: stores,
+	}
+	if withAdministrator {
+		dependencies.AdministratorStore = stores
+		dependencies.PasswordHasher = password.NewDefaultHasher()
+	}
+	service, err := setup.New(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
 
 func TestBootstrapControlRejectsUnauthorizedUnixPeer(t *testing.T) {
 	ctx := context.Background()
@@ -36,7 +54,7 @@ func TestBootstrapControlRejectsUnauthorizedUnixPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(setup.New(stores, stores), slog.Default())}
+	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, false), slog.Default())}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 
@@ -80,7 +98,7 @@ func TestBootstrapControlRoundTripOverAuthorizedUnixPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(setup.New(stores, stores), slog.Default())}
+	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, false), slog.Default())}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 
@@ -123,7 +141,7 @@ func TestAdministratorProvisioningIsOneTimeOverRootControlSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(setup.New(stores, stores), slog.Default())}
+	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, true), slog.Default())}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 	request := control.ProvisionAdministratorRequest{Username: "simplus_admin", Password: "first-generated-password-123", Locale: "zh-CN"}

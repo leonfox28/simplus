@@ -7,8 +7,8 @@ runtime or domain that owns it:
 
 | Path | Current owner and evidence |
 | --- | --- |
-| `cmd/` | Per-binary flag parsing, dependency construction, lifecycle, operational log rendering, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, HTTP and application-owned background coordinators; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
-| `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports. `internal/application/messaging/service.go` owns its repository, Line source, sender, and inbox contracts; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
+| `cmd/` | Per-binary flag parsing, concrete dependency construction, lifecycle, operational log rendering, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, HTTP and application-owned background coordinators, while `cmd/simplusd/setup.go` translates concrete password/filesystem/secret/certificate adapters into Setup-owned ports and values; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
+| `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports/values. Setup owns explicit persistence/security ports and directory/Local-CA values but no concrete adapter defaults; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
 | `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/` defines normalized topology; `internal/domain/pagination/` owns shared opaque cursor validation/encoding. |
 | `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, and generated OpenAPI server implementation (`internal/api/httpapi/server.go`). |
 | `api/` and `internal/api/openapi/` | `api/openapi.yaml` is the public API source; `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml` define Go generation; `internal/api/openapi/generated.go` is output. |
@@ -75,6 +75,10 @@ and verification contract together instead of inventing a manual refresh.
   before searching the owning packages for an existing narrow pattern.
 - Do not import a concrete SQLite store or Agent implementation into an
   application service when a consumer-owned port is sufficient.
+- Do not type-assert one catch-all store to discover optional application
+  capabilities or construct password/filesystem/secret/certificate defaults in
+  an application constructor. Name the ports and assemble concrete adapters in
+  `cmd/**`.
 - Do not create a second public API type tree beside `api/openapi.yaml`, or a
   second hardware protocol beside `internal/agentapi` for one model.
 - Do not move tests to a distant umbrella directory; co-location is what makes

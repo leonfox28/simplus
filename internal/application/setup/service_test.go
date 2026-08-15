@@ -6,13 +6,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/leonfox28/simplus/internal/domain/managementtls"
-	"github.com/leonfox28/simplus/internal/security/managementcert"
-	storagefs "github.com/leonfox28/simplus/internal/storage/filesystem"
 )
 
 type testStore struct {
@@ -222,19 +221,110 @@ func (hasher testPasswordHasher) Hash(string) (string, error) {
 	return hasher.hash, hasher.err
 }
 
-func newTestService(store *testStore) *Service {
-	service := New(store, store)
-	service.now = func() time.Time { return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC) }
+func testTime() time.Time {
+	return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+}
+
+func newTestService(t *testing.T, store *testStore) *Service {
+	t.Helper()
+	return newTestServiceWithClock(t, store, testTime)
+}
+
+func newTestServiceWithClock(t *testing.T, store *testStore, now func() time.Time) *Service {
+	t.Helper()
+	service, err := New(testServiceDependencies(store, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+func testServiceDependencies(store *testStore, now func() time.Time) Dependencies {
 	randomBytes := append(bytes.Repeat([]byte{0x11}, 32), bytes.Repeat([]byte{0x22}, 32)...)
 	randomBytes = append(randomBytes, bytes.Repeat([]byte{0x33}, 32)...)
-	service.random = bytes.NewReader(randomBytes)
-	service.passwordHasher = testPasswordHasher{hash: "$argon2id$test-password-hash"}
-	service.prepareDirectory = func(path string) (storagefs.DirectoryIdentity, error) {
-		return storagefs.DirectoryIdentity{Path: path, Device: 1, Inode: 2}, nil
+	return Dependencies{
+		StateStore:         store,
+		AuthorizationStore: store,
+		AdministratorStore: store,
+		PasswordHasher:     testPasswordHasher{hash: "$argon2id$test-password-hash"},
+		StorageStore:       store,
+		DirectoryPreparer: func(path string) (DirectoryIdentity, error) {
+			return DirectoryIdentity{Path: path, Device: 1, Inode: 2}, nil
+		},
+		ManagementTLSStore: store,
+		SecretProtectorOpener: func() (SecretProtector, error) {
+			return testProtector{}, nil
+		},
+		LocalCAGenerator: func(now time.Time, sans []string) (LocalCABundle, error) {
+			return LocalCABundle{
+				CACertificatePEM:   []byte("test-ca-certificate"),
+				CAPrivateKeyPEM:    []byte("test-ca-private-key"),
+				LeafCertificatePEM: []byte("test-leaf-certificate"),
+				LeafPrivateKeyPEM:  []byte("test-leaf-private-key"),
+				RootFingerprint:    strings.Repeat("a", 64),
+				LeafNotAfter:       now.Add(90 * 24 * time.Hour),
+				SANs:               append([]string(nil), sans...),
+			}, nil
+		},
+		HardwareReviewStore: store,
+		CompletionStore:     store,
+		Random:              bytes.NewReader(randomBytes),
+		Now:                 now,
 	}
-	service.openSecretProtector = func() (SecretProtector, error) { return testProtector{}, nil }
-	service.generateLocalCA = managementcert.GenerateLocalCA
+}
+
+func newStateService(t *testing.T, stateStore StateStore) *Service {
+	t.Helper()
+	service, err := New(Dependencies{StateStore: stateStore})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return service
+}
+
+func TestNewValidatesExplicitDependencyShapes(t *testing.T) {
+	store := &testStore{state: InstallationUninitialized}
+	preparer := func(path string) (DirectoryIdentity, error) { return DirectoryIdentity{Path: path}, nil }
+	opener := func() (SecretProtector, error) { return testProtector{}, nil }
+	generator := func(time.Time, []string) (LocalCABundle, error) { return LocalCABundle{}, nil }
+
+	invalid := []struct {
+		name         string
+		dependencies Dependencies
+	}{
+		{name: "missing state store", dependencies: Dependencies{}},
+		{name: "administrator without password hasher", dependencies: Dependencies{StateStore: store, AdministratorStore: store}},
+		{name: "password hasher without administrator", dependencies: Dependencies{StateStore: store, PasswordHasher: testPasswordHasher{}}},
+		{name: "storage without directory preparer", dependencies: Dependencies{StateStore: store, StorageStore: store}},
+		{name: "directory preparer without storage", dependencies: Dependencies{StateStore: store, DirectoryPreparer: preparer}},
+		{name: "secret opener without generator", dependencies: Dependencies{StateStore: store, ManagementTLSStore: store, SecretProtectorOpener: opener}},
+		{name: "generator without secret opener", dependencies: Dependencies{StateStore: store, ManagementTLSStore: store, LocalCAGenerator: generator}},
+		{name: "local CA without management TLS", dependencies: Dependencies{StateStore: store, SecretProtectorOpener: opener, LocalCAGenerator: generator}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := New(test.dependencies)
+			if service != nil || !errors.Is(err, ErrDependenciesInvalid) {
+				t.Fatalf("New() = %#v, %v", service, err)
+			}
+		})
+	}
+
+	service, err := New(Dependencies{StateStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BeginAdministratorSetup(context.Background()); err == nil || !strings.Contains(err.Error(), "authorization store") {
+		t.Fatalf("reduced BeginAdministratorSetup error = %v", err)
+	}
+
+	service, err = New(Dependencies{StateStore: store, AuthorizationStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BeginAdministratorSetup(context.Background()); err == nil || !strings.Contains(err.Error(), "administrator setup") {
+		t.Fatalf("reduced BeginAdministratorSetup error = %v", err)
+	}
 }
 
 func TestStatusMapsInstallationStateToSetupBoundary(t *testing.T) {
@@ -282,7 +372,7 @@ func TestStatusMapsInstallationStateToSetupBoundary(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &testStore{state: test.state}
-			status, err := New(store, store).Status(context.Background())
+			status, err := newStateService(t, store).Status(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -295,7 +385,7 @@ func TestStatusMapsInstallationStateToSetupBoundary(t *testing.T) {
 
 func TestProvisionAdministratorIsNoOpForExistingReadyInstance(t *testing.T) {
 	store := &testStore{state: InstallationReady, administratorUsername: "simplus_admin", administratorLocale: "zh-CN"}
-	created, err := newTestService(store).ProvisionAdministrator(context.Background(), AdministratorInput{
+	created, err := newTestService(t, store).ProvisionAdministrator(context.Background(), AdministratorInput{
 		Username: "simplus_admin", Password: "replacement-password", PasswordConfirmation: "replacement-password", InstanceDefaultLocale: "zh-CN",
 	})
 	if err != nil || created {
@@ -305,7 +395,7 @@ func TestProvisionAdministratorIsNoOpForExistingReadyInstance(t *testing.T) {
 
 func TestBootstrapIsSingleUseAndCreatesRestrictedSession(t *testing.T) {
 	store := &testStore{state: InstallationUninitialized}
-	service := newTestService(store)
+	service := newTestService(t, store)
 
 	grant, err := service.GenerateBootstrap(context.Background())
 	if err != nil {
@@ -314,8 +404,8 @@ func TestBootstrapIsSingleUseAndCreatesRestrictedSession(t *testing.T) {
 	if len(grant.Code) != 43 {
 		t.Fatalf("bootstrap code length = %d, want 43", len(grant.Code))
 	}
-	if grant.ExpiresAt.Sub(service.now()) != 10*time.Minute {
-		t.Fatalf("bootstrap lifetime = %s", grant.ExpiresAt.Sub(service.now()))
+	if grant.ExpiresAt.Sub(testTime()) != 10*time.Minute {
+		t.Fatalf("bootstrap lifetime = %s", grant.ExpiresAt.Sub(testTime()))
 	}
 	if store.bootstrapHash != sha256.Sum256([]byte(grant.Code)) {
 		t.Fatal("authorization store did not retain exactly the bootstrap-code hash")
@@ -328,8 +418,8 @@ func TestBootstrapIsSingleUseAndCreatesRestrictedSession(t *testing.T) {
 	if len(sessionGrant.Token) != 43 {
 		t.Fatalf("session token length = %d, want 43", len(sessionGrant.Token))
 	}
-	if sessionGrant.ExpiresAt.Sub(service.now()) != 30*time.Minute {
-		t.Fatalf("session lifetime = %s", sessionGrant.ExpiresAt.Sub(service.now()))
+	if sessionGrant.ExpiresAt.Sub(testTime()) != 30*time.Minute {
+		t.Fatalf("session lifetime = %s", sessionGrant.ExpiresAt.Sub(testTime()))
 	}
 	if _, err := service.ConsumeBootstrap(context.Background(), grant.Code); !errors.Is(err, ErrBootstrapInvalidOrExpired) {
 		t.Fatalf("second bootstrap consumption error = %v", err)
@@ -349,7 +439,7 @@ func TestBootstrapIsSingleUseAndCreatesRestrictedSession(t *testing.T) {
 
 func TestConfigureAdministratorPersistsOnlyAfterAuthorizedValidation(t *testing.T) {
 	store := &testStore{state: InstallationUninitialized}
-	service := newTestService(store)
+	service := newTestService(t, store)
 	grant, err := service.GenerateBootstrap(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +484,7 @@ func TestConfigureAdministratorPersistsOnlyAfterAuthorizedValidation(t *testing.
 
 func TestConfigureStorageRequiresAdministratorAndPersistsValidatedRoots(t *testing.T) {
 	store := &testStore{state: InstallationUninitialized}
-	service := newTestService(store)
+	service := newTestService(t, store)
 	grant, err := service.GenerateBootstrap(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +518,7 @@ func TestConfigureStorageRequiresAdministratorAndPersistsValidatedRoots(t *testi
 
 func TestConfigureHTTPSSupportsLoopbackAndConfirmedLocalCA(t *testing.T) {
 	store := &testStore{state: InstallationUninitialized}
-	service := newTestService(store)
+	service := newTestService(t, store)
 	grant, err := service.GenerateBootstrap(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -523,9 +613,75 @@ func TestConfigureHTTPSSupportsLoopbackAndConfirmedLocalCA(t *testing.T) {
 	}
 }
 
+func TestConfigureHTTPSMapsAndClearsApplicationLocalCABundle(t *testing.T) {
+	store := &testStore{state: InstallationUninitialized}
+	caPrivateKey := []byte("synthetic-ca-private-key")
+	leafPrivateKey := []byte("synthetic-leaf-private-key")
+	leafNotAfter := testTime().Add(90 * 24 * time.Hour)
+	var generatorTime time.Time
+	var generatorSANs []string
+	dependencies := testServiceDependencies(store, testTime)
+	dependencies.LocalCAGenerator = func(now time.Time, sans []string) (LocalCABundle, error) {
+		generatorTime = now
+		generatorSANs = append([]string(nil), sans...)
+		return LocalCABundle{
+			CACertificatePEM:   []byte("synthetic-ca-certificate"),
+			CAPrivateKeyPEM:    caPrivateKey,
+			LeafCertificatePEM: []byte("synthetic-leaf-certificate"),
+			LeafPrivateKeyPEM:  leafPrivateKey,
+			RootFingerprint:    strings.Repeat("b", 64),
+			LeafNotAfter:       leafNotAfter,
+			SANs:               []string{"normalized.example", "192.168.50.10"},
+		}, nil
+	}
+	service, err := New(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.GenerateBootstrap(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.ConsumeBootstrap(context.Background(), grant.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfigureAdministrator(context.Background(), session.Token, AdministratorInput{
+		Username: "admin", Password: "correct horse battery staple", PasswordConfirmation: "correct horse battery staple", InstanceDefaultLocale: "en-US",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfigureStorage(context.Background(), session.Token, StorageInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfigureHTTPS(context.Background(), session.Token, HTTPSInput{
+		Mode: "local-ca", ListenHost: "192.168.50.10", ListenPort: 8443, SubjectAlternativeNames: []string{"simplus.local"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if generatorTime != testTime() || !reflect.DeepEqual(generatorSANs, []string{"simplus.local", "192.168.50.10"}) {
+		t.Fatalf("Local CA generator inputs = %s, %#v", generatorTime, generatorSANs)
+	}
+	if !bytes.Equal(caPrivateKey, make([]byte, len(caPrivateKey))) || !bytes.Equal(leafPrivateKey, make([]byte, len(leafPrivateKey))) {
+		t.Fatal("Setup retained plaintext Local CA private-key bytes")
+	}
+	configuration := store.managementTLS
+	if string(configuration.CACertificatePEM) != "synthetic-ca-certificate" ||
+		string(configuration.LeafCertificatePEM) != "synthetic-leaf-certificate" ||
+		string(configuration.EncryptedCAPrivateKey) != "management-tls-ca-private-key-v1:synthetic-ca-private-key" ||
+		string(configuration.EncryptedLeafPrivateKey) != "management-tls-leaf-private-key-v1:synthetic-leaf-private-key" ||
+		configuration.RootFingerprintSHA256 != strings.Repeat("b", 64) ||
+		!configuration.LeafNotAfter.Equal(leafNotAfter) ||
+		!reflect.DeepEqual(configuration.SubjectAlternativeNames, []string{"normalized.example", "192.168.50.10"}) {
+		t.Fatalf("persisted Local CA configuration = %#v", configuration)
+	}
+}
+
 func TestBootstrapAndSessionFailClosed(t *testing.T) {
 	store := &testStore{state: InstallationUninitialized}
-	service := newTestService(store)
+	currentTime := testTime()
+	service := newTestServiceWithClock(t, store, func() time.Time { return currentTime })
 	if _, err := service.ConsumeBootstrap(context.Background(), "not-a-token"); !errors.Is(err, ErrBootstrapInvalidOrExpired) {
 		t.Fatalf("invalid bootstrap error = %v", err)
 	}
@@ -536,7 +692,7 @@ func TestBootstrapAndSessionFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.now = func() time.Time { return grant.ExpiresAt }
+	currentTime = grant.ExpiresAt
 	if _, err := service.ConsumeBootstrap(context.Background(), grant.Code); !errors.Is(err, ErrBootstrapInvalidOrExpired) {
 		t.Fatalf("expired bootstrap error = %v", err)
 	}
@@ -550,18 +706,18 @@ func TestBootstrapAndSessionFailClosed(t *testing.T) {
 func TestStatusFailsClosed(t *testing.T) {
 	storeError := errors.New("storage unavailable")
 	store := &testStore{stateErr: storeError}
-	if _, err := New(store, store).Status(context.Background()); !errors.Is(err, storeError) {
+	if _, err := newStateService(t, store).Status(context.Background()); !errors.Is(err, storeError) {
 		t.Fatalf("store error = %v", err)
 	}
 	store.stateErr = nil
 	store.state = "broken"
-	if _, err := New(store, store).Status(context.Background()); err == nil {
+	if _, err := newStateService(t, store).Status(context.Background()); err == nil {
 		t.Fatal("Status accepted an unsupported installation state")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	store.state = InstallationReady
-	if _, err := New(store, store).Status(ctx); !errors.Is(err, context.Canceled) {
+	if _, err := newStateService(t, store).Status(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled status error = %v", err)
 	}
 }
