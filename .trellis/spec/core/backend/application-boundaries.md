@@ -313,6 +313,140 @@ if err != nil {
 }
 ```
 
+## Scenario: Explicit Mihomo supervisor composition
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `RuntimeManager` in
+`internal/application/mihomo`, its constructor,
+`SIMPLUS_MIHOMO_SUPERVISOR_SOCKET`, or local/socket Mihomo supervisor
+selection. The application owns selected-subscription intent, artifact
+readiness, persisted running state and restart/rollback semantics. The
+`cmd/simplusd` composition root owns which concrete supervisor implementation
+satisfies the typed runtime capability.
+
+### 2. Signatures
+
+The application constructor has one explicit, error-returning form:
+
+```go
+var ErrRuntimeManagerConfiguration = errors.New(
+    "Mihomo runtime manager dependencies are invalid",
+)
+
+func NewRuntimeManager(
+    root string,
+    store RuntimeStore,
+    artifacts ArtifactResolver,
+    core CoreStatusReader,
+    supervisor mihomosupervisor.API,
+) (*RuntimeManager, error)
+```
+
+The executable owns the concrete selection seam:
+
+```go
+func newMihomoSupervisor(
+    root string,
+    socketPath string,
+) (mihomosupervisor.API, error)
+```
+
+### 3. Contracts
+
+- `root` is the absolute `filepath.Join(cfg.Storage.DataRoot, "mihomo")`.
+  `NewRuntimeManager` requires an absolute root and cleans it before storing it.
+- `RuntimeStore`, `ArtifactResolver`, `CoreStatusReader` and
+  `mihomosupervisor.API` are all mandatory. Nil and typed-nil dependencies wrap
+  `ErrRuntimeManagerConfiguration`; construction never returns a manager that
+  can fail later because one of these dependencies is absent.
+- Empty `SIMPLUS_MIHOMO_SUPERVISOR_SOCKET` explicitly selects
+  `mihomosupervisor.NewLocal(root)` for the existing development/Simulator
+  mode. A non-empty value must be an absolute Unix-socket path and selects
+  `mihomosupervisor.NewClient(socketPath)`.
+- Both concrete constructors only validate/normalize paths and allocate
+  in-memory state: selecting local mode does not start Mihomo, and selecting
+  socket mode does not dial netd. Supervisor filesystem/process/socket I/O
+  starts only when the application invokes `Status`, `Start` or `Stop` on the
+  injected typed API.
+- `newMihomoSupervisor` translates either concrete-constructor failure into a
+  true nil API. `main.go` logs the bounded configuration failure, closes the
+  stores and exits with code 2. Application dependency configuration failure
+  also closes the stores and exits non-zero (currently code 1).
+- Compose production supplies the absolute netd socket and remains
+  socket-backed. Empty-socket local mode is not a production fallback.
+- Fixed artifact readiness, generated-config checks and restart rollback stay
+  in `internal/application/mihomo`; supervisor request-path/process validation
+  and concrete process lifecycle stay in `internal/mihomosupervisor`. Do not
+  move either behavior into `cmd/simplusd` while fixing composition.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Empty or relative application root | `NewRuntimeManager` returns nil and wraps `ErrRuntimeManagerConfiguration` |
+| Any required dependency is nil or typed nil | constructor returns nil and wraps `ErrRuntimeManagerConfiguration` |
+| Empty socket plus absolute root | select `*mihomosupervisor.Local`; do not execute a process |
+| Empty socket plus relative root | return a true nil API and the local-constructor error; startup stops |
+| Absolute socket path | select `*mihomosupervisor.Client`; do not contact the socket during construction |
+| Relative socket path | return a true nil API and the client-constructor error; startup stops |
+| Valid supervisor but invalid application dependencies | close stores and exit non-zero before HTTP/background assembly |
+| Runtime `Start`/`Stop`/`Status`/`Restart` fails | preserve existing typed application/supervisor error mapping and rollback semantics; do not select another implementation |
+
+### 5. Good / Base / Bad Cases
+
+- Good: Compose passes an absolute netd socket; `cmd/simplusd` constructs the
+  Unix client, injects it once, and the application knows only the typed API.
+- Base: local development leaves the socket empty; the command constructs a
+  local supervisor but no child process starts until `RuntimeManager.Start` or
+  `RuntimeManager.Restart` issues a typed `Start` request.
+- Bad: an application convenience constructor calls `NewLocal`, discards its
+  error, infers local mode from a missing dependency, or silently falls back
+  from a failed socket client to a local process.
+
+### 6. Tests Required
+
+- `internal/application/mihomo/runtime_test.go` injects a recording fake,
+  asserts the selected subscription, binary path, absolute generated-config
+  path, pending-restart state and one stop call, and covers empty/relative
+  root plus nil and typed-nil mandatory dependencies with `errors.Is`.
+- `cmd/simplusd/mihomo_test.go` asserts concrete local/socket selection and
+  true-nil error returns for invalid paths. A deliberately missing absolute
+  socket proves construction does not dial it.
+- `internal/mihomosupervisor` retains the concrete process/client behavior
+  tests. Application runtime tests may create synthetic artifact files needed
+  by readiness checks, but must not launch a process.
+- Focused scans must find one `NewRuntimeManager` constructor, no
+  `NewRuntimeManagerWithSupervisor`, no application call to `NewLocal`, and no
+  discarded concrete-constructor error. Run focused packages under
+  `go test -race`, then the supported `./cmd/... ./internal/...` test/vet scope.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: the application hides a concrete default and its failure.
+func NewRuntimeManager(root string, store RuntimeStore, artifacts ArtifactResolver, core CoreStatusReader) *RuntimeManager {
+    local, _ := mihomosupervisor.NewLocal(root)
+    return &RuntimeManager{Supervisor: local}
+}
+
+// Correct: cmd owns implementation choice and the application requires it.
+supervisor, err := newMihomoSupervisor(mihomoRoot, mihomoSupervisorSocket)
+if err != nil {
+    logger.Error("Mihomo supervisor configuration failed", "error", err)
+    _ = stores.Close()
+    return 2
+}
+runtime, err := mihomoapp.NewRuntimeManager(
+    mihomoRoot, stores, configManager, coreManager, supervisor,
+)
+if err != nil {
+    logger.Error("Mihomo runtime manager dependency configuration failed", "error", err)
+    _ = stores.Close()
+    return 1
+}
+```
+
 ## Stable Business Identity and Runtime Resolution
 
 Persisted configuration is not the same as live hardware observation.

@@ -33,7 +33,6 @@ import (
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/config"
 	"github.com/leonfox28/simplus/internal/control"
-	"github.com/leonfox28/simplus/internal/mihomosupervisor"
 	"github.com/leonfox28/simplus/internal/security/password"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
@@ -239,17 +238,17 @@ func run() int {
 		return 1
 	}
 	mihomoConfigManager.ConfigureDashboard(mihomoDashboardStatus)
-	var mihomoRuntimeManager *mihomoapp.RuntimeManager
-	if mihomoSupervisorSocket == "" {
-		mihomoRuntimeManager = mihomoapp.NewRuntimeManager(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager)
-	} else {
-		mihomoSupervisor, supervisorErr := mihomosupervisor.NewClient(mihomoSupervisorSocket)
-		if supervisorErr != nil {
-			logger.Error("Mihomo supervisor client configuration failed", "error", supervisorErr)
-			_ = stores.Close()
-			return 2
-		}
-		mihomoRuntimeManager = mihomoapp.NewRuntimeManagerWithSupervisor(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager, mihomoSupervisor)
+	mihomoSupervisor, supervisorErr := newMihomoSupervisor(mihomoRoot, mihomoSupervisorSocket)
+	if supervisorErr != nil {
+		logger.Error("Mihomo supervisor configuration failed", "error", supervisorErr)
+		_ = stores.Close()
+		return 2
+	}
+	mihomoRuntimeManager, runtimeManagerErr := mihomoapp.NewRuntimeManager(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager, mihomoSupervisor)
+	if runtimeManagerErr != nil {
+		logger.Error("Mihomo runtime manager dependency configuration failed", "error", runtimeManagerErr)
+		_ = stores.Close()
+		return 1
 	}
 	mihomoSubscriptionService := mihomoapp.NewSubscriptionService(stores, secretKeyring, mihomoConfigManager)
 	lineEgressService := lineegressapp.New(stores, managedLineService, mihomoRuntimeManager)

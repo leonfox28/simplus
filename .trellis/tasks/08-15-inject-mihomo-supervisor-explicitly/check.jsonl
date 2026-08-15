@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go quality and dependency-direction requirements."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Independently verify concrete assembly stays in cmd and tests stay with owners."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Verify typed required dependency, stable error and fail-closed construction."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Verify focused/race/broad safe checks and meaningful observable assertions."}

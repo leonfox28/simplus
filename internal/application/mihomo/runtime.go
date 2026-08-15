@@ -3,7 +3,10 @@ package mihomo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -11,9 +14,10 @@ import (
 )
 
 var (
-	ErrRuntimeAlreadyRunning = errors.New("Mihomo is already running")
-	ErrRuntimeNotRunning     = errors.New("Mihomo is not running")
-	ErrRuntimeStartupFailed  = errors.New("Mihomo listeners failed during startup")
+	ErrRuntimeManagerConfiguration = errors.New("Mihomo runtime manager dependencies are invalid")
+	ErrRuntimeAlreadyRunning       = errors.New("Mihomo is already running")
+	ErrRuntimeNotRunning           = errors.New("Mihomo is not running")
+	ErrRuntimeStartupFailed        = errors.New("Mihomo listeners failed during startup")
 )
 
 type RuntimeStore interface {
@@ -44,13 +48,49 @@ type RuntimeManager struct {
 	mu         sync.Mutex
 }
 
-func NewRuntimeManager(root string, store RuntimeStore, artifacts ArtifactResolver, core CoreStatusReader) *RuntimeManager {
-	local, _ := mihomosupervisor.NewLocal(root)
-	return NewRuntimeManagerWithSupervisor(root, store, artifacts, core, local)
+func NewRuntimeManager(
+	root string,
+	store RuntimeStore,
+	artifacts ArtifactResolver,
+	core CoreStatusReader,
+	supervisor mihomosupervisor.API,
+) (*RuntimeManager, error) {
+	if !filepath.IsAbs(root) {
+		return nil, fmt.Errorf("%w: root must be absolute", ErrRuntimeManagerConfiguration)
+	}
+	if runtimeDependencyMissing(store) {
+		return nil, fmt.Errorf("%w: runtime store is required", ErrRuntimeManagerConfiguration)
+	}
+	if runtimeDependencyMissing(artifacts) {
+		return nil, fmt.Errorf("%w: artifact resolver is required", ErrRuntimeManagerConfiguration)
+	}
+	if runtimeDependencyMissing(core) {
+		return nil, fmt.Errorf("%w: core status reader is required", ErrRuntimeManagerConfiguration)
+	}
+	if runtimeDependencyMissing(supervisor) {
+		return nil, fmt.Errorf("%w: supervisor is required", ErrRuntimeManagerConfiguration)
+	}
+	return &RuntimeManager{
+		Root:       filepath.Clean(root),
+		Store:      store,
+		Artifacts:  artifacts,
+		Core:       core,
+		Supervisor: supervisor,
+		Now:        time.Now,
+	}, nil
 }
 
-func NewRuntimeManagerWithSupervisor(root string, store RuntimeStore, artifacts ArtifactResolver, core CoreStatusReader, supervisor mihomosupervisor.API) *RuntimeManager {
-	return &RuntimeManager{Root: root, Store: store, Artifacts: artifacts, Core: core, Supervisor: supervisor, Now: time.Now}
+func runtimeDependencyMissing(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (manager *RuntimeManager) Status(ctx context.Context) (RuntimeStatus, error) {

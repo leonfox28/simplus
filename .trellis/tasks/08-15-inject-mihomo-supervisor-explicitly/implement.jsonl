@@ -1,0 +1,5 @@
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go ownership, pre-development checklist and validation ladder."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Composition-root and application/supervisor package ownership rules."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Consumer-owned typed dependency, constructor validation and error contracts."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Co-located fake/composition tests and safe targeted-to-broad validation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer ownership and explicit contract review checklist."}
