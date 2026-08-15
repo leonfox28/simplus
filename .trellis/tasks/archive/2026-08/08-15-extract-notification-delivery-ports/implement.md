@@ -43,7 +43,8 @@
   formatting and `git diff --check`.
 - [x] Complete an independent Trellis check and update backend
   boundary/storage/quality specs with the verified contract.
-- [ ] Commit, archive and record the completed task/session.
+- [x] Commit the completed task as `04e1770`; archive and record it through the
+  Trellis finish-work flow.
 
 ## Validation Commands
 

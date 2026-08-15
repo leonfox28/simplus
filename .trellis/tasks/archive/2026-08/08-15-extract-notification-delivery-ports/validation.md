@@ -44,6 +44,8 @@ performing hardware, HIL, RF, SIM/eUICC, SMS or call actions.
 - Confirmed no OpenAPI, generated source, migration, public provider or stored
   credential format changed.
 
-## Deferred
+## Completion
 
-- Product commit, task archive and session-journal recording.
+- Product, tests, task evidence and specification were committed as
+  `04e1770` (`refactor: isolate notification webhook delivery`).
+- The task is ready for Trellis archival and session-journal recording.

@@ -80,26 +80,26 @@ assembled in `cmd/simplusd`.
 
 ## Acceptance Criteria
 
-- [ ] AC1. The notification Service contains no `http.Client`, raw Webhook
+- [x] AC1. The notification Service contains no `http.Client`, raw Webhook
   request/response handling, provider JSON/signature function or official
   endpoint/path validation; those behaviors exist only in the concrete adapter.
-- [ ] AC2. The application exposes one bounded typed Webhook port and an
+- [x] AC2. The application exposes one bounded typed Webhook port and an
   error-returning constructor that rejects every missing/typed-nil mandatory
   dependency.
-- [ ] AC3. `cmd/simplusd` explicitly constructs and injects the Webhook adapter,
+- [x] AC3. `cmd/simplusd` explicitly constructs and injects the Webhook adapter,
   handles application configuration failure and preserves the existing Feishu
   client composition.
-- [ ] AC4. Application fake-port tests prove target validation, decrypted
+- [x] AC4. Application fake-port tests prove target validation, decrypted
   credential/message/timestamp handoff, event filtering, success, network
   failure, rejection, invalid adapter result and persistence ordering/mapping.
-- [ ] AC5. Adapter tests prove both provider payloads/signature, exact allowed
+- [x] AC5. Adapter tests prove both provider payloads/signature, exact allowed
   target shapes, per-delivery revalidation, headers, redirect/transport
   classification, bounded response parsing and credential-safe errors using
   synthetic transports only.
-- [ ] AC6. Existing application integration, HTTP, storage and Feishu tests
+- [x] AC6. Existing application integration, HTTP, storage and Feishu tests
   preserve public responses, encrypted data, legacy rows and application
   binding semantics without API/schema/generated changes.
-- [ ] AC7. Focused race tests, broad safe Go tests, formatting, lint, ownership
+- [x] AC7. Focused race tests, broad safe Go tests, formatting, lint, ownership
   scans, task validation and `git diff --check` pass without external delivery,
   services, Compose, private-state access, HIL or hardware/network actions.
 
