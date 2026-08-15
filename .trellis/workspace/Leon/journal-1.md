@@ -349,3 +349,25 @@ Resolved audit V-04 by moving local/socket Mihomo supervisor selection into cmd/
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Isolate notification Webhook delivery
+
+**Date**: 2026-08-15
+**Task**: Isolate notification Webhook delivery
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Resolved audit V-05 by introducing an application-owned typed Webhook port, moving fixed WeCom/Feishu bot target validation and HTTP protocol into a concrete adapter assembled by cmd/simplusd, preserving legacy ciphertext/API/outcome behavior, and strengthening credential-safe error tests. Independent implementation/spec review and safe race, broad Go, lint, generated-drift, docs, ownership, and privacy gates passed without any external delivery or runtime action.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `04e1770` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~351 | Active |
+| `journal-1.md` | ~373 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-08-15 | Isolate notification Webhook delivery | `04e1770` | `main` |
 | 15 | 2026-08-15 | Make Mihomo supervisor composition explicit | `ffbc69b` | `main` |
 | 14 | 2026-08-15 | Make Setup dependencies explicit | `d66860f` | `main` |
 | 13 | 2026-08-14 | Move background policy into application coordinators | `024cbfb` | `main` |
