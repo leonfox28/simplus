@@ -46,6 +46,8 @@ services, hardware discovery, HIL, communications, or device/network actions.
 - Reconciled the directory summary with the empty-socket development/Simulator
   branch and configured Unix-socket client branch.
 
-## Deferred to the main session
+## Completion
 
-- Commit and task archive.
+- Product, tests, task evidence and specification were committed as
+  `ffbc69b` (`refactor: inject Mihomo supervisor explicitly`).
+- The task is ready for Trellis archival and session-journal recording.

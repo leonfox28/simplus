@@ -49,19 +49,19 @@ application runtime manager to receive one explicit typed supervisor API.
 
 ## Acceptance Criteria
 
-- [ ] AC1. No production code under `internal/application/mihomo` calls
+- [x] AC1. No production code under `internal/application/mihomo` calls
   `mihomosupervisor.NewLocal` or selects a concrete supervisor implementation.
-- [ ] AC2. There is one `NewRuntimeManager` constructor; it requires a typed
+- [x] AC2. There is one `NewRuntimeManager` constructor; it requires a typed
   supervisor and returns an error for invalid root, store, artifact resolver,
   core reader, or supervisor dependencies.
-- [ ] AC3. `cmd/simplusd` owns both local and socket construction branches,
+- [x] AC3. `cmd/simplusd` owns both local and socket construction branches,
   handles every returned error, and injects the selected API explicitly.
-- [ ] AC4. Existing runtime start/status/stop/restart semantics and Compose's
+- [x] AC4. Existing runtime start/status/stop/restart semantics and Compose's
   socket-backed production path are unchanged.
-- [ ] AC5. Focused application and command tests cover the two composition
+- [x] AC5. Focused application and command tests cover the two composition
   modes, invalid construction, and typed runtime behavior without launching a
   real process from the application test.
-- [ ] AC6. Focused race tests, supported Go vet/lint checks, task validation,
+- [x] AC6. Focused race tests, supported Go vet/lint checks, task validation,
   focused ownership scans, and `git diff --check` pass without deployment,
   Compose startup, private-state access, HIL or hardware/network side effects.
 

@@ -26,7 +26,8 @@
   stale constructor names; run task validation and `git diff --check`.
 - [x] Update the backend boundary/directory specification after independent
   review.
-- [ ] Commit and archive the completed child task.
+- [x] Commit the completed child task as `ffbc69b`; archive it through the
+  Trellis finish-work flow.
 
 ## Prohibited validation
 
