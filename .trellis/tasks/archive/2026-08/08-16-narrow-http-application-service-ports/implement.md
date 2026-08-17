@@ -29,7 +29,7 @@
   `git diff --check`.
 - [x] Complete an independent Trellis check, then synchronize the verified
   HTTP consumer-port rule into the relevant backend specs.
-- [ ] Commit, archive the child task, update the parent audit task record, and
+- [x] Commit, archive the child task, update the parent audit task record, and
   record the Trellis session journal.
 
 ## Validation Commands
@@ -86,3 +86,5 @@ Rollback is a source-only revert; no migration or external cleanup is needed.
   affected Go scope and generated-contract checks passed instead.
 - No service, Compose, external endpoint, private runtime state, hardware, HIL,
   RF, SIM/eUICC, SMS, or call action was used.
+- Functional work was committed as `aa8b41f`; task archival and journal
+  recording are completed by the Trellis finish-work flow.
