@@ -10,7 +10,7 @@ runtime or domain that owns it:
 | `cmd/` | Per-binary flag parsing, concrete dependency construction, lifecycle, operational log rendering, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, HTTP and application-owned background coordinators, constructs the fixed legacy-Webhook adapter, and injects it into Notification; `cmd/simplusd/setup.go` translates concrete password/filesystem/secret/certificate adapters into Setup-owned ports and values, while `cmd/simplusd/mihomo.go` selects the empty-socket development/Simulator local supervisor or the configured Unix-socket client; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
 | `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports/values. Setup owns explicit persistence/security ports and directory/Local-CA values but no concrete adapter defaults; the Mihomo runtime manager requires one injected typed supervisor and never selects its local/client implementation; Notification owns Webhook port values, secret/state policy and outcome persistence but no raw legacy-Webhook HTTP/provider protocol; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
 | `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/` defines normalized topology; `internal/domain/pagination/` owns shared opaque cursor validation/encoding. |
-| `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, and generated OpenAPI server implementation (`internal/api/httpapi/server.go`). |
+| `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, generated OpenAPI server implementation, and consumer-owned ports for adjacent Health, Setup, Inventory and Realtime application behavior (`internal/api/httpapi/server.go`). |
 | `api/` and `internal/api/openapi/` | `api/openapi.yaml` is the public API source; `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml` define Go generation; `internal/api/openapi/generated.go` is output. |
 | `internal/agentapi/` | Bounded Unix-socket hardware protocol, peer validation, typed clients/servers, and protocol tests. |
 | `internal/modemadapter/`, `internal/hardwareprobe/`, `internal/attransport/` | Model facts and commands, inventory orchestration, and generic bounded tty I/O respectively. |
@@ -29,7 +29,9 @@ runtime or domain that owns it:
   needs. The small interfaces at the top of
   `internal/api/httpapi/server.go` and
   `internal/application/messaging/service.go` avoid a shared catch-all service
-  package.
+  package. HTTP's `HealthReader`, `SetupManager`, `InventoryReader`, and
+  `RealtimeManager` contain only live handler operations; `cmd/simplusd`
+  injects the existing concrete implementations structurally.
 - Keep protocol-neutral business records in `internal/domain/**`. Wire and
   persistence representations may convert at their boundaries; they must not
   become the domain source of truth.

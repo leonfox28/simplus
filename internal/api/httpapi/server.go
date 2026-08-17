@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -160,10 +161,38 @@ type ManagedLineManager interface {
 	Update(context.Context, string, string) (linedomain.View, error)
 }
 
+type HealthReader interface {
+	Snapshot(context.Context) (health.Snapshot, error)
+}
+
+type SetupManager interface {
+	Status(context.Context) (setupapp.Status, error)
+	ConsumeBootstrap(context.Context, string) (setupapp.SessionGrant, error)
+	ReadSession(context.Context, string) (setupapp.Session, error)
+	ConfigureAdministrator(context.Context, string, setupapp.AdministratorInput) (setupapp.Session, error)
+	ConfigureStorage(context.Context, string, setupapp.StorageInput) (setupapp.Session, error)
+	ConfigureHTTPS(context.Context, string, setupapp.HTTPSInput) (setupapp.Session, error)
+	ConfirmHTTPS(context.Context, string, string) (setupapp.Session, error)
+	ReadRootCertificate(context.Context, string) ([]byte, string, error)
+	ConfirmHardwareReview(context.Context, string, setupapp.HardwareReviewInput) (setupapp.Session, error)
+	Complete(context.Context, string, setupapp.HardwareReviewInput) (setupapp.Completion, error)
+	BeginAdministratorSetup(context.Context) (setupapp.SessionGrant, error)
+}
+
+type InventoryReader interface {
+	Snapshot(context.Context) (inventory.Snapshot, error)
+	Topology(context.Context) (inventory.Topology, error)
+}
+
+type RealtimeManager interface {
+	Subscribe() *realtime.Subscription
+	Publish([]realtime.Topic, realtime.Attention)
+}
+
 type Server struct {
-	health              *health.Service
-	setup               *setupapp.Service
-	inventory           *inventory.Service
+	health              HealthReader
+	setup               SetupManager
+	inventory           InventoryReader
 	auth                Authenticator
 	messages            Messenger
 	contacts            ContactManager
@@ -179,7 +208,7 @@ type Server struct {
 	mihomoRuntime       MihomoRuntimeManager
 	mihomoDashboard     MihomoDashboardManager
 	notifications       NotificationManager
-	realtime            *realtime.Hub
+	realtime            RealtimeManager
 	realtimeHeartbeat   time.Duration
 	logger              *slog.Logger
 }
@@ -251,9 +280,9 @@ func WithNotifications(server *Server, manager NotificationManager) *Server {
 	return server
 }
 
-func WithRealtime(server *Server, hub *realtime.Hub) *Server {
+func WithRealtime(server *Server, manager RealtimeManager) *Server {
 	if server != nil {
-		server.realtime = hub
+		server.realtime = manager
 	}
 	return server
 }
@@ -272,9 +301,9 @@ func WithEUICC(server *Server, manager EUICCManager) *Server {
 	return server
 }
 func New(
-	healthService *health.Service,
-	setupService *setupapp.Service,
-	inventoryService *inventory.Service,
+	healthService HealthReader,
+	setupService SetupManager,
+	inventoryService InventoryReader,
 	logger *slog.Logger,
 	authentication Authenticator,
 	messages Messenger,
@@ -291,6 +320,21 @@ func New(
 		server.contacts = contactManagers[0]
 	}
 	return server
+}
+
+// httpDependencyMissing lets required ports retain their nil-receiver error
+// behavior while optional Setup/realtime checks treat typed nil as absent.
+func httpDependencyMissing(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func Router(server *Server) http.Handler {
@@ -373,7 +417,7 @@ func (server *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	if !authorized {
 		return
 	}
-	if server.realtime == nil {
+	if httpDependencyMissing(server.realtime) {
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "EVENT_STREAM_UNAVAILABLE", Retryable: true})
 		return
 	}
@@ -428,7 +472,7 @@ func (server *Server) StreamEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) realtimeSessionValid(ctx context.Context, token string) bool {
-	if server == nil || server.setup == nil || server.auth == nil {
+	if server == nil || httpDependencyMissing(server.setup) || server.auth == nil {
 		return false
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, realtimeAuthTimeout)
@@ -482,7 +526,7 @@ func writeRealtimeEvent(w io.Writer, event realtime.Event) error {
 }
 
 func (server *Server) publish(topics []realtime.Topic, attention realtime.Attention) {
-	if server != nil && server.realtime != nil {
+	if server != nil && !httpDependencyMissing(server.realtime) {
 		server.realtime.Publish(topics, attention)
 	}
 }
@@ -1141,7 +1185,7 @@ func (server *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setAdministratorCookies(w, r, result.SessionToken, result.CSRFToken, result.ExpiresAt)
-	if server.setup != nil {
+	if !httpDependencyMissing(server.setup) {
 		status, statusErr := server.setup.Status(r.Context())
 		if statusErr != nil {
 			server.logger.ErrorContext(r.Context(), "read setup status after login failed", "error", statusErr)

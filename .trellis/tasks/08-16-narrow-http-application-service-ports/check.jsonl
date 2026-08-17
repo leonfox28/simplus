@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-16-narrow-http-application-service-ports/research.md","reason":"Independently verify every converted port is exact, concrete coupling is removed and behavior is preserved."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Check consumer ownership, smallest method sets and no catch-all interface."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Check interface placement and concrete assembly remain in the intended owners."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Check Setup gates, HTTP mappings and authenticated realtime behavior for compatibility."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check independent fakes, typed-nil regression coverage and safe validation completeness."}

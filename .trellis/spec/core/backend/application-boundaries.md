@@ -20,6 +20,127 @@ The HTTP layer follows the same rule. Interfaces such as `Messenger`,
 `internal/api/httpapi/server.go` express handler needs and keep concrete
 assembly in `cmd/simplusd/main.go`.
 
+## Scenario: HTTP-owned adjacent application ports
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `httpapi.Server`, `httpapi.New`, Setup or
+inventory handlers, system health, authenticated realtime streaming, or
+`WithRealtime`. HTTP owns the operations it consumes; `cmd/simplusd` owns the
+concrete application implementations supplied at runtime.
+
+### 2. Signatures
+
+The HTTP boundary owns these exact roles:
+
+```go
+type HealthReader interface {
+    Snapshot(context.Context) (health.Snapshot, error)
+}
+
+type SetupManager interface {
+    Status(context.Context) (setup.Status, error)
+    ConsumeBootstrap(context.Context, string) (setup.SessionGrant, error)
+    ReadSession(context.Context, string) (setup.Session, error)
+    ConfigureAdministrator(context.Context, string, setup.AdministratorInput) (setup.Session, error)
+    ConfigureStorage(context.Context, string, setup.StorageInput) (setup.Session, error)
+    ConfigureHTTPS(context.Context, string, setup.HTTPSInput) (setup.Session, error)
+    ConfirmHTTPS(context.Context, string, string) (setup.Session, error)
+    ReadRootCertificate(context.Context, string) ([]byte, string, error)
+    ConfirmHardwareReview(context.Context, string, setup.HardwareReviewInput) (setup.Session, error)
+    Complete(context.Context, string, setup.HardwareReviewInput) (setup.Completion, error)
+    BeginAdministratorSetup(context.Context) (setup.SessionGrant, error)
+}
+
+type InventoryReader interface {
+    Snapshot(context.Context) (inventory.Snapshot, error)
+    Topology(context.Context) (inventory.Topology, error)
+}
+
+type RealtimeManager interface {
+    Subscribe() *realtime.Subscription
+    Publish([]realtime.Topic, realtime.Attention)
+}
+```
+
+`Server` stores those four interfaces. The first three `New` parameters use
+the corresponding roles, and `WithRealtime(*Server, RealtimeManager)` supplies
+the fourth. Argument order, logger defaults, variadic contacts and the
+`*Server` return shape remain unchanged.
+
+### 3. Contracts
+
+- Every method above has a live HTTP call. Setup deliberately excludes
+  `GenerateBootstrap` and `ProvisionAdministrator`, which belong to other
+  composition/control paths.
+- Application-owned typed inputs and results may appear in port signatures;
+  concrete application implementation pointers may not appear in HTTP fields
+  or construction parameters.
+- `cmd/simplusd` injects the existing `*health.Service`, `*setup.Service`,
+  `*inventory.Service`, and `*realtime.Hub` by structural satisfaction. Do not
+  add an adapter or move concrete selection into HTTP.
+- Interface values are stored unchanged. `httpDependencyMissing` is used only
+  by `StreamEvents`, `realtimeSessionValid`, `publish`, and `Login` so those
+  optional availability decisions treat typed nil as absent.
+- Do not normalize typed-nil Health/Setup/Inventory values to a true nil
+  interface: their concrete nil-receiver methods return the existing bounded
+  configuration errors used by HTTP mappings.
+- This boundary refactor changes no OpenAPI schema/route, cookie, status/error
+  code, Setup transition, health/inventory payload, realtime topic/attention,
+  heartbeat/session behavior, generated source or application implementation.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Production concrete services and Hub | structurally satisfy the four ports; no wrapper or caller behavior change |
+| Independent fake implementations | `New`/`WithRealtime` accept them without a concrete service value |
+| raw or typed-nil Setup in Login/realtime validation | treat as absent; skip optional Login Setup work and fail realtime validation closed |
+| raw or typed-nil Realtime manager | stream returns `EVENT_STREAM_UNAVAILABLE`; publication is a no-op |
+| typed-nil concrete Health/Setup/Inventory called by a handler | dispatch its nil-receiver method and retain the pre-refactor bounded error path |
+| extra method added to a port | focused exact-method-set test fails until a live HTTP need is demonstrated |
+| `WithRealtime(nil, manager)` | return nil without dereferencing the server |
+
+### 5. Good / Base / Bad Cases
+
+- Good: production supplies the existing services, while an HTTP test supplies
+  four recording fakes and observes the same bounded mapping/publication flow.
+- Base: realtime is not configured; authenticated stream setup returns the
+  existing stable unavailable error and ordinary publish calls do nothing.
+- Bad: store `*setup.Service` directly, add every exported Setup method to the
+  interface, normalize typed nil to true nil, or introduce a general service
+  registry/event bus.
+
+### 6. Tests Required
+
+- Compile-time assertions for all four production implementations and four
+  independent fake implementations.
+- A handwritten exact method-name assertion for each interface, including the
+  negative absence of Setup's control-only methods.
+- Fake-only construction plus observable `Subscribe` and `Publish` calls.
+- Raw/typed-nil optional availability cases and separate typed-nil concrete
+  Health/Setup/Inventory receiver-error cases.
+- Existing `httptest` coverage for Setup gates, Health/Inventory mapping,
+  authenticated SSE, heartbeat/session expiry and publication remains green.
+- Run focused HTTP and command tests under `-race`, then the supported
+  `./cmd/... ./internal/...` tests/vet/lint and generated-drift checks.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: concrete coupling plus an interface conversion that loses nil state.
+type Server struct { setup *setup.Service }
+if server.setupPort != nil { // typed-nil pointer inside the interface is non-nil
+    _, _ = server.setupPort.Status(ctx)
+}
+
+// Correct: consumer-owned port and typed-nil-aware optional availability.
+type Server struct { setup SetupManager }
+if !httpDependencyMissing(server.setup) {
+    _, _ = server.setup.Status(ctx)
+}
+```
+
 ## Scenario: Background coordination and realtime invalidation
 
 ### 1. Scope / Trigger

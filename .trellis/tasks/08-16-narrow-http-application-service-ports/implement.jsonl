@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/08-16-narrow-http-application-service-ports/research.md","reason":"Exact C-01 concrete wiring, live method matrix, compatibility constraints and test gap."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go dependency direction and pre-development checklist."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Consumer-owned typed-port rule and adjacent application/realtime ownership."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"HTTP ownership, cmd composition, interface placement and co-located test rules."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Existing HTTP, Setup gate and authenticated realtime behavior that must remain unchanged."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Trusted httptest/realtime patterns and safe targeted-to-broad validation ladder."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer ownership and boundary verification checklist."}
