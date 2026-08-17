@@ -371,3 +371,25 @@ Resolved audit V-05 by introducing an application-owned typed Webhook port, movi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Narrow HTTP application service ports
+
+**Date**: 2026-08-17
+**Task**: Narrow HTTP application service ports
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Replaced concrete Health, Setup, Inventory, and Realtime HTTP dependencies with exact consumer-owned ports; preserved typed-nil compatibility, added focused boundary tests, synchronized backend specs, and passed independent safe validation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa8b41f` | (see git log) |
+
+### Status
+
+[OK] **Completed**

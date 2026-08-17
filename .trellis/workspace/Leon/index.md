@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
-- **Last Active**: 2026-08-15
+- **Total Sessions**: 17
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~373 | Active |
+| `journal-1.md` | ~395 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-08-17 | Narrow HTTP application service ports | `aa8b41f` | `main` |
 | 16 | 2026-08-15 | Isolate notification Webhook delivery | `04e1770` | `main` |
 | 15 | 2026-08-15 | Make Mihomo supervisor composition explicit | `ffbc69b` | `main` |
 | 14 | 2026-08-15 | Make Setup dependencies explicit | `d66860f` | `main` |
