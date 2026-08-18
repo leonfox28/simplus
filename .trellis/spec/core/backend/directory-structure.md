@@ -8,13 +8,13 @@ runtime or domain that owns it:
 | Path | Current owner and evidence |
 | --- | --- |
 | `cmd/` | Per-binary flag parsing, concrete dependency construction, lifecycle, operational log rendering, and executable-only helpers. `cmd/simplusd/main.go` wires stores, services, transports, HTTP and application-owned background coordinators, constructs the fixed legacy-Webhook adapter, and injects it into Notification; `cmd/simplusd/setup.go` translates concrete password/filesystem/secret/certificate adapters into Setup-owned ports and values, while `cmd/simplusd/mihomo.go` selects the empty-socket development/Simulator local supervisor or the configured Unix-socket client; `cmd/simplus-agent/main.go` wires the typed hardware server; `cmd/simplus-netd/main.go` wires the privileged supervisors. |
-| `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports/values. Setup owns explicit persistence/security ports and directory/Local-CA values but no concrete adapter defaults; the Mihomo runtime manager requires one injected typed supervisor and never selects its local/client implementation; Notification owns Webhook port values, secret/state policy and outcome persistence but no raw legacy-Webhook HTTP/provider protocol; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. |
+| `internal/application/` | Domain use-case services, background business coordinators and consumer-owned ports/values. Setup owns explicit persistence/security ports and directory/Local-CA values but no concrete adapter defaults; the Mihomo runtime manager requires one injected typed supervisor and never selects its local/client implementation; Notification owns Webhook port values, secret/state policy and outcome persistence but no raw legacy-Webhook HTTP/provider protocol; Messaging and Inventory own their SMS/Agent-change coordination policy; `internal/application/realtime/` owns bounded topic publication/subscriptions. There is no supported `application/resourcelease` package: the unassembled SQLite-typed orchestrator was retired. |
 | `internal/domain/` | Business records, enums, validation, and domain errors without transport assembly. `internal/domain/hardware/` defines normalized topology; `internal/domain/pagination/` owns shared opaque cursor validation/encoding. |
 | `internal/api/httpapi/` | Public HTTP authentication, middleware, request/response mapping, generated OpenAPI server implementation, and consumer-owned ports for adjacent Health, Setup, Inventory and Realtime application behavior (`internal/api/httpapi/server.go`). |
 | `api/` and `internal/api/openapi/` | `api/openapi.yaml` is the public API source; `internal/api/openapi/generate.go` and `api/oapi-codegen.yaml` define Go generation; `internal/api/openapi/generated.go` is output. |
 | `internal/agentapi/` | Bounded Unix-socket hardware protocol, peer validation, typed clients/servers, and protocol tests. |
 | `internal/modemadapter/`, `internal/hardwareprobe/`, `internal/attransport/` | Model facts and commands, inventory orchestration, and generic bounded tty I/O respectively. |
-| `internal/storage/sqlite/` | SQLite opening, migrations, repositories, generated sqlc package, and persistence tests. |
+| `internal/storage/sqlite/` | SQLite opening, migrations, repositories, generated sqlc package, and persistence tests. `resource_leases.go`, its focused test, and runtime migration 00005 are dormant historical compatibility fixtures, not application APIs or evidence of a production lease capability. |
 | `internal/notificationwebhook/` | Concrete legacy enterprise WeChat/Feishu bot Webhook target validation, payload/signature generation, bounded HTTP and explicit provider-response parsing. It implements the Notification-owned port, returns typed outcomes plus credential-safe stable errors, and owns no store or event/state policy. |
 | `internal/*supervisor/` | Typed clients and local implementations for privileged Mihomo/Host VoWiFi runtime ownership. |
 
@@ -35,6 +35,11 @@ runtime or domain that owns it:
 - Keep protocol-neutral business records in `internal/domain/**`. Wire and
   persistence representations may convert at their boundaries; they must not
   become the domain source of truth.
+- An abstract repository does not make storage-owned parameters/results
+  application-safe. If a future feature needs the dormant ResourceGroup lease
+  mechanism, define application/domain values first and map them in the
+  concrete persistence owner; do not revive the retired package around the
+  SQLite record types.
 - Keep Linux-specific implementations behind portable files or interfaces.
   Examples include `internal/attransport/session_linux.go` plus
   `internal/attransport/session_other.go`, and
@@ -78,6 +83,9 @@ and verification contract together instead of inventing a manual refresh.
   before searching the owning packages for an existing narrow pattern.
 - Do not import a concrete SQLite store or Agent implementation into an
   application service when a consumer-owned port is sufficient.
+- Do not alias, re-export, accept, return, or branch on the retained
+  `sqlite.ResourceLease*` types/constants from an application package. Their
+  exported Go names support only the dormant storage fixture and its tests.
 - Do not type-assert one catch-all store to discover optional application
   capabilities or construct password/filesystem/secret/certificate defaults or
   local/client supervisor/Webhook HTTP implementations in an application

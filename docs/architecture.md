@@ -255,7 +255,7 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 写入权威状态，浏览器再通过 HTTP 重新读取。SSE 不能承载 mutation 结果或建立第二套
 事件状态。
 
-现有 `radio.ensure-off` ledger 代码与 ResourceGroup lease 可以保留为 fixture/历史基础设施，但 production Agent 不注册该命令。新的 RF 路径只接受目标开关状态，在 Agent 内串行执行固定命令并立即读回；新的 SMS/Call 纵切也不应扩展通用分布式命令平台。
+旧的 ResourceGroup lease 应用编排器已移除；已发布的 runtime migration 00005 和 SQLite lease repository 只作为数据与迁移兼容的 dormant fixture 保留，不是 production capability，也不是新 application 类型的来源。独立的 `radio.ensure-off` outcome/fencing ledger 仍保留，但 production Agent 不注册该命令。新的 RF 路径只接受目标开关状态，在 Agent 内串行执行固定命令并立即读回；新的 SMS/Call 纵切也不应扩展通用分布式命令平台。
 
 ## 5. 关键数据流
 
@@ -355,7 +355,8 @@ Web POST -> 内存中的单实例绑定状态 -> 固定 accounts.feishu.cn 设�
 
 ## 8. 当前技术债处理原则
 
-- 已完成但超出新 MVP 的 setup/auth/topology/lease 代码先保持可用；
+- 已完成但超出新 MVP 的 setup/auth/topology 代码先保持可用；ResourceGroup lease
+  应用编排器已删除，只有已发布 migration 与 SQLite fixture 为兼容保留；
 - 不为删代码而中断短信纵切；
 - 当旧抽象实际阻碍一个纵切时，用小型执行计划删除或折叠；
 - 每次只保留一个业务真相源，避免在 daemon、Agent 和 Web 分别维护同一状态；

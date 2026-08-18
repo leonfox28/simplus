@@ -16,6 +16,25 @@ and WAL artifacts. Each database uses one open connection, `busy_timeout`,
 foreign keys, `synchronous=FULL`, `trusted_schema=OFF`, and WAL. Preserve those
 checks rather than opening the same files ad hoc from a domain store.
 
+### Dormant runtime ResourceGroup lease compatibility
+
+Runtime migration `00005_resource_group_leases.sql` and
+`internal/storage/sqlite/resource_leases.go` are legacy storage artifacts
+present since the initial public source release. The application orchestrator
+that exposed these SQLite-owned values was never production-wired and has been
+removed. The migration, repository, and `resource_leases_test.go` are currently
+retained unchanged as historical storage compatibility/fixture infrastructure;
+they do not establish a supported application or production capability.
+
+Do not import, alias, or re-export `ResourceLeaseAcquire`, `ResourceLease`,
+`ResourceLeaseOperation`, or `ResourceLeaseCall` into application contracts.
+A future feature must define application/domain values and an explicit SQLite
+mapping. A future request to remove the tables or their data requires a
+separately approved migration/data decision and a new migration; deleting dead
+application code never authorizes editing the released runtime v5 file. Keep
+the focused real-SQLite replay, fencing, expiry/reopen, conflict, and
+concurrency tests while this fixture remains.
+
 ## Store Methods
 
 - Put persistence behavior in a domain-named file under

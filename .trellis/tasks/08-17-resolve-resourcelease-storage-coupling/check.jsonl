@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-17-resolve-resourcelease-storage-coupling/research.md","reason":"Independently verify complete reference inventory, selected deletion scope and absence of a production caller."}
+{"file":".trellis/tasks/08-14-audit-layer-boundaries/audit.md","reason":"Check the final repair closes C-02 without broadening beyond its minimum remediation."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Verify no application contract exposes storage-owned lease vocabulary or replacement bypass."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Verify package deletion and retained storage ownership match the repository layout contract."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Verify migration 00005, stored data compatibility and SQLite evidence remain intact."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check focused SQLite, broad Go and safe offline validation completeness."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review the full application-to-storage direction and adjacent surfaces for scope drift."}
+{"file":"docs/architecture.md","reason":"Confirm current product text distinguishes retired orchestration from retained historical storage."}
+{"file":"docs/decisions/0001-product-scope-reset.md","reason":"Confirm the repair follows rather than rewrites the historical product reset."}

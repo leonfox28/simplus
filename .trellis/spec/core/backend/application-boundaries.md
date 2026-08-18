@@ -20,6 +20,123 @@ The HTTP layer follows the same rule. Interfaces such as `Messenger`,
 `internal/api/httpapi/server.go` express handler needs and keep concrete
 assembly in `cmd/simplusd/main.go`.
 
+## Scenario: Retired ResourceGroup lease application contract
+
+### 1. Scope / Trigger
+
+Apply this contract when considering a ResourceGroup lease feature, changing
+the retained runtime lease tables/repository, or introducing an application
+repository whose methods use persistence-owned values. An interface named
+`Repository` is not a layer boundary when its parameters, results, or enum
+branches are owned by `internal/storage/sqlite`.
+
+The former `internal/application/resourcelease` package was never assembled by
+a production binary and has been removed. Do not recreate it merely to expose
+the historical SQLite fixture.
+
+### 2. Signatures
+
+These current signatures belong only to the dormant storage fixture in
+`internal/storage/sqlite/resource_leases.go`:
+
+```go
+func (*Set) AcquireResourceGroupLease(
+    context.Context,
+    ResourceLeaseAcquire,
+) (ResourceLease, bool, error)
+
+func (*Set) RenewResourceGroupLease(
+    context.Context,
+    string,
+    uint64,
+    time.Time,
+    time.Time,
+) (ResourceLease, error)
+
+func (*Set) ReleaseResourceGroupLease(context.Context, string, uint64) error
+func (*Set) ActiveResourceGroupLeases(
+    context.Context,
+    string,
+    time.Time,
+) ([]ResourceLease, error)
+```
+
+`ResourceLeaseAcquire`, `ResourceLease`, `ResourceLeaseOperation`, and
+`ResourceLeaseCall` are SQLite-package vocabulary. No supported application
+signature accepts, returns, aliases, or re-exports them.
+
+### 3. Contracts
+
+- `internal/application/resourcelease` must remain absent unless a newly
+  approved current product feature establishes a real application use case.
+- A future use case defines its request/result/kind vocabulary in the
+  application or protocol-neutral domain owner first. A concrete SQLite
+  adapter maps those values at the persistence boundary.
+- Application validation must not branch on SQLite constants or treat the
+  retained storage record as the business source of truth.
+- Runtime migration `00005_resource_group_leases.sql`, the SQLite repository,
+  and its focused test are historical compatibility/fixture infrastructure,
+  not evidence of a production capability.
+- Removing dead application code does not authorize a schema change, deletion
+  of stored rows, a new command/API, or activation of the separate Agent
+  `radio.ensure-off` outcome/fencing ledger.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Application port accepts/returns `sqlite.ResourceLease*` | reject the design; define application/domain values and an explicit mapping |
+| Application code aliases a SQLite lease type or branches on its kind constants | reject as persistence vocabulary leaking upward |
+| No production caller and the old application policy is obsolete | remove the complete application package; do not preserve an unused facade |
+| Dead application package is removed | retain the released migration and existing rows unchanged |
+| A future product feature genuinely needs leasing | approve a new task, define the current business contract, then implement and test the mapping |
+| A future change wants to drop lease tables or data | require a separately approved migration/data-compatibility decision and a new migration; never rewrite runtime v5 |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a future vertical slice defines application-owned lease intent and a
+  narrow repository, while a SQLite adapter explicitly converts to its storage
+  representation and focused tests prove the round trip.
+- Base: the dormant SQLite repository, real-SQLite tests, and embedded runtime
+  migration remain isolated with no application import or production caller.
+- Bad: recreate `application/resourcelease`, alias `sqlite.ResourceLease`, or
+  call the SQLite fixture from an executable because the old tables already
+  exist.
+
+### 6. Tests Required
+
+- Focused scans must find no `internal/application/resourcelease` package and
+  no application use of `sqlite.ResourceLease*` or the SQLite lease-kind
+  constants.
+- `internal/storage/sqlite/resource_leases_test.go` remains the focused
+  real-SQLite evidence for replay, fencing, expiry/reopen, conflict, and
+  concurrent acquisition behavior while the fixture is retained.
+- Run `go test -count=1 ./internal/storage/sqlite`, then the supported
+  `./cmd/... ./internal/...` test/vet/lint scope to catch hidden imports or
+  production wiring.
+- A task that does not change OpenAPI, generated sources, or migrations must
+  still run generated-drift and protected-file diff checks. No service,
+  private runtime database, hardware, or HIL validation is required.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: the interface name hides a concrete persistence contract.
+type Repository interface {
+    Acquire(context.Context, sqlite.ResourceLeaseAcquire) (
+        sqlite.ResourceLease, bool, error,
+    )
+}
+
+// Correct current shape: no application ResourceGroup lease contract exists.
+// The retained methods stay inside internal/storage/sqlite and are called only
+// by the storage-focused compatibility tests.
+
+// If a separately approved feature needs leasing, that task defines its
+// business vocabulary first and adds an explicit persistence mapping; this
+// retired contract does not prescribe the future API.
+```
+
 ## Scenario: HTTP-owned adjacent application ports
 
 ### 1. Scope / Trigger

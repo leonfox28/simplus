@@ -1,0 +1,9 @@
+{"file":".trellis/tasks/08-17-resolve-resourcelease-storage-coupling/research.md","reason":"Complete C-02 live-reference, history, migration, documentation and option inventory."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go dependency direction and pre-development checklist."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Application consumer-owned port/value rules and prohibition on persistence-owned contracts."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Application, storage, composition-root and co-located test ownership."}
+{"file":".trellis/spec/core/backend/storage-and-migrations.md","reason":"Released migration immutability, embedded runtime schema and real-SQLite compatibility testing."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Targeted-to-broad Go validation and synthetic no-hardware test constraints."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer ownership and boundary verification checklist."}
+{"file":"docs/architecture.md","reason":"Canonical current product scope for generic ResourceGroup leases and historical fixture treatment."}
+{"file":"docs/decisions/0001-product-scope-reset.md","reason":"Historical decision not to extend lease/fencing infrastructure into current SMS/Call flows."}
