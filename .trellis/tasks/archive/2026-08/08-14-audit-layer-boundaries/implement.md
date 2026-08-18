@@ -50,7 +50,7 @@
   supported Go, lint, generated, documentation and container-contract gates.
 - [x] Complete an independent final Trellis check that the closure table and
   current source agree and no audit finding remains open.
-- [ ] Commit the closure record, archive the parent task and record the session
+- [x] Commit the closure record, archive the parent task and record the session
   journal.
 
 ### Phase F validation evidence — 2026-08-18
@@ -79,6 +79,8 @@
   completed without network access.
 - No service, Compose, provider endpoint, private runtime state, hardware,
   modem, RF, SMS/call, SIM/eUICC, network mutation or HIL action was used.
+- The closure record was committed as `dce8356`; parent-task archival and the
+  session journal are completed by the Trellis finish-work flow.
 
 ## Validation commands
 
