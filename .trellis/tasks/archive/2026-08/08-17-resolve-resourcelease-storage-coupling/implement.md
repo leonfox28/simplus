@@ -32,7 +32,7 @@
   compatibility, documentation accuracy, and validation evidence.
 - [x] Synchronize the verified application/storage ownership and historical
   fixture contract into the relevant backend specs.
-- [ ] Commit, archive the child task, update the parent audit task record, and
+- [x] Commit, archive the child task, update the parent audit task record, and
   record the Trellis session journal.
 
 ## Validation commands
@@ -103,3 +103,5 @@ cleanup, or hardware action is involved.
   It removed an unsupported claim that the retained artifacts predate the
   product reset, avoided prescribing a speculative future application API,
   and synchronized backend-index routing without changing product code.
+- Functional work was committed as `1fe33a7`; task archival and journal
+  recording are completed by the Trellis finish-work flow.
