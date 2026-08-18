@@ -393,3 +393,25 @@ Replaced concrete Health, Setup, Inventory, and Realtime HTTP dependencies with 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: Retire dormant resource lease application
+
+**Date**: 2026-08-18
+**Task**: Retire dormant resource lease application
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Removed the unassembled application/resourcelease package that exposed SQLite-owned lease types, retained the released runtime migration and SQLite compatibility fixture unchanged, aligned architecture and backend specs, and passed focused/broad offline validation plus independent review.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1fe33a7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
