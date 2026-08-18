@@ -415,3 +415,25 @@ Removed the unassembled application/resourcelease package that exposed SQLite-ow
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: Close layer boundary audit remediation
+
+**Date**: 2026-08-18
+**Task**: Close layer boundary audit remediation
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Closed the parent layer-boundary audit after all five violations and two architecture concerns were independently repaired and archived; added the historical-baseline remediation table, revalidated cumulative source and repository gates, and archived the 7/7 parent task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dce8356` | (see git log) |
+
+### Status
+
+[OK] **Completed**

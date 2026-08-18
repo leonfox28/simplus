@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~417 | Active |
+| `journal-1.md` | ~439 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-08-18 | Close layer boundary audit remediation | `dce8356` | `main` |
 | 18 | 2026-08-18 | Retire dormant resource lease application | `1fe33a7` | `main` |
 | 17 | 2026-08-17 | Narrow HTTP application service ports | `aa8b41f` | `main` |
 | 16 | 2026-08-15 | Isolate notification Webhook delivery | `04e1770` | `main` |
