@@ -2,7 +2,7 @@
   "id": "audit-layer-boundaries",
   "name": "audit-layer-boundaries",
   "title": "Audit layer boundaries",
-  "description": "",
+  "description": "Static layer-boundary audit and coordinated closure of all five violations and two architecture concerns.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

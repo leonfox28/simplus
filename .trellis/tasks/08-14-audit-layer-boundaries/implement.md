@@ -40,6 +40,46 @@
 - [x] Run `git diff --check` and confirm changed files are confined to `.trellis/tasks/08-14-audit-layer-boundaries/**`.
 - [x] Incorporate only task-report corrections, then present the final audit result and any proposed follow-up tasks to the user.
 
+## Phase F — Close the remediation program
+
+- [x] Verify all seven approved child tasks are completed and archived, and
+  map every V-01–V-05 / C-01–C-02 finding to its functional commit.
+- [x] Add a dated remediation-closure section to `audit.md` while preserving
+  the original baseline, evidence classes and historical source anchors.
+- [x] Run cumulative source-only checks for all repaired boundaries plus the
+  supported Go, lint, generated, documentation and container-contract gates.
+- [x] Complete an independent final Trellis check that the closure table and
+  current source agree and no audit finding remains open.
+- [ ] Commit the closure record, archive the parent task and record the session
+  journal.
+
+### Phase F validation evidence — 2026-08-18
+
+- All seven child task records are completed under
+  `.trellis/tasks/archive/2026-08/**`; their listed functional commits are
+  ancestors of the current `HEAD` and match the closure table.
+- Focused current-source assertions passed for registry-backed driver
+  registration, application-owned background coordinators, explicit Setup and
+  Mihomo dependencies, the bounded legacy-Webhook port, HTTP-owned adjacent
+  service ports, and absence of ResourceLease vocabulary from application
+  source.
+- The retained SQLite ResourceGroup lease repository, focused test and
+  `00005_resource_group_leases.sql` have identical SHA-256 values at the audit
+  baseline, immediately before C-02 and in the current worktree. No migration
+  or protected-file diff exists across the remediation program.
+- `make check-format`, `go test -count=1 ./cmd/... ./internal/...`, `go vet
+  ./cmd/... ./internal/...`, `make lint`, `make verify-generated`, `make
+  check-docs`, `make check-container-files`, `go test -count=1
+  ./internal/containercontract`, Web typecheck, task validation and `git diff
+  --check` passed without external access.
+- During independent review, a stricter `GOPROXY=off make lint` repetition
+  reached and passed `go vet`, then its pinned `go run ...@v1.7.12` attempted a
+  cached-module metadata lookup. The exact cached Actionlint v1.7.12 binary
+  passed all workflow files, so the lint contract was still independently
+  completed without network access.
+- No service, Compose, provider endpoint, private runtime state, hardware,
+  modem, RF, SMS/call, SIM/eUICC, network mutation or HIL action was used.
+
 ## Validation commands
 
 Only safe, non-HIL variants are permitted. The exact search expressions may be refined during execution, but the command classes are:

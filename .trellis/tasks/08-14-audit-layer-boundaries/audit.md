@@ -19,6 +19,48 @@ The audit did find five active production responsibility/boundary violations:
 
 The two Low concerns are concrete adjacent-layer coupling in `httpapi.Server` and SQLite-owned lease types in the dormant `resourcelease` application package. No repair was made by this audit.
 
+### Remediation closure — 2026-08-18
+
+The findings above remain the historical static-audit result at commit
+`7f6e8923420872a7be09280a4cb99dd6d9c4211d`; their source anchors must not be
+read as current-line references. All seven findings were subsequently repaired
+in separately planned, independently checked child tasks:
+
+| Finding | Closed outcome | Child task | Functional commit |
+| --- | --- | --- | --- |
+| V-01 / High | Retired the native production deployment and its duplicate VID/PID writer; Docker Compose is the sole production path and driver registration remains registry-backed. | `08-14-retire-native-deployment` | `7013707` |
+| V-02 / Medium | Moved SMS synchronization and Agent-change business/event policy into application-owned coordinators; `cmd/simplusd` retains assembly and lifecycle only. | `08-14-move-background-policy-to-application` | `024cbfb` |
+| V-03 / Medium | Replaced Setup's hidden filesystem/password/secret/certificate defaults with explicit application-owned dependencies assembled in `cmd/simplusd`. | `08-14-make-setup-dependencies-explicit` | `d66860f` |
+| V-04 / Medium | Made the Mihomo supervisor mandatory and injected; `cmd/simplusd` now owns local/client concrete selection and constructor failure handling. | `08-15-inject-mihomo-supervisor-explicitly` | `ffbc69b` |
+| V-05 / Medium | Extracted legacy Webhook target/wire/HTTP behavior behind a bounded Notification-owned delivery port and a concrete adapter. | `08-15-extract-notification-delivery-ports` | `04e1770` |
+| C-01 / Low | Replaced four concrete HTTP application pointers with exact HTTP-owned consumer ports while preserving typed-nil behavior. | `08-16-narrow-http-application-service-ports` | `aa8b41f` |
+| C-02 / Low | Removed the never-assembled `application/resourcelease` package; retained the released runtime migration and SQLite repository/test only as historical storage compatibility fixtures. | `08-17-resolve-resourcelease-storage-coupling` | `1fe33a7` |
+
+Each child task used offline/synthetic validation and an independent Trellis
+check. The cumulative closure does not add a new production capability, alter
+the released ResourceGroup lease migration, or authorize any deployment,
+private-runtime, modem, RF, SMS/call, SIM/eUICC, network-mutation, or HIL
+action. The original static-analysis limitations still apply, but no finding
+from this report remains open in the reviewed source tree.
+
+Except for this remediation-closure section, the remainder of this document is
+the preserved report for baseline `7f6e8923420872a7be09280a4cb99dd6d9c4211d`.
+Its present-tense verdicts, source anchors and prioritized-remediation list
+describe that historical baseline and are superseded by the closure table
+above; they are not assertions that the findings remain current.
+
+Final closure verification rechecked the archived child records and functional
+commit ancestry, traced every repaired boundary in the current source, matched
+the retained ResourceGroup lease repository, test and runtime-v5 migration to
+their baseline SHA-256 values, and passed the supported offline Go tests, vet,
+format, generated-drift, documentation and container-contract gates. `make
+lint` passed in the repository's local tool/module environment without
+external access. An independent stricter `GOPROXY=off` repetition passed its
+Go-vet stage but could not make `go run ...@v1.7.12` resolve cached module
+metadata; the exact cached Actionlint v1.7.12 binary passed all workflow files.
+No service, Compose, external endpoint, private runtime, hardware or HIL action
+was used.
+
 ## Baseline, scope and safety
 
 ### Baseline
