@@ -278,7 +278,8 @@ type InboundSyncer interface {
     SyncInbound(context.Context) (InboundSyncResult, error)
 }
 type NotificationSender interface {
-    Notify(context.Context, string, string) error
+    NotifyReceivedSMS(context.Context, string, string) error
+    NotifyReceivedSMSSummary(context.Context, int) error
 }
 type RealtimePublisher interface {
     Publish([]realtime.Topic, realtime.Attention)
@@ -304,11 +305,13 @@ func NewAgentChangeCoordinator(AgentChangeSource, AgentChangePublisher) (*AgentC
 func (*AgentChangeCoordinator) Run(context.Context, func(AgentChangeReport))
 ```
 
-`SyncReport` carries the typed result, synchronization error, notification
-error and durable-change decision. `AgentChangeReport` carries operation
-`snapshot | changes` plus the source error. These reports let
+`InboundSyncResult` keeps counters as its public reporting surface and carries
+an unexported, narrow `{Sender, Body}` value for every newly persisted inbound
+SMS. `SyncReport` carries the typed result, synchronization error, joined
+notification error and durable-change decision. `AgentChangeReport` carries
+operation `snapshot | changes` plus the source error. These reports let
 `cmd/simplusd` preserve operational logs without importing `slog` into the
-application coordinators.
+application coordinators or exposing SMS bodies to the executable.
 
 ### 3. Contracts
 
@@ -316,11 +319,31 @@ application coordinators.
   `Persisted`, `AlreadyKnown`, `OutboundSent`, `OutboundFailed` or
   `OutboundUnconfirmed` publishes `messages`; acknowledgement-only counters do
   not. Only `Persisted > 0` attaches `sms.received` attention.
-- Newly persisted inbound SMS invokes notification event `sms.received` with
-  the bounded summary text, using a 15-second context detached from parent
-  cancellation. The coordinator publishes `notifications` after the attempt,
-  including when delivery fails. Only the synchronization error selects retry;
-  notification failure is report-only for scheduling.
+- Each successful first persistence appends exactly one private `{Sender,
+  Body}` notification value in discovery order. A repository replay appends
+  none. If persistence succeeds and acknowledgement fails, the partial result
+  retains the value, so that cycle notifies once and the later replay does not
+  notify again. Pass this narrow value instead of a domain `sms.Message`.
+- Single-part inbound, outbound and fully assembled multipart bodies share the
+  same validation: non-blank valid UTF-8, at most 1600 runes and at most 6400
+  bytes. Revalidate after multipart assembly before persistence; validating
+  fragments alone is insufficient.
+- For every private value, the coordinator calls `NotifyReceivedSMS` in
+  discovery order under a fresh, detached 15-second context. Calls are
+  sequential and independent: collect an indexed, content-free error and
+  continue after a failure or timeout. After all per-SMS calls, invoke
+  `NotifyReceivedSMSSummary` once under its own detached 15-second context.
+- The notification service renders each Feishu-only message as
+  `[Simplus] 新短信\n发件人：<sender>\n内容：\n<body>` and preserves the complete
+  body, including Unicode and line breaks. The count summary remains once per
+  synchronization cycle for enabled non-Feishu channels only; SMS content must
+  never be sent to those channels. Existing generic notification behavior
+  remains unchanged.
+- The coordinator publishes `notifications` after all notification attempts,
+  including when any delivery fails. Channel delivery status reflects the
+  latest individual attempt. Only the synchronization error selects retry;
+  notification failures are joined for reporting and never trigger a sync
+  retry or a persistent notification outbox.
 - SMS intervals below one second normalize to two seconds. Synchronization
   failure begins at `max(15s, interval*4)`, doubles to five minutes and resets
   after a successful synchronization. Partial durable results are still
@@ -342,56 +365,80 @@ application coordinators.
 | --- | --- |
 | Any required SMS coordinator dependency is nil | `ErrSyncCoordinatorConfiguration`; do not start the loop |
 | Any required Agent coordinator dependency is nil | `ErrAgentChangeCoordinatorConfiguration`; do not start the loop |
-| SMS result is partial and synchronization also errors | publish/notify all durable progress, report the error, then use retry delay |
+| SMS result contains N newly persisted values | publish `messages`, attempt N ordered Feishu content notifications with fresh deadlines, attempt one non-Feishu count summary, then publish `notifications` |
+| One per-SMS Feishu attempt fails or times out | join an indexed error without sender/body, continue with every later SMS and the non-Feishu summary; a successful sync keeps the normal interval |
+| Persistence succeeds but acknowledgement fails | retain and notify the private value in the partial result, report the sync error, then use retry delay; the replay must not notify again |
+| Repository reports the SMS as already known | increment `AlreadyKnown` but append no private notification value and send no SMS-content notification |
+| Assembled multipart body exceeds the shared SMS limit | return `ErrInboundSync` before persistence; do not expose a partial assembled message |
 | SMS result contains only acknowledgement counters | no realtime publication or notification |
-| Notification delivery fails after persisted SMS | report notification error, still publish `notifications`; a successful sync keeps normal interval |
 | Agent initial snapshot fails | report operation `snapshot`, wait with bounded retry, retain prior successful snapshot |
 | Agent long-poll fails | report operation `changes`, reconnect with bounded retry |
 | Reconnected instance or generation differs | publish Inventory/Modems/Lines once before resuming long-poll |
-| Parent context is cancelled | stop pending interval/retry waits promptly and cancel in-flight sync/Agent source contexts; an already-started notification remains detached but bounded by its 15-second deadline |
+| Parent context is cancelled | stop pending interval/retry waits promptly and cancel in-flight sync/Agent source contexts; each notification already started or subsequently required by the completed result remains detached and individually bounded by its own 15-second deadline |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: SMS persists a new inbound record and returns a partial transport
-  error; the coordinator publishes Messages with attention, attempts the
-  notification, publishes Notifications, reports the error and then backs off.
-- Base: Agent long-poll returns unchanged state; update the current snapshot,
-  reset retry and continue without publishing.
-- Bad: `cmd/simplusd` branches on `InboundSyncResult`, constructs notification
-  text, maps Agent changes to topics, or owns exponential-backoff helpers.
+- Good: One sync discovers two new SMS messages. The first Feishu attempt
+  fails, the second is still attempted with its own deadline, non-Feishu
+  channels receive one count summary, notification invalidation is published,
+  and the joined error contains only the ordinal and delivery error.
+- Base: A replayed SMS increments `AlreadyKnown` without another content
+  notification. Independently, an unchanged Agent long-poll updates the
+  current snapshot, resets retry and continues without publishing.
+- Bad: pass a complete `sms.Message` through the coordinator, reuse one timeout
+  across the batch, stop after the first Feishu failure, send body text to
+  WeCom, omit post-assembly body validation, or construct notification policy
+  in `cmd/simplusd`.
 
 ### 6. Tests Required
 
+- `messaging/service_test.go`, `messaging/vowifi_sms_test.go` and inbound tests:
+  first-persistence-only private values, exact discovery order, persisted
+  sender/body, replay/restart suppression, persistence-plus-ACK-error partial
+  results, complete multipart body, and rejection after oversized assembly.
 - `messaging/sync_coordinator_test.go`: required dependencies, exact
-  sync→Messages→notification→Notifications order, detached/bounded notification
-  context, partial progress plus error, acknowledgement-only behavior,
-  notification-error retry isolation, retry reset/cap and cancellation.
+  sync→Messages→ordered per-SMS attempts→summary→Notifications order, a fresh
+  detached/bounded context per attempt, continuation after failure, content-free
+  joined errors, acknowledgement-only behavior, retry isolation/reset/cap and
+  cancellation.
+- `notification/service_test.go`: exact Unicode and multiline Feishu text in
+  webhook and app modes, Feishu/non-Feishu provider filtering, latest-attempt
+  status, validation and delivery errors, and no body leakage to other channel
+  types.
 - `inventory/change_coordinator_test.go`: non-probing snapshot and exact
   long-poll arguments, explicit change, instance restart, generation change,
   unchanged reconnect, typed failure reporting, retry reset/cap and
   cancellation.
 - `cmd/simplusd` tests retain executable-only helpers; focused ownership scans
-  must find no command-local SMS/Agent topic mapping or backoff functions.
+  must find no command-local SMS body, notification policy, SMS/Agent topic
+  mapping or backoff functions; operational logs remain counter/error-only.
 - Run the coordinator packages and `cmd/simplusd` under `go test -race`, then
   run the supported `./cmd/... ./internal/...` test/vet scope.
 
 ### 7. Wrong vs Correct
 
 ```go
-// Wrong: composition root owns business/event policy.
-result, err := messages.SyncInbound(ctx)
+// Wrong: collapse multiple SMS messages into one Feishu summary.
 if result.Persisted > 0 {
-    hub.Publish([]realtime.Topic{realtime.TopicMessages}, realtime.AttentionSMSReceived)
+    notifications.Notify(ctx, "sms.received",
+        fmt.Sprintf("[Simplus] 收到 %d 条新短信", result.Persisted))
 }
 
-// Correct: application coordinator owns policy through narrow ports.
-coordinator, err := messaging.NewSyncCoordinator(messages, notifications, hub)
-if err != nil {
-    logger.Error("SMS synchronization coordinator configuration failed", "error", err)
-    _ = stores.Close()
-    return 1
+// Correct: the application coordinator attempts each SMS independently.
+for index, received := range result.receivedSMS {
+    deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+    if err := notifications.NotifyReceivedSMS(deliveryCtx, received.Sender, received.Body); err != nil {
+        notificationErr = errors.Join(notificationErr,
+            fmt.Errorf("received SMS %d: %w", index+1, err))
+    }
+    cancel()
 }
-go coordinator.Run(ctx, smsInterval, logSyncReport)
+summaryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+if err := notifications.NotifyReceivedSMSSummary(summaryCtx, result.Persisted); err != nil {
+    notificationErr = errors.Join(notificationErr,
+        fmt.Errorf("received SMS summary: %w", err))
+}
+cancel()
 ```
 
 ## Scenario: Explicit Setup dependencies and concrete adapter assembly

@@ -844,6 +844,9 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	if !errors.Is(err, ErrInboundSync) || first.Persisted != 1 || first.Acknowledged != 0 {
 		t.Fatalf("first sync = %#v, error = %v", first, err)
 	}
+	if len(first.receivedSMS) != 1 || first.receivedSMS[0].Sender != inbound.Sender || first.receivedSMS[0].Body != inbound.Body {
+		t.Fatalf("first received SMS notifications = %#v", first.receivedSMS)
+	}
 	messages, err := stores.ListSMS(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -857,6 +860,9 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	if second.AlreadyKnown != 1 || second.Acknowledged != 1 {
 		t.Fatalf("second sync = %#v", second)
+	}
+	if len(second.receivedSMS) != 0 {
+		t.Fatalf("replay returned received SMS notification = %#v", second.receivedSMS)
 	}
 	remaining, err := backend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
@@ -878,6 +884,9 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	if restartResult.Persisted != 0 || restartResult.AlreadyKnown != 1 || restartResult.Acknowledged != 1 {
 		t.Fatalf("restart sync = %#v", restartResult)
 	}
+	if len(restartResult.receivedSMS) != 0 {
+		t.Fatalf("restart replay returned received SMS notification = %#v", restartResult.receivedSMS)
+	}
 	remaining, err = restartedBackend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
 		t.Fatal(err)
@@ -891,6 +900,35 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	if len(messages) != 1 {
 		t.Fatalf("restart duplicated inbound message: %#v", messages)
+	}
+}
+
+func TestInboundSyncReturnsOrderedNarrowReceivedSMSValues(t *testing.T) {
+	ctx := context.Background()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	receivedAt := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	inbound := []agentapi.SMSStoredMessage{
+		{MessageID: "inbound-ordered-1", DeviceID: "simulator-device-1", Sender: "10010", Body: "first", ReceivedAt: receivedAt},
+		{MessageID: "inbound-ordered-2", DeviceID: "simulator-device-1", Sender: "Service", Body: "第二条\n完整正文", ReceivedAt: receivedAt.Add(time.Second)},
+	}
+	gateway, _ := newAgentGatewayForTest(t, inbound...)
+	service, err := NewService(ctx, stores, managedTestLines(inventory.NewSimulator()), AgentNativeSMSTransport(gateway, gateway))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.SyncInbound(ctx)
+	if err != nil || result.Persisted != 2 || result.Acknowledged != 2 {
+		t.Fatalf("sync result = %#v, error = %v", result, err)
+	}
+	if len(result.receivedSMS) != 2 ||
+		result.receivedSMS[0] != (receivedSMSNotification{Sender: inbound[0].Sender, Body: inbound[0].Body}) ||
+		result.receivedSMS[1] != (receivedSMSNotification{Sender: inbound[1].Sender, Body: inbound[1].Body}) {
+		t.Fatalf("received SMS notifications = %#v", result.receivedSMS)
 	}
 }
 

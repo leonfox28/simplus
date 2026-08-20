@@ -6,9 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	"github.com/leonfox28/simplus/internal/domain/sms"
@@ -23,6 +21,12 @@ type InboundSyncResult struct {
 	OutboundFailed              int
 	OutboundUnconfirmed         int
 	OutboundReportsAcknowledged int
+	receivedSMS                 []receivedSMSNotification
+}
+
+type receivedSMSNotification struct {
+	Sender string
+	Body   string
 }
 
 func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, error) {
@@ -63,6 +67,7 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 		result.OutboundFailed += lineResult.OutboundFailed
 		result.OutboundUnconfirmed += lineResult.OutboundUnconfirmed
 		result.OutboundReportsAcknowledged += lineResult.OutboundReportsAcknowledged
+		result.receivedSMS = append(result.receivedSMS, lineResult.receivedSMS...)
 		if err != nil {
 			syncErrors = errors.Join(syncErrors, err)
 		}
@@ -110,6 +115,7 @@ func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line
 		result.Persisted += messageResult.Persisted
 		result.AlreadyKnown += messageResult.AlreadyKnown
 		result.Acknowledged += messageResult.Acknowledged
+		result.receivedSMS = append(result.receivedSMS, messageResult.receivedSMS...)
 		if err != nil {
 			return result, err
 		}
@@ -237,6 +243,9 @@ func (service *Service) syncInboundMessage(ctx context.Context, target InboxTarg
 	if err != nil {
 		return InboundSyncResult{}, fmt.Errorf("%w: assemble inbound SMS fragments: %v", ErrInboundSync, err)
 	}
+	if !validSMSBody(body) {
+		return InboundSyncResult{}, fmt.Errorf("%w: assembled inbound SMS body is invalid", ErrInboundSync)
+	}
 	return service.persistAndAcknowledgeInbound(ctx, target, lineID, groupID,
 		message.SourceMessageID, message.Sender, body, receivedAt, inbox)
 }
@@ -245,7 +254,7 @@ func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target
 	providerMessageID, acknowledgeMessageID, sender, body string, receivedAt time.Time, inbox Inbox) (InboundSyncResult, error) {
 	messageID := inboundSourceID("msg_in_", lineID, providerMessageID)
 	operationID := inboundSourceID("in_", lineID, providerMessageID)
-	_, replayed, err := service.repository.CreateInboundSMS(ctx, sms.Message{
+	persisted, replayed, err := service.repository.CreateInboundSMS(ctx, sms.Message{
 		ID: messageID, OperationID: operationID, Direction: sms.DirectionInbound, LineID: lineID,
 		RemoteAddress: sender, Body: body, Status: sms.StatusReceived,
 		ProviderMessageID: providerMessageID, CreatedAt: receivedAt, UpdatedAt: service.currentTime(),
@@ -258,6 +267,10 @@ func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target
 		result.AlreadyKnown = 1
 	} else {
 		result.Persisted = 1
+		result.receivedSMS = []receivedSMSNotification{{
+			Sender: persisted.RemoteAddress,
+			Body:   persisted.Body,
+		}}
 	}
 	if err := service.acknowledgeInbound(ctx, target, lineID, acknowledgeMessageID, inbox); err != nil {
 		return result, err
@@ -281,8 +294,7 @@ func validateInboundMessage(reference InboxMessageReference, message InboxMessag
 		return ErrRequestInvalid
 	}
 	if message.Segment == nil {
-		if strings.TrimSpace(message.Body) == "" || !utf8.ValidString(message.Body) ||
-			utf8.RuneCountInString(message.Body) > 1600 || len(message.Body) > 6400 {
+		if !validSMSBody(message.Body) {
 			return ErrRequestInvalid
 		}
 		return nil

@@ -36,6 +36,8 @@ const (
 	ErrorDeviceStale                = "SMS_DEVICE_STALE"
 	HistoryCapacity                 = 10000
 	InboundFragmentRetention        = 7 * 24 * time.Hour
+	maximumSMSBodyRunes             = 1600
+	maximumSMSBodyBytes             = 6400
 	readTokenVersion                = byte(1)
 	readTokenPrefixLen              = 9
 	maximumReadTokenLen             = 256
@@ -659,11 +661,15 @@ func (service *Service) currentTime() time.Time {
 
 func validateSendRequest(request SendRequest) error {
 	if !operationIDPattern.MatchString(request.OperationID) || !lineIDPattern.MatchString(request.LineID) ||
-		!destinationPattern.MatchString(request.Destination) || strings.TrimSpace(request.Body) == "" ||
-		!utf8.ValidString(request.Body) || utf8.RuneCountInString(request.Body) > 1600 || len(request.Body) > 6400 {
+		!destinationPattern.MatchString(request.Destination) || !validSMSBody(request.Body) {
 		return ErrRequestInvalid
 	}
 	return nil
+}
+
+func validSMSBody(body string) bool {
+	return strings.TrimSpace(body) != "" && utf8.ValidString(body) &&
+		utf8.RuneCountInString(body) <= maximumSMSBodyRunes && len(body) <= maximumSMSBodyBytes
 }
 
 func encodeReadThroughToken(boundary sms.UnreadBoundary) (string, error) {
