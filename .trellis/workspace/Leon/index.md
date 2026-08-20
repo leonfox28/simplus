@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
+- **Total Sessions**: 21
 - **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~461 | Active |
+| `journal-1.md` | ~483 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-08-20 | Restore local Compose deployment | `47f273e` | `sms-to-feishu-content` |
 | 20 | 2026-08-20 | Forward SMS content to Feishu | `47f273e` | `sms-to-feishu-content` |
 | 19 | 2026-08-18 | Close layer boundary audit remediation | `dce8356` | `main` |
 | 18 | 2026-08-18 | Retire dormant resource lease application | `1fe33a7` | `main` |

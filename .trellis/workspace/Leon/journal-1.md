@@ -459,3 +459,25 @@ Implemented one independent Feishu message per newly persisted SMS with sender a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 21: Restore local Compose deployment
+
+**Date**: 2026-08-20
+**Task**: Restore local Compose deployment
+**Package**: core
+**Branch**: `sms-to-feishu-content`
+
+### Summary
+
+Recovered the local Compose deployment after an update was launched from a temporary worktree and bound an empty relative data directory. Restarted Compose from the canonical deployment root with the original environment and persistent data, verified the instance was ready, all long-running services were healthy on feature commit 47f273e, and the user-confirmed SMS notification succeeded. No persistent data was deleted and no additional SMS, RF, modem-write, or HIL action was initiated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47f273e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
