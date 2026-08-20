@@ -481,3 +481,38 @@ Recovered the local Compose deployment after an update was launched from a tempo
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: Patch Go and nanoid security baselines
+
+**Date**: 2026-08-20
+**Task**: Patch Go and nanoid security baselines
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Upgraded the audited Go and Web dependency baselines, verified the complete local and GitHub quality gates, and rebase-merged PR #2 into main.
+
+### Main Changes
+
+- Upgraded repository-local and container Go pins from 1.26.5 to 1.26.6 with official archive checksums and the pinned image digest.
+- Forced nanoid versions below 3.3.18 to the patched release and refreshed the pnpm lockfile.
+- Created and self-reviewed PR #2, waited for all checks, rebase-merged it, and confirmed the post-merge main CI.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97ad0f4` | (see git log) |
+
+### Testing
+
+- [OK] make security and the production-only pnpm audit
+- [OK] make verify-modules, make lint, CI-equivalent make test, make build-go, and container contract checks
+- [OK] Web typecheck, 70 Vitest tests, production build, generated drift, and 2 Playwright regressions
+- [OK] PR checks and post-merge main CI
+
+### Status
+
+[OK] **Completed**
