@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/08-20-feishu-sms-content/research/current-flow.md","reason":"Current SMS persistence-to-notification flow, exact anchors, preserved invariants, and provider-aware planning conclusion."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Root Go dependency direction, package scope, and backend pre-development checklist."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Normative SMS background coordinator, notification intent, timeout/order/retry, and typed Webhook delivery ownership contracts."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Consumer-owned port placement, application policy ownership, cmd composition limits, and co-located test rules."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Synthetic test shapes, privacy assertions, failure handling, and targeted-to-full validation ladder."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Data-flow mapping and typed contract checks for carrying newly persisted SMS values across application boundaries."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Search/reuse discipline when specializing the existing notification path and formatting behavior."}

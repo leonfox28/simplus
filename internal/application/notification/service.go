@@ -240,6 +240,30 @@ func (s *Service) Test(ctx context.Context, id string) (ChannelView, error) {
 	return s.deliverOne(ctx, id, "Simplus 通知渠道测试成功")
 }
 func (s *Service) Notify(ctx context.Context, event, message string) error {
+	return s.notify(ctx, event, message, nil)
+}
+
+func (s *Service) NotifyReceivedSMS(ctx context.Context, sender, body string) error {
+	if sender == "" || body == "" {
+		return ErrChannelInvalid
+	}
+	message := fmt.Sprintf("[Simplus] 新短信\n发件人：%s\n内容：\n%s", sender, body)
+	return s.notify(ctx, "sms.received", message, func(item domain.Channel) bool {
+		return item.Provider == string(WebhookProviderFeishu)
+	})
+}
+
+func (s *Service) NotifyReceivedSMSSummary(ctx context.Context, count int) error {
+	if count <= 0 {
+		return ErrChannelInvalid
+	}
+	message := fmt.Sprintf("[Simplus] 收到 %d 条新短信", count)
+	return s.notify(ctx, "sms.received", message, func(item domain.Channel) bool {
+		return item.Provider != string(WebhookProviderFeishu)
+	})
+}
+
+func (s *Service) notify(ctx context.Context, event, message string, include func(domain.Channel) bool) error {
 	if _, ok := allowedEvents[event]; !ok || message == "" || len([]rune(message)) > WebhookMessageRuneLimit {
 		return ErrChannelInvalid
 	}
@@ -249,7 +273,7 @@ func (s *Service) Notify(ctx context.Context, event, message string) error {
 	}
 	var failures []error
 	for _, item := range items {
-		if !item.Enabled || !contains(item.EventKinds, event) {
+		if !item.Enabled || !contains(item.EventKinds, event) || include != nil && !include(item) {
 			continue
 		}
 		if _, err := s.deliver(ctx, item, message); err != nil {

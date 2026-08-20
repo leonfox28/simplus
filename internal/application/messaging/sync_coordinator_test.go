@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,25 +39,41 @@ func (fake *fakeInboundSyncer) SyncInbound(ctx context.Context) (InboundSyncResu
 }
 
 type fakeNotificationSender struct {
-	err     error
-	calls   int
-	event   string
-	message string
-	events  *[]string
-	inspect func(context.Context)
+	receivedErrors []error
+	summaryError   error
+	receivedCalls  []receivedSMSNotification
+	summaryCalls   []int
+	contexts       []context.Context
+	events         *[]string
+	inspect        func(context.Context)
 }
 
-func (fake *fakeNotificationSender) Notify(ctx context.Context, event, message string) error {
-	fake.calls++
-	fake.event = event
-	fake.message = message
+func (fake *fakeNotificationSender) NotifyReceivedSMS(ctx context.Context, sender, body string) error {
+	callIndex := len(fake.receivedCalls)
+	fake.receivedCalls = append(fake.receivedCalls, receivedSMSNotification{Sender: sender, Body: body})
+	fake.contexts = append(fake.contexts, ctx)
 	if fake.events != nil {
-		*fake.events = append(*fake.events, "notify")
+		*fake.events = append(*fake.events, "notify:sms")
 	}
 	if fake.inspect != nil {
 		fake.inspect(ctx)
 	}
-	return fake.err
+	if callIndex < len(fake.receivedErrors) {
+		return fake.receivedErrors[callIndex]
+	}
+	return nil
+}
+
+func (fake *fakeNotificationSender) NotifyReceivedSMSSummary(ctx context.Context, count int) error {
+	fake.summaryCalls = append(fake.summaryCalls, count)
+	fake.contexts = append(fake.contexts, ctx)
+	if fake.events != nil {
+		*fake.events = append(*fake.events, "notify:summary")
+	}
+	if fake.inspect != nil {
+		fake.inspect(ctx)
+	}
+	return fake.summaryError
 }
 
 type syncTestPublication struct {
@@ -104,8 +121,14 @@ func TestSyncCoordinatorCyclePublishesAndNotifiesInOrder(t *testing.T) {
 	parent, cancelParent := context.WithCancel(context.Background())
 	cancelParent()
 	syncer := &fakeInboundSyncer{
-		outcomes: []syncTestOutcome{{result: InboundSyncResult{Persisted: 2, Acknowledged: 1}}},
-		events:   &events,
+		outcomes: []syncTestOutcome{{result: InboundSyncResult{
+			Persisted: 2, Acknowledged: 1,
+			receivedSMS: []receivedSMSNotification{
+				{Sender: "10086", Body: "first"},
+				{Sender: "Service", Body: "second\nline"},
+			},
+		}}},
+		events: &events,
 		inspect: func(ctx context.Context) {
 			if ctx.Err() == nil {
 				t.Fatal("synchronization context did not inherit parent cancellation")
@@ -132,10 +155,14 @@ func TestSyncCoordinatorCyclePublishesAndNotifiesInOrder(t *testing.T) {
 	if report.SyncError != nil || report.NotificationError != nil || !report.DurableChange {
 		t.Fatalf("report = %#v", report)
 	}
-	if notifications.calls != 1 || notifications.event != "sms.received" || notifications.message != "[Simplus] 收到 2 条新短信" {
-		t.Fatalf("notification = calls %d event %q message %q", notifications.calls, notifications.event, notifications.message)
+	wantReceived := []receivedSMSNotification{{Sender: "10086", Body: "first"}, {Sender: "Service", Body: "second\nline"}}
+	if !reflect.DeepEqual(notifications.receivedCalls, wantReceived) || !reflect.DeepEqual(notifications.summaryCalls, []int{2}) {
+		t.Fatalf("received calls = %#v, summary calls = %#v", notifications.receivedCalls, notifications.summaryCalls)
 	}
-	wantEvents := []string{"sync", "publish:messages", "notify", "publish:notifications"}
+	if len(notifications.contexts) != 3 || notifications.contexts[0] == notifications.contexts[1] || notifications.contexts[1] == notifications.contexts[2] {
+		t.Fatalf("notification contexts are not independent: %#v", notifications.contexts)
+	}
+	wantEvents := []string{"sync", "publish:messages", "notify:sms", "notify:sms", "notify:summary", "publish:notifications"}
 	if !reflect.DeepEqual(events, wantEvents) {
 		t.Fatalf("events = %#v, want %#v", events, wantEvents)
 	}
@@ -152,10 +179,13 @@ func TestSyncCoordinatorCycleKeepsPartialProgressAndNotificationFailure(t *testi
 	syncErr := errors.New("partial synchronization")
 	notificationErr := errors.New("delivery unavailable")
 	syncer := &fakeInboundSyncer{outcomes: []syncTestOutcome{{
-		result: InboundSyncResult{Persisted: 1, OutboundFailed: 2},
-		err:    syncErr,
+		result: InboundSyncResult{
+			Persisted: 1, OutboundFailed: 2,
+			receivedSMS: []receivedSMSNotification{{Sender: "private-sender", Body: "private body"}},
+		},
+		err: syncErr,
 	}}}
-	notifications := &fakeNotificationSender{err: notificationErr}
+	notifications := &fakeNotificationSender{receivedErrors: []error{notificationErr}}
 	publisher := &fakeSyncPublisher{}
 	coordinator, err := NewSyncCoordinator(syncer, notifications, publisher)
 	if err != nil {
@@ -166,8 +196,40 @@ func TestSyncCoordinatorCycleKeepsPartialProgressAndNotificationFailure(t *testi
 	if !errors.Is(report.SyncError, syncErr) || !errors.Is(report.NotificationError, notificationErr) || !report.DurableChange {
 		t.Fatalf("report = %#v", report)
 	}
-	if notifications.calls != 1 || len(publisher.publications) != 2 || publisher.publications[0].attention != realtime.AttentionSMSReceived {
-		t.Fatalf("notification calls = %d, publications = %#v", notifications.calls, publisher.publications)
+	if len(notifications.receivedCalls) != 1 || len(notifications.summaryCalls) != 1 || len(publisher.publications) != 2 || publisher.publications[0].attention != realtime.AttentionSMSReceived {
+		t.Fatalf("received calls = %d, summary calls = %d, publications = %#v", len(notifications.receivedCalls), len(notifications.summaryCalls), publisher.publications)
+	}
+	if strings.Contains(report.NotificationError.Error(), "private-sender") || strings.Contains(report.NotificationError.Error(), "private body") {
+		t.Fatalf("notification error leaked SMS content: %v", report.NotificationError)
+	}
+}
+
+func TestSyncCoordinatorCycleContinuesAfterIndependentSMSFailure(t *testing.T) {
+	firstError := errors.New("first delivery timed out")
+	syncer := &fakeInboundSyncer{outcomes: []syncTestOutcome{{result: InboundSyncResult{
+		Persisted: 2,
+		receivedSMS: []receivedSMSNotification{
+			{Sender: "10010", Body: "first"},
+			{Sender: "10086", Body: "second"},
+		},
+	}}}}
+	notifications := &fakeNotificationSender{receivedErrors: []error{firstError}}
+	publisher := &fakeSyncPublisher{}
+	coordinator, err := NewSyncCoordinator(syncer, notifications, publisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := coordinator.runCycle(context.Background())
+	if !errors.Is(report.NotificationError, firstError) {
+		t.Fatalf("notification error = %v", report.NotificationError)
+	}
+	want := []receivedSMSNotification{{Sender: "10010", Body: "first"}, {Sender: "10086", Body: "second"}}
+	if !reflect.DeepEqual(notifications.receivedCalls, want) || !reflect.DeepEqual(notifications.summaryCalls, []int{2}) {
+		t.Fatalf("received calls = %#v, summary calls = %#v", notifications.receivedCalls, notifications.summaryCalls)
+	}
+	if len(publisher.publications) != 2 || publisher.publications[1].topics[0] != realtime.TopicNotifications {
+		t.Fatalf("publications = %#v", publisher.publications)
 	}
 }
 
@@ -204,8 +266,8 @@ func TestSyncCoordinatorCycleClassifiesDurableMessageChanges(t *testing.T) {
 			if test.changed && publisher.publications[0].attention != "" {
 				t.Fatalf("attention = %q", publisher.publications[0].attention)
 			}
-			if notifications.calls != 0 {
-				t.Fatalf("notification calls = %d", notifications.calls)
+			if len(notifications.receivedCalls) != 0 || len(notifications.summaryCalls) != 0 {
+				t.Fatalf("notification calls = %#v / %#v", notifications.receivedCalls, notifications.summaryCalls)
 			}
 		})
 	}
@@ -218,7 +280,10 @@ func TestSyncCoordinatorRunUsesSyncErrorOnlyForRetryAndResetsAfterSuccess(t *tes
 		{err: syncErr},
 		{},
 	}}
-	notifications := &fakeNotificationSender{err: errors.New("must not affect scheduling")}
+	notifications := &fakeNotificationSender{
+		receivedErrors: []error{errors.New("must not affect scheduling")},
+		summaryError:   errors.New("must not affect scheduling"),
+	}
 	publisher := &fakeSyncPublisher{}
 	coordinator, err := NewSyncCoordinator(syncer, notifications, publisher)
 	if err != nil {
@@ -241,7 +306,9 @@ func TestSyncCoordinatorRunUsesSyncErrorOnlyForRetryAndResetsAfterSuccess(t *tes
 	}
 
 	// A notification error is observable but a successful synchronization still uses the normal interval.
-	syncer = &fakeInboundSyncer{outcomes: []syncTestOutcome{{result: InboundSyncResult{Persisted: 1}}}}
+	syncer = &fakeInboundSyncer{outcomes: []syncTestOutcome{{result: InboundSyncResult{
+		Persisted: 1, receivedSMS: []receivedSMSNotification{{Sender: "10086", Body: "bounded"}},
+	}}}}
 	coordinator, err = NewSyncCoordinator(syncer, notifications, publisher)
 	if err != nil {
 		t.Fatal(err)

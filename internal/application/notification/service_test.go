@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -359,9 +360,114 @@ func TestNotifyFiltersEventsAndBoundsMessages(t *testing.T) {
 	}
 }
 
+func TestNotifyReceivedSMSDeliversExactContentOnlyToFeishuModes(t *testing.T) {
+	const (
+		sender = "Service"
+		body   = "第一行\nsecond line 🙂"
+		want   = "[Simplus] 新短信\n发件人：Service\n内容：\n第一行\nsecond line 🙂"
+	)
+	t.Run("webhook", func(t *testing.T) {
+		store := &memoryStore{channels: map[string]domain.Channel{}}
+		feishu := webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", "feishu")
+		feishu.Enabled = true
+		store.channels[feishu.ID] = feishu
+		wecom := webhookChannelWithID(t, store, "channel_BBBBBBBBBBBBBBBBBBBBBB", "wecom")
+		wecom.Enabled = true
+		store.channels[wecom.ID] = wecom
+		webhooks := &webhookPortFake{result: WebhookDeliveryResult{Outcome: WebhookDelivered}}
+		service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := service.NotifyReceivedSMS(context.Background(), sender, body); err != nil {
+			t.Fatal(err)
+		}
+		if len(webhooks.deliverCalls) != 1 || webhooks.deliverCalls[0].Provider != WebhookProviderFeishu || webhooks.deliverCalls[0].Message != want {
+			t.Fatalf("delivery calls = %#v", webhooks.deliverCalls)
+		}
+	})
+
+	t.Run("private app", func(t *testing.T) {
+		store := &memoryStore{channels: map[string]domain.Channel{}}
+		item := feishuAppChannel(t, store, "channel_CCCCCCCCCCCCCCCCCCCCCC")
+		var messages []string
+		service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: &webhookPortFake{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.FeishuMessenger = messengerFunc(func(_ context.Context, _ FeishuRegistrationResult, message string) error {
+			messages = append(messages, message)
+			return nil
+		})
+
+		if err := service.NotifyReceivedSMS(context.Background(), sender, body); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(messages, []string{want}) || store.channels[item.ID].LastDeliveryStatus != "success" {
+			t.Fatalf("messages = %#v, channel = %#v", messages, store.channels[item.ID])
+		}
+	})
+}
+
+func TestNotifyReceivedSMSSummaryPreservesNonFeishuBehavior(t *testing.T) {
+	store := &memoryStore{channels: map[string]domain.Channel{}}
+	feishu := webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", "feishu")
+	feishu.Enabled = true
+	store.channels[feishu.ID] = feishu
+	wecom := webhookChannelWithID(t, store, "channel_BBBBBBBBBBBBBBBBBBBBBB", "wecom")
+	wecom.Enabled = true
+	store.channels[wecom.ID] = wecom
+	webhooks := &webhookPortFake{result: WebhookDeliveryResult{Outcome: WebhookDelivered}}
+	service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.NotifyReceivedSMSSummary(context.Background(), 2); err != nil {
+		t.Fatal(err)
+	}
+	if len(webhooks.deliverCalls) != 1 || webhooks.deliverCalls[0].Provider != WebhookProviderWeCom || webhooks.deliverCalls[0].Message != "[Simplus] 收到 2 条新短信" {
+		t.Fatalf("delivery calls = %#v", webhooks.deliverCalls)
+	}
+}
+
+func TestNotifyReceivedSMSAttemptsKeepLatestStatusAndSafeErrors(t *testing.T) {
+	const privateBody = "private-body-marker"
+	store := &memoryStore{channels: map[string]domain.Channel{}}
+	item := webhookChannel(t, store, "feishu")
+	item.Enabled = true
+	store.channels[item.ID] = item
+	deliveryError := errors.New("synthetic bounded delivery failure")
+	webhooks := &webhookPortFake{
+		result:     WebhookDeliveryResult{Outcome: WebhookNetworkFailed},
+		deliverErr: deliveryError,
+	}
+	service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = service.NotifyReceivedSMS(context.Background(), "10086", privateBody)
+	if !errors.Is(err, deliveryError) || strings.Contains(err.Error(), privateBody) || store.channels[item.ID].LastDeliveryStatus != "failed" {
+		t.Fatalf("first error = %v, channel = %#v", err, store.channels[item.ID])
+	}
+	webhooks.result = WebhookDeliveryResult{Outcome: WebhookDelivered}
+	webhooks.deliverErr = nil
+	if err := service.NotifyReceivedSMS(context.Background(), "10086", "later success"); err != nil {
+		t.Fatal(err)
+	}
+	if store.channels[item.ID].LastDeliveryStatus != "success" || store.channels[item.ID].LastErrorCode != "" {
+		t.Fatalf("latest channel status = %#v", store.channels[item.ID])
+	}
+}
+
 func webhookChannel(t *testing.T, store *memoryStore, provider string) domain.Channel {
+	return webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", provider)
+}
+
+func webhookChannelWithID(t *testing.T, store *memoryStore, id, provider string) domain.Channel {
 	t.Helper()
-	id := "channel_AAAAAAAAAAAAAAAAAAAAAA"
 	cipher := testCipher{}
 	webhook, err := cipher.Encrypt(secretLabel(id, "webhook"), []byte("https://synthetic.invalid/hook"))
 	if err != nil {
@@ -378,6 +484,31 @@ func webhookChannel(t *testing.T, store *memoryStore, provider string) domain.Ch
 		ID: id, Provider: provider, DeliveryMode: domain.DeliveryModeWebhook, DisplayName: "Synthetic",
 		WebhookCiphertext: webhook, WebhookHint: "synthetic.invalid", SigningSecretCiphertext: signing,
 		EventKinds: []string{"sms.received"}, LastDeliveryStatus: "never",
+	}
+	store.channels[id] = item
+	return item
+}
+
+func feishuAppChannel(t *testing.T, store *memoryStore, id string) domain.Channel {
+	t.Helper()
+	cipher := testCipher{}
+	appID, err := cipher.Encrypt(feishuSecretLabel(id, "app-id"), []byte("cli_synthetic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appSecret, err := cipher.Encrypt(feishuSecretLabel(id, "app-secret"), []byte("synthetic-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	openID, err := cipher.Encrypt(feishuSecretLabel(id, "recipient-open-id"), []byte("ou_synthetic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := domain.Channel{
+		ID: id, Provider: string(WebhookProviderFeishu), DeliveryMode: domain.DeliveryModeFeishuApp,
+		DisplayName: "Synthetic app", Enabled: true, EventKinds: []string{"sms.received"},
+		FeishuAppIDCiphertext: appID, FeishuAppSecretCiphertext: appSecret,
+		FeishuRecipientOpenIDCiphertext: openID, LastDeliveryStatus: "never",
 	}
 	store.channels[id] = item
 	return item

@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -279,9 +280,64 @@ func TestVoWiFiMultipartInboundSurvivesControlPlaneRestart(t *testing.T) {
 	if err != nil || result.Persisted != 1 || result.Acknowledged != 1 || len(second.ackRequests) != 1 {
 		t.Fatalf("second sync=%#v acks=%#v error=%v", result, second.ackRequests, err)
 	}
+	if len(result.receivedSMS) != 1 || result.receivedSMS[0].Sender != "+447700900123" || result.receivedSMS[0].Body != body {
+		t.Fatalf("assembled received SMS notification = %#v", result.receivedSMS)
+	}
 	messages, err := stores.ListSMS(ctx, 10)
 	if err != nil || len(messages) != 1 || messages[0].Body != body || messages[0].ProviderMessageID == secondMessageID {
 		t.Fatalf("assembled messages=%#v error=%v", messages, err)
+	}
+}
+
+func TestVoWiFiMultipartInboundRejectsAssembledBodyBeyondSMSLimit(t *testing.T) {
+	ctx := context.Background()
+	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	line := inventory.Line{
+		ID: "line_AQEBAQEBAQEBAQEBAQEBAQ", PhysicalDeviceID: "usb-device",
+		ModemFunctionID: "modem-function", State: inventory.LineReady,
+		Capabilities: hardware.Capabilities{HostVoWiFiAuth: true},
+	}
+	segments, err := smscodec.Encode(strings.Repeat("界", maximumSMSBodyRunes))
+	if err != nil || len(segments) < 2 {
+		t.Fatalf("segments=%d error=%v", len(segments), err)
+	}
+	last := &segments[len(segments)-1]
+	last.UserData = append(last.UserData, 0x75, 0x4c)
+	last.UnitCount++
+	assembled, err := smscodec.Decode(segments)
+	if err != nil || len([]rune(assembled)) != maximumSMSBodyRunes+1 {
+		t.Fatalf("assembled runes=%d error=%v", len([]rune(assembled)), err)
+	}
+	receivedAt := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+	messages := make([]vowifisupervisor.SMSMessage, 0, len(segments))
+	for index, segment := range segments {
+		messages = append(messages, voWiFiSMSMessage(
+			fmt.Sprintf("imsin_oversize_%02d_012345", index), "+447700900123", receivedAt, segment,
+		))
+	}
+	fake := &fakeVoWiFiSMSAPI{messages: messages}
+	gateway, err := NewVoWiFiSMSGateway(fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ctx, stores, fixedLineSource{topology: inventory.Topology{Lines: []inventory.Line{line}}},
+		HostVoWiFiSMSTransport(messagingTransportAvailability(true), gateway, gateway))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.SyncInbound(ctx)
+	if !errors.Is(err, ErrInboundSync) || result.Persisted != 0 || len(result.receivedSMS) != 0 ||
+		result.Acknowledged != len(segments)-1 || len(fake.ackRequests) != len(segments)-1 {
+		t.Fatalf("sync=%#v acks=%d error=%v", result, len(fake.ackRequests), err)
+	}
+	persisted, err := stores.ListSMS(ctx, 10)
+	if err != nil || len(persisted) != 0 {
+		t.Fatalf("persisted messages=%#v error=%v", persisted, err)
 	}
 }
 

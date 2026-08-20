@@ -24,7 +24,8 @@ type InboundSyncer interface {
 }
 
 type NotificationSender interface {
-	Notify(context.Context, string, string) error
+	NotifyReceivedSMS(context.Context, string, string) error
+	NotifyReceivedSMSSummary(context.Context, int) error
 }
 
 type RealtimePublisher interface {
@@ -97,13 +98,21 @@ func (coordinator *SyncCoordinator) runCycle(ctx context.Context) SyncReport {
 		return report
 	}
 
-	deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
-	report.NotificationError = coordinator.notifications.Notify(
-		deliveryCtx,
-		"sms.received",
-		fmt.Sprintf("[Simplus] 收到 %d 条新短信", result.Persisted),
-	)
-	cancelDelivery()
+	for index, received := range result.receivedSMS {
+		deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
+		if err := coordinator.notifications.NotifyReceivedSMS(deliveryCtx, received.Sender, received.Body); err != nil {
+			report.NotificationError = errors.Join(
+				report.NotificationError,
+				fmt.Errorf("received SMS %d: %w", index+1, err),
+			)
+		}
+		cancelDelivery()
+	}
+	summaryCtx, cancelSummary := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
+	if err := coordinator.notifications.NotifyReceivedSMSSummary(summaryCtx, result.Persisted); err != nil {
+		report.NotificationError = errors.Join(report.NotificationError, fmt.Errorf("received SMS summary: %w", err))
+	}
+	cancelSummary()
 	coordinator.publisher.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	return report
 }

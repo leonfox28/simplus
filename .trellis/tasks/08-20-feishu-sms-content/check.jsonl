@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-20-feishu-sms-content/research/current-flow.md","reason":"Verify the implementation closes the count-only gap while preserving replay, privacy, and provider compatibility invariants."}
+{"file":".trellis/spec/core/backend/application-boundaries.md","reason":"Check messaging coordinator ownership, exact side-effect ordering/retry isolation, and notification delivery boundaries."}
+{"file":".trellis/spec/core/backend/directory-structure.md","reason":"Check new types/ports/policy remain in their current owners and cmd stays composition-only."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Check synthetic coverage, privacy-safe failures, race/full validation, and scope attribution."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace sender/body data end to end and verify no consumer-specific contract drift or unintended exposure."}
