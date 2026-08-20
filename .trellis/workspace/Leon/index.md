@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
-- **Last Active**: 2026-08-18
+- **Total Sessions**: 20
+- **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~439 | Active |
+| `journal-1.md` | ~461 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-08-20 | Forward SMS content to Feishu | `47f273e` | `sms-to-feishu-content` |
 | 19 | 2026-08-18 | Close layer boundary audit remediation | `dce8356` | `main` |
 | 18 | 2026-08-18 | Retire dormant resource lease application | `1fe33a7` | `main` |
 | 17 | 2026-08-17 | Narrow HTTP application service ports | `aa8b41f` | `main` |

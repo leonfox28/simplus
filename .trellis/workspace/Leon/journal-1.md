@@ -437,3 +437,25 @@ Closed the parent layer-boundary audit after all five violations and two archite
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: Forward SMS content to Feishu
+
+**Date**: 2026-08-20
+**Task**: Forward SMS content to Feishu
+**Package**: core
+**Branch**: `sms-to-feishu-content`
+
+### Summary
+
+Implemented one independent Feishu message per newly persisted SMS with sender and complete body, preserved count-only summaries for non-Feishu channels, added replay/failure/privacy/multipart coverage, updated the application-boundary spec, and rebuilt the local dev Compose deployment at commit 47f273e.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47f273e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
