@@ -27,15 +27,16 @@
 - [x] 运行 focused bundle/container tests、`make container-config CONTAINER_IMAGE_TAG=dev` 和 Actions lint。
 - [x] 运行 `make check-container-files`、`go test ./internal/containercontract`、`make check-docs`、`make lint`、`make test`、`make security`、`git diff --check`。
 - [x] 对工作树、历史和生成 bundle 运行启用 redaction 的独立 secret scan；人工复核资产清单/许可证且不保存扫描输出。
-- [ ] Trellis check 通过后更新规范、提交分支、推送并创建以 `main` 为 base 的 PR；等待 CI 成功后合并。
+- [x] Trellis check 通过后更新规范、提交分支、推送并创建 PR #5；7 个执行检查成功后以 merge commit `d7aaa34` 合并。
 
-## 5. v0.1.0 Pre-release
+## 5. v0.1.0 failure and v0.1.1 Pre-release
 
-- [ ] 对合并提交创建/推送不可移动的 `v0.1.0`，等待 containers workflow 完成。
-- [ ] 验证 Pre-release 部署包/checksum、strongSwan/Mihomo 来源资产、三个 GHCR tag 和 digest manifest。
+- [x] 对合并提交 `d7aaa34` 创建/推送不可移动的 `v0.1.0`；部署/来源资产发布成功，三个镜像 job 在构建/推送前失败，Release 保持不完整 Pre-release。
+- [x] 从 Actions 日志确认 `curl --request HEAD` 导致 exit 18；不重跑、移动或补写 `v0.1.0`，添加 `--head` 回归合同。
+- [ ] 修复分支经 PR/CI 合并后，对新合并提交创建并推送 `v0.1.1`，等待 containers workflow 完成。
+- [ ] 验证 `v0.1.1` Pre-release 部署包/checksum、strongSwan/Mihomo 来源资产、三个 GHCR tag 和 digest manifest。
 - [ ] 由仓库所有者把三个首次 package 改为 public；在无 GHCR 登录环境 inspect/pull 并核对 OCI metadata/digest。
 - [ ] 解包到临时目录，运行 checksum、`docker compose config --quiet` 和 `docker compose pull`；不得执行 up、宿主准备或 HIL。
-- [ ] 若需代码修复，不移动 v0.1.0；在 main 修复后发布 v0.1.1。
 
 ## Rollback points
 
@@ -53,3 +54,6 @@
   用校验和固定的 `make dev-toolchain` 刷新后，`make security` 报告可达漏洞 0、pnpm 漏洞 0。
 - `SIMPLUS_DEB_VERSION=0.1.0-1` 的 strongSwan 包、对应源码、manifest 和 checksum 已完成
   本地隔离构建与校验；未执行宿主准备、Compose 启动或任何 HIL。
+- `v0.1.0` Actions run `32479227277` 证明来源资产阶段成功且镜像阶段失败关闭；修复后的
+  `v0.1.1` bundle checksum/解包/Compose render、合同测试、lint、完整 `make test`、
+  `make security` 和脱敏工作树/历史扫描均通过。

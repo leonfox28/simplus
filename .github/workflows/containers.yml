@@ -309,7 +309,7 @@ jobs:
             --data-urlencode "scope=repository:${image_repository}:pull" \
             https://ghcr.io/token | jq -er '.token // .access_token')
           status=$(curl -sS --retry 3 --proto '=https' --tlsv1.2 \
-            --request HEAD --output /dev/null --write-out '%{http_code}' \
+            --head --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer ${registry_token}" \
             --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
             "https://ghcr.io/v2/${image_repository}/manifests/${RELEASE_TAG}")
@@ -367,7 +367,7 @@ jobs:
             --data-urlencode "scope=repository:${image_repository}:pull" \
             https://ghcr.io/token | jq -er '.token // .access_token')
           status=$(curl -sS --retry 3 --proto '=https' --tlsv1.2 \
-            --request HEAD --output /dev/null --write-out '%{http_code}' \
+            --head --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer ${registry_token}" \
             --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
             "https://ghcr.io/v2/${image_repository}/manifests/${RELEASE_TAG}")

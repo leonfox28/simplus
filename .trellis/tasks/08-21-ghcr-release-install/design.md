@@ -42,9 +42,18 @@ bundle README 仅给出 SHA 校验后的显式命令，不提供 `curl | sh` 或
 
 ## First release and visibility
 
-代码经 PR 合并后，仅给合并提交创建 `v0.1.0`。GitHub 首次创建的个人 GHCR package 默认 private，workflow 无法替代所有者的不可逆 visibility 决策；三个镜像完成后由所有者逐个改为 public，再从未登录 registry 的环境执行 inspect/pull 验证。
+代码经 PR #5 合并后，给合并提交创建了不可移动的 `v0.1.0`。部署/来源资产成功进入
+Pre-release，但两个 registry manifest HEAD 调用错误使用 `curl --request HEAD`，三个
+矩阵项均在任何镜像构建或推送前以 exit 18 失败，digest manifest 未生成。该 tag 和
+Pre-release 保持不完整，不重跑或补写；修复合并后用新 tag `v0.1.1` 完成首发。
 
-基础设施瞬时错误可对同一 tag/commit 重跑。若修复需要改代码，不移动 `v0.1.0`，而是在 main 修复后使用 `v0.1.1`。首发保持 Pre-release，clean-VM 验收由独立任务完成。
+GitHub 首次创建的个人 GHCR package 默认 private，workflow 无法替代所有者的不可逆
+visibility 决策；`v0.1.1` 三个镜像完成后由所有者逐个改为 public，再从未登录 registry
+的环境执行 inspect/pull 验证。
+
+基础设施瞬时错误可对同一 tag/commit 重跑。此次失败需要改代码，所以不移动或复用
+`v0.1.0`，而是在 main 修复后使用 `v0.1.1`。首发保持 Pre-release，clean-VM 验收由
+独立任务完成。
 
 同 ref concurrency 消除 workflow 自身重跑竞争；发布期间其他主体不得持有或使用
 `packages: write` 改写同 tag。GHCR 在本流程中没有 compare-and-set 接口，因此版本 tag

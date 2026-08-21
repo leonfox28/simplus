@@ -264,6 +264,7 @@ func TestContainerWorkflowPublishesOnlyStrictVersionTagsAfterReleaseAssets(t *te
 		"packages: write",
 		"push-by-digest=true",
 		"scripts/release/inspect-published-container-image.sh",
+		"--head --output /dev/null --write-out '%{http_code}'",
 		"refusing to move an existing immutable image tag",
 		"published version tag digest differs from the staged immutable digest",
 		"Validate the exact public Release asset allowlist",
@@ -278,7 +279,15 @@ func TestContainerWorkflowPublishesOnlyStrictVersionTagsAfterReleaseAssets(t *te
 			t.Fatalf("container workflow is missing release contract %q", required)
 		}
 	}
-	for _, forbidden := range []string{"gh release upload \"$RELEASE_TAG\" release-assets/* --clobber", "tags: latest", "tags: main"} {
+	if count := strings.Count(text, "--head --output /dev/null --write-out '%{http_code}'"); count != 2 {
+		t.Fatalf("container workflow has %d registry HEAD probes, want 2", count)
+	}
+	for _, forbidden := range []string{
+		"gh release upload \"$RELEASE_TAG\" release-assets/* --clobber",
+		"tags: latest",
+		"tags: main",
+		"--request HEAD",
+	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("container workflow contains mutable publication contract %q", forbidden)
 		}
