@@ -516,3 +516,40 @@ Upgraded the audited Go and Web dependency baselines, verified the complete loca
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: Publish versioned GHCR deployment candidate
+
+**Date**: 2026-08-21
+**Task**: Publish versioned GHCR deployment candidate
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Published the deterministic Release-bundle/GHCR installation flow; preserved the failed v0.1.0 attempt and completed v0.1.1 with anonymous image and bundle verification.
+
+### Main Changes
+
+- Added deterministic versioned Compose bundles, strict tag-only GHCR publication, immutable digest manifest, docs, specs, and contract tests.
+- Fixed curl HEAD semantics after v0.1.0 failed closed before image publication; released v0.1.1 from a new merge commit without moving the old tag.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `901eabe` | (see git log) |
+| `bc05259` | (see git log) |
+| `04dc171` | (see git log) |
+
+### Testing
+
+- [OK] PR CI, local lint/test/security, redacted worktree/history/assets scan, source/license review, eight anonymous Release assets, OCI/digest checks, and empty-credential Compose pull passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Complete the separately scoped clean Debian VM Compose lifecycle validation before claiming stable Runtime evidence.

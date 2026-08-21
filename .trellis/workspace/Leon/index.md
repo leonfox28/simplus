@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-08-20
+- **Total Sessions**: 23
+- **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~518 | Active |
+| `journal-1.md` | ~555 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-08-21 | Publish versioned GHCR deployment candidate | `901eabe`, `bc05259`, `04dc171` | `main` |
 | 22 | 2026-08-20 | Patch Go and nanoid security baselines | `97ad0f4` | `main` |
 | 21 | 2026-08-20 | Restore local Compose deployment | `47f273e` | `sms-to-feishu-content` |
 | 20 | 2026-08-20 | Forward SMS content to Feishu | `47f273e` | `sms-to-feishu-content` |
