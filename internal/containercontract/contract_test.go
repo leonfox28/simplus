@@ -146,12 +146,12 @@ func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 	}
 }
 
-func TestComposeUsesFixedReleaseTagsAndRuntimeVolumes(t *testing.T) {
+func TestSourceComposeRequiresExplicitDevelopmentTagAndRuntimeVolumes(t *testing.T) {
 	compose := readCompose(t)
 	for _, name := range []string{"data-init", "agent", "netd", "app", "bootstrap"} {
 		image := compose.Services[name].Image
-		if strings.HasSuffix(image, ":latest") || !strings.Contains(image, "${SIMPLUS_IMAGE_TAG:-v0.1.0}") {
-			t.Fatalf("service %q has an unpinned image contract %q", name, image)
+		if strings.HasSuffix(image, ":latest") || !strings.Contains(image, "${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}") {
+			t.Fatalf("service %q does not require the explicit source-development image tag: %q", name, image)
 		}
 		if len(compose.Services[name].Healthcheck) == 0 && name != "data-init" && name != "bootstrap" {
 			t.Fatalf("service %q has no typed healthcheck", name)
@@ -176,6 +176,16 @@ func TestDockerfileHasOnlyProductionRuntimeTargets(t *testing.T) {
 	for _, target := range []string{" AS control", " AS agent", " AS netd"} {
 		if !strings.Contains(text, target) {
 			t.Fatalf("Dockerfile target %q is missing", strings.TrimSpace(target))
+		}
+	}
+	for _, label := range []string{
+		`org.opencontainers.image.source="https://github.com/leonfox28/simplus"`,
+		`org.opencontainers.image.version="$VERSION"`,
+		`org.opencontainers.image.revision="$COMMIT"`,
+		`org.opencontainers.image.licenses="LicenseRef-PolyForm-Noncommercial-1.0.0"`,
+	} {
+		if !strings.Contains(text, label) {
+			t.Fatalf("Dockerfile is missing OCI metadata label %q", label)
 		}
 	}
 	for _, forbidden := range []string{" AS dev", "network_mode: host", "privileged: true"} {
@@ -232,6 +242,58 @@ func TestNetdImagePinsMihomoAndReleaseSource(t *testing.T) {
 		if !strings.Contains(string(source), required) {
 			t.Fatalf("Mihomo source metadata is missing %q", required)
 		}
+	}
+}
+
+func TestContainerWorkflowPublishesOnlyStrictVersionTagsAfterReleaseAssets(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repositoryRoot(t), ".github", "workflows", "containers.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, required := range []string{
+		`[[ $GITHUB_EVENT_NAME == push ]]`,
+		`[[ $GITHUB_REPOSITORY == leonfox28/simplus ]]`,
+		`^v[0-9]+\.[0-9]+\.[0-9]+$`,
+		"concurrency:",
+		"cancel-in-progress: false",
+		"verify-images:",
+		"push: false",
+		"publish-images:",
+		"needs: [metadata, compose-contract, publish-release-sources]",
+		"packages: write",
+		"push-by-digest=true",
+		"scripts/release/inspect-published-container-image.sh",
+		"refusing to move an existing immutable image tag",
+		"published version tag digest differs from the staged immutable digest",
+		"Validate the exact public Release asset allowlist",
+		"--prerelease",
+		"simplus-images-${RELEASE_TAG}.json",
+		"provenance: mode=max",
+		"sbom: true",
+		"platforms: linux/amd64",
+		"ghcr.io/leonfox28/simplus-${{ matrix.target }}",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("container workflow is missing release contract %q", required)
+		}
+	}
+	for _, forbidden := range []string{"gh release upload \"$RELEASE_TAG\" release-assets/* --clobber", "tags: latest", "tags: main"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("container workflow contains mutable publication contract %q", forbidden)
+		}
+	}
+	if strings.Index(text, "publish-release-sources:") > strings.Index(text, "publish-images:") {
+		t.Fatal("release source publication must be declared before image publication")
+	}
+	publishStart := strings.Index(text, "  publish-images:")
+	publishEnd := strings.Index(text, "  publish-image-manifest:")
+	if publishStart == -1 || publishEnd <= publishStart {
+		t.Fatal("cannot locate the image publication job")
+	}
+	publishJob := text[publishStart:publishEnd]
+	if strings.Contains(publishJob, "\n          push: true") || strings.Contains(publishJob, "\n          tags: ghcr.io/") {
+		t.Fatal("image publication must stage content by digest instead of pushing the version tag during build")
 	}
 }
 

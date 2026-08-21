@@ -76,13 +76,19 @@ artifacts. `internal/containercontract/contract_test.go` protects
 local references, private docs, and packet captures. Do not widen the Docker
 context or add a debug `COPY` that reintroduces them.
 
-Public release assets may include the fixed application images,
-strongSwan-plugin package plus corresponding source/manifest, and required
-Mihomo corresponding source when the locked release workflow produces them.
+Public release assets may include the fixed application images, the
+allowlisted versioned Compose deployment archive and checksum, its three-image
+digest manifest, the strongSwan-plugin package plus corresponding
+source/manifest, and required Mihomo corresponding source when the locked
+release workflow produces them. The deployment archive contains only the
+literal-tag Compose file, three-key `.env.example`, reviewed host scripts,
+README, version metadata, root license, and third-party notices; it never
+contains `.env`, source, Git metadata, runtime data, logs, or private evidence.
 The allowed set and license/provenance are defined by `Dockerfile`,
-`third_party/**`, `packaging/strongswan-plugins/**`,
-`THIRD_PARTY_NOTICES.md`, and `.github/workflows/containers.yml`. Container
-data, site config, logs, or credentials are never release assets.
+`third_party/**`, `packaging/container/**`,
+`packaging/strongswan-plugins/**`, `THIRD_PARTY_NOTICES.md`, and
+`.github/workflows/containers.yml`. Container data, site config, logs, or
+credentials are never release assets.
 
 ## Publication Procedure
 

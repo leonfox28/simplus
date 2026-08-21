@@ -16,6 +16,10 @@ STRONGSWAN_PLUGIN_PACKAGE_DIR ?= $(CURDIR)/.dev/packages/strongswan-plugins
 CONTAINER_IMAGE_TAG ?= dev
 CONTAINER_IMAGE_PREFIX ?= ghcr.io/leonfox28/simplus
 CONTAINER_DEB_VERSION ?= 0.0.0+container1-1
+RELEASE_TAG ?=
+RELEASE_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+RELEASE_SOURCE_DATE_EPOCH ?= $(if $(SOURCE_DATE_EPOCH),$(SOURCE_DATE_EPOCH),$(shell git show -s --format=%ct HEAD 2>/dev/null || echo unknown))
+RELEASE_OUTPUT_DIR ?= $(CURDIR)/.dev/release-assets
 COMPOSE ?= docker compose
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -42,7 +46,7 @@ endif
 
 export GOTOOLCHAIN GOFLAGS VERSION COMMIT PNPM_HOME
 
-.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs check-container-files format check-format lint test web-e2e test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package container-build container-config dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
+.PHONY: doctor bootstrap-dev generate verify-generated verify-modules check-docs check-container-files format check-format lint test web-e2e test-worktree-manifest test-dev-sim security build build-go build-linux build-vowifi-hil build-strongswan-plugins-deb test-strongswan-plugins-package container-build container-config container-release-bundle dev-sim dev-sim-lan dev-hardware dev-hardware-lan dev-hardware-probe dev-agent-deploy dev-toolchain clean
 
 doctor:
 	@set -eu; \
@@ -100,7 +104,7 @@ check-docs:
 
 check-container-files:
 	@sh -n containers/agent-entrypoint.sh containers/data-init.sh containers/netd-entrypoint.sh containers/netd-preflight.sh
-	@bash -n scripts/release/prepare-container-host.sh scripts/release/check-container-host.sh
+	@bash -n scripts/release/prepare-container-host.sh scripts/release/check-container-host.sh scripts/release/build-container-release-bundle.sh scripts/release/inspect-published-container-image.sh
 
 format:
 	$(GO) fmt $(GO_PACKAGES)
@@ -190,6 +194,11 @@ container-build:
 container-config:
 	@command -v "$(word 1,$(COMPOSE))" >/dev/null 2>&1 || { echo 'Docker Compose is required for container-config' >&2; exit 1; }
 	@SIMPLUS_IMAGE_TAG="$(CONTAINER_IMAGE_TAG)" $(COMPOSE) -f compose.yaml config --quiet
+
+container-release-bundle:
+	@install -d -m 0755 "$(RELEASE_OUTPUT_DIR)"
+	@scripts/release/build-container-release-bundle.sh \
+		"$(RELEASE_TAG)" "$(RELEASE_COMMIT)" "$(RELEASE_SOURCE_DATE_EPOCH)" "$(RELEASE_OUTPUT_DIR)"
 
 dev-toolchain:
 	scripts/dev/setup-toolchain.sh

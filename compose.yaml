@@ -2,7 +2,7 @@ name: simplus
 
 services:
   data-init:
-    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     user: "0:0"
     entrypoint: ["/usr/local/libexec/simplus/data-init"]
     network_mode: none
@@ -18,7 +18,7 @@ services:
     restart: "no"
 
   agent:
-    image: ghcr.io/leonfox28/simplus-agent:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/leonfox28/simplus-agent:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     init: true
     user: "0:10001"
     network_mode: none
@@ -77,7 +77,7 @@ services:
     pids_limit: 128
 
   netd:
-    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/leonfox28/simplus-netd:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     init: true
     user: "0:10001"
     group_add: ["10001"]
@@ -129,7 +129,7 @@ services:
     networks: [runtime]
 
   app:
-    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     init: true
     user: "10001:10001"
     environment:
@@ -178,7 +178,7 @@ services:
     networks: [runtime]
 
   bootstrap:
-    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     user: "0:0"
     entrypoint: ["/usr/local/bin/simplusctl"]
     command:

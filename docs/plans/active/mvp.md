@@ -194,6 +194,12 @@
 - [x] 增加 typed app/Agent/netd healthcheck、Compose 静态 contract、宿主准备/检查脚本
   和 GHCR amd64 tag workflow，并以校验过摘要的 standalone Compose 完成 config render；
   release 同时发布 strongSwan `.deb` 与对应源码；
+- [x] 将正式安装接口收敛为确定性 `linux/amd64` Release 部署包：包内 Compose 写死严格
+  版本 tag，`.env` 只保留两个端口和设备 GID；PR/手动 workflow 只验证构建，tag workflow
+  按部署包/对应源码 → 三张 GHCR 镜像 → digest manifest 的顺序保持 Pre-release；
+- [ ] 发布首个不可移动的 `v0.1.0` Pre-release，由仓库所有者把三张首次 GHCR package
+  显式改为 public，并在未登录 registry 的环境核对匿名 pull、OCI metadata、digest
+  manifest 和解包后的 Compose config/pull；该项不得执行 `up`、宿主准备或 HIL；
 - [x] 保持日常开发、Simulator、Go/Web 测试和 CI 使用本机/runner 工具，不提供 dev
   image；保留受限 `simplus-agent-dev` 供本机 HIL；
 - [x] 在当前 Debian 13/amd64 开发 VM 构建三个 production target，并以隔离空
@@ -253,6 +259,8 @@
 8. 将 ePDG FQDN、IKE responder identity 和远端选择从当前已验证运营商接入 profile 中解耦，并分别完成其他运营商 HIL；动态 IMS Home Domain 本身不能作为多运营商兼容证据。
 9. 完成 Milestone 26 的 clean-VM Compose 生命周期验收；ARM64、rootless/userns、
    Podman、Docker Desktop 与 SELinux 发行版仍需独立设计和证据。
+10. 在 `v0.1.0` 合并提交上完成 Pre-release/GHCR 首发和所有者 public visibility 门禁；
+    若代码修复才可完成发布，保留原 tag 并使用新的 patch 版本。
 
 每项真实副作用都需要独立设计、最小实现、明确授权和与风险相称的 HIL；Web/API 不得暴露任意 AT/QMI、设备路径、网络命令或配置路径。
 

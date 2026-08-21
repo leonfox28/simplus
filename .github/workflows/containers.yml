@@ -9,9 +9,17 @@ on:
       - Dockerfile
       - compose.yaml
       - .dockerignore
+      - Makefile
       - LICENSE
       - THIRD_PARTY_NOTICES.md
+      - README.md
+      - docs/installation.md
+      - docs/development.md
+      - docs/decisions/0021-container-production-deployment.md
+      - docs/plans/active/mvp.md
       - containers/**
+      - packaging/container/**
+      - scripts/release/**
       - third_party/mihomo/**
       - third_party/zashboard/**
       - cmd/**
@@ -33,25 +41,86 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: containers-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.metadata.outputs.publish }}
+      bundle_tag: ${{ steps.metadata.outputs.bundle_tag }}
+      image_tag: ${{ steps.metadata.outputs.image_tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      deb_version: ${{ steps.metadata.outputs.deb_version }}
+      commit: ${{ steps.metadata.outputs.commit }}
+      source_date_epoch: ${{ steps.metadata.outputs.source_date_epoch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Derive and validate immutable build metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=$(git rev-parse "$GITHUB_SHA^{commit}")
+          short_sha=${commit:0:12}
+          source_date_epoch=$(git show -s --format=%ct "$commit")
+          if [[ $GITHUB_EVENT_NAME == push ]]; then
+            [[ $GITHUB_REPOSITORY == leonfox28/simplus ]] || { echo 'release publication is restricted to leonfox28/simplus' >&2; exit 2; }
+            [[ $GITHUB_REF == refs/tags/* ]] || { echo 'tag publication requires a tag ref' >&2; exit 2; }
+            [[ $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo 'release tag must match vX.Y.Z exactly' >&2
+              exit 2
+            }
+            publish=true
+            bundle_tag=$GITHUB_REF_NAME
+            image_tag=$GITHUB_REF_NAME
+            version=$GITHUB_REF_NAME
+            deb_version=${GITHUB_REF_NAME#v}-1
+          else
+            publish=false
+            bundle_tag=v0.0.0
+            image_tag=ci-$short_sha
+            version=0.0.0+git$short_sha
+            deb_version=0.0.0+git$short_sha-1
+          fi
+          printf 'publish=%s\nbundle_tag=%s\nimage_tag=%s\nversion=%s\ndeb_version=%s\ncommit=%s\nsource_date_epoch=%s\n' \
+            "$publish" "$bundle_tag" "$image_tag" "$version" "$deb_version" "$commit" "$source_date_epoch" \
+            >>"$GITHUB_OUTPUT"
+
   compose-contract:
+    needs: [metadata]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Render the production Compose contract
+      - name: Render the source development Compose contract
         env:
           SIMPLUS_IMAGE_TAG: ci
         run: docker compose -f compose.yaml config --quiet
+      - name: Build and render the release bundle
+        env:
+          RELEASE_TAG: ${{ needs.metadata.outputs.bundle_tag }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+          RELEASE_SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          make container-release-bundle RELEASE_OUTPUT_DIR="$PWD/.dev/release-assets"
+          archive=".dev/release-assets/simplus-compose-${RELEASE_TAG}-linux-amd64.tar.gz"
+          (cd .dev/release-assets && sha256sum -c "${archive##*/}.sha256")
+          install -d -m 0700 .dev/release-contract
+          tar -xzf "$archive" -C .dev/release-contract
+          bundle=".dev/release-contract/simplus-compose-${RELEASE_TAG}-linux-amd64"
+          cp "$bundle/.env.example" "$bundle/.env"
+          (cd "$bundle" && docker compose config --quiet)
 
-  images:
-    needs: [compose-contract, publish-release-sources]
-    if: >-
-      always() &&
-      needs.compose-contract.result == 'success' &&
-      (!startsWith(github.ref, 'refs/tags/v') || needs.publish-release-sources.result == 'success')
+  verify-images:
+    if: needs.metadata.outputs.publish == 'false'
+    needs: [metadata, compose-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -60,52 +129,29 @@ jobs:
         target: [control, agent, netd]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Derive immutable build metadata
-        id: metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          short_sha=${GITHUB_SHA:0:12}
-          source_date_epoch=$(git show -s --format=%ct "$GITHUB_SHA")
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            image_tag=$GITHUB_REF_NAME
-            version=$GITHUB_REF_NAME
-            deb_version=${GITHUB_REF_NAME#v}-1
-          else
-            image_tag=ci-$short_sha
-            version=0.0.0+git$short_sha
-            deb_version=0.0.0+git$short_sha-1
-          fi
-          printf 'image_tag=%s\nversion=%s\ndeb_version=%s\nsource_date_epoch=%s\n' \
-            "$image_tag" "$version" "$deb_version" "$source_date_epoch" >>"$GITHUB_OUTPUT"
-      - if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Build the ${{ matrix.target }} image
+      - name: Build the ${{ matrix.target }} image without publishing
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile
           target: ${{ matrix.target }}
           platforms: linux/amd64
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ghcr.io/${{ github.repository_owner }}/simplus-${{ matrix.target }}:${{ steps.metadata.outputs.image_tag }}
+          push: false
+          tags: ghcr.io/leonfox28/simplus-${{ matrix.target }}:${{ needs.metadata.outputs.image_tag }}
           build-args: |
-            VERSION=${{ steps.metadata.outputs.version }}
-            COMMIT=${{ github.sha }}
-            SIMPLUS_DEB_VERSION=${{ steps.metadata.outputs.deb_version }}
-            SOURCE_DATE_EPOCH=${{ steps.metadata.outputs.source_date_epoch }}
+            VERSION=${{ needs.metadata.outputs.version }}
+            COMMIT=${{ needs.metadata.outputs.commit }}
+            SIMPLUS_DEB_VERSION=${{ needs.metadata.outputs.deb_version }}
+            SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.source_date_epoch }}
           cache-from: type=gha,scope=simplus-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=simplus-${{ matrix.target }}
           provenance: mode=max
           sbom: true
 
   release-sources:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.metadata.outputs.publish == 'true'
+    needs: [metadata, compose-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     container: debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
@@ -114,23 +160,28 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            bash binutils build-essential bzip2 ca-certificates curl \
-            dpkg-dev git gzip make patch sed tar xz-utils
+            bash binutils build-essential bzip2 ca-certificates coreutils curl \
+            diffutils dpkg-dev findutils git gzip make patch sed tar xz-utils
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Build the release package and corresponding source
+      - name: Build packages, corresponding source, and deployment bundle
+        env:
+          RELEASE_TAG: ${{ needs.metadata.outputs.bundle_tag }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+          RELEASE_SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
         shell: bash
         run: |
           set -euo pipefail
-          export SIMPLUS_DEB_VERSION="${GITHUB_REF_NAME#v}-1"
-          export SOURCE_DATE_EPOCH
-          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          export SIMPLUS_DEB_VERSION="${RELEASE_TAG#v}-1"
+          export SOURCE_DATE_EPOCH=$RELEASE_SOURCE_DATE_EPOCH
           make test-strongswan-plugins-package
           install -d -m 0755 .dev/release-assets
           cp .dev/packages/strongswan-plugins/* .dev/release-assets/
+          make container-release-bundle RELEASE_OUTPUT_DIR="$PWD/.dev/release-assets"
       - name: Fetch the corresponding Mihomo source
         shell: bash
         run: |
           set -euo pipefail
+          umask 022
           archive=.dev/release-assets/mihomo-v1.19.29-source.tar.gz
           source_tree=$(mktemp -d)
           source_commit=e26714a181ac0e2fa803453c0a8e9a9ce94e31cb
@@ -145,6 +196,35 @@ jobs:
             "$archive" | sha256sum -c -
           tar -tzf "$archive" >"$source_tree/archive-files"
           grep -Fx 'mihomo-v1.19.29/LICENSE' "$source_tree/archive-files"
+      - name: Validate the exact public Release asset allowlist
+        env:
+          RELEASE_TAG: ${{ needs.metadata.outputs.bundle_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="${RELEASE_TAG#v}-1"
+          expected_assets=$(printf '%s\n' \
+            "mihomo-v1.19.29-source.tar.gz" \
+            "simplus-compose-${RELEASE_TAG}-linux-amd64.tar.gz" \
+            "simplus-compose-${RELEASE_TAG}-linux-amd64.tar.gz.sha256" \
+            "simplus-strongswan-plugins_${package_version}.source.tar.xz" \
+            "simplus-strongswan-plugins_${package_version}_amd64.deb" \
+            "strongswan-plugins.manifest" \
+            "strongswan-plugins.sha256" | LC_ALL=C sort)
+          actual_assets=$(find .dev/release-assets -mindepth 1 -maxdepth 1 \
+            -printf '%f\n' | LC_ALL=C sort)
+          [[ $actual_assets == "$expected_assets" ]] || {
+            echo 'release source directory does not match the public asset allowlist' >&2
+            diff -u <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$actual_assets") >&2 || true
+            exit 2
+          }
+          while IFS= read -r asset; do
+            path=".dev/release-assets/$asset"
+            [[ -f $path && ! -L $path && $(stat -c '%a' "$path") == 644 ]] || {
+              echo "release asset must be a regular 0644 file: $asset" >&2
+              exit 2
+            }
+          done <<<"$expected_assets"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simplus-release-sources
@@ -152,27 +232,240 @@ jobs:
           if-no-files-found: error
 
   publish-release-sources:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release-sources]
+    if: needs.metadata.outputs.publish == 'true'
+    needs: [metadata, release-sources]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
-      packages: read
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: simplus-release-sources
           path: release-assets
-      - name: Publish packages and corresponding sources
+      - name: Publish immutable source and deployment assets to a Pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.bundle_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --verify-tag \
-              --title "Simplus $GITHUB_REF_NAME" --generate-notes
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            state=$(gh release view "$RELEASE_TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft] | @tsv')
+            [[ $state == $'true\tfalse' ]] || { echo 'existing Release must remain a published Pre-release' >&2; exit 2; }
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --prerelease \
+              --title "Simplus $RELEASE_TAG" --generate-notes
           fi
-          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          existing_assets=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+          comparison=$(mktemp -d)
+          for asset in release-assets/*; do
+            name=${asset##*/}
+            if grep -Fxq "$name" <<<"$existing_assets"; then
+              gh release download "$RELEASE_TAG" --pattern "$name" --dir "$comparison"
+              cmp -s "$asset" "$comparison/$name" || { echo "existing Release asset differs: $name" >&2; exit 2; }
+            else
+              gh release upload "$RELEASE_TAG" "$asset"
+            fi
+          done
+
+  publish-images:
+    if: needs.metadata.outputs.publish == 'true'
+    needs: [metadata, compose-contract, publish-release-sources]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [control, agent, netd]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Reuse an existing immutable image tag when present
+        id: image_state
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.image_tag }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $TARGET =~ ^(control|agent|netd)$ ]] || { echo 'invalid image target' >&2; exit 2; }
+          image_repository="leonfox28/simplus-${TARGET}"
+          image_ref="ghcr.io/${image_repository}:${RELEASE_TAG}"
+          registry_token=$(curl -fsSL --retry 3 --proto '=https' --tlsv1.2 \
+            --user "${GITHUB_ACTOR}:${REGISTRY_PASSWORD}" --get \
+            --data-urlencode 'service=ghcr.io' \
+            --data-urlencode "scope=repository:${image_repository}:pull" \
+            https://ghcr.io/token | jq -er '.token // .access_token')
+          status=$(curl -sS --retry 3 --proto '=https' --tlsv1.2 \
+            --request HEAD --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${registry_token}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${image_repository}/manifests/${RELEASE_TAG}")
+          case "$status" in
+            200)
+              digest=$(scripts/release/inspect-published-container-image.sh \
+                "$image_ref" "$RELEASE_TAG" "$RELEASE_COMMIT")
+              printf 'exists=true\ndigest=%s\n' "$digest" >>"$GITHUB_OUTPUT"
+              ;;
+            404)
+              printf 'exists=false\n' >>"$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "GHCR tag lookup failed with HTTP $status" >&2
+              exit 2
+              ;;
+          esac
+      - name: Build and stage the ${{ matrix.target }} image by digest
+        if: steps.image_state.outputs.exists == 'false'
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          outputs: type=image,name=ghcr.io/leonfox28/simplus-${{ matrix.target }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            VERSION=${{ needs.metadata.outputs.version }}
+            COMMIT=${{ needs.metadata.outputs.commit }}
+            SIMPLUS_DEB_VERSION=${{ needs.metadata.outputs.deb_version }}
+            SOURCE_DATE_EPOCH=${{ needs.metadata.outputs.source_date_epoch }}
+          cache-from: type=gha,scope=simplus-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=simplus-${{ matrix.target }}
+          provenance: mode=max
+          sbom: true
+      - name: Publish the immutable ${{ matrix.target }} version tag
+        if: steps.image_state.outputs.exists == 'false'
+        id: publish
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.image_tag }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $BUILT_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'build returned an invalid image digest' >&2; exit 2; }
+          image_repository="leonfox28/simplus-${TARGET}"
+          image_ref="ghcr.io/${image_repository}:${RELEASE_TAG}"
+          registry_token=$(curl -fsSL --retry 3 --proto '=https' --tlsv1.2 \
+            --user "${GITHUB_ACTOR}:${REGISTRY_PASSWORD}" --get \
+            --data-urlencode 'service=ghcr.io' \
+            --data-urlencode "scope=repository:${image_repository}:pull" \
+            https://ghcr.io/token | jq -er '.token // .access_token')
+          status=$(curl -sS --retry 3 --proto '=https' --tlsv1.2 \
+            --request HEAD --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${registry_token}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${image_repository}/manifests/${RELEASE_TAG}")
+          [[ $status == 404 ]] || {
+            if [[ $status == 200 ]]; then
+              echo 'refusing to move an existing immutable image tag' >&2
+            else
+              echo "GHCR pre-publication lookup failed with HTTP $status" >&2
+            fi
+            exit 2
+          }
+          docker buildx imagetools create \
+            --tag "$image_ref" "ghcr.io/${image_repository}@${BUILT_DIGEST}"
+          digest=$(scripts/release/inspect-published-container-image.sh \
+            "$image_ref" "$RELEASE_TAG" "$RELEASE_COMMIT")
+          [[ $digest == "$BUILT_DIGEST" ]] || {
+            echo 'published version tag digest differs from the staged immutable digest' >&2
+            exit 2
+          }
+          printf 'digest=%s\n' "$digest" >>"$GITHUB_OUTPUT"
+      - name: Record the published digest
+        env:
+          TARGET: ${{ matrix.target }}
+          EXISTING_DIGEST: ${{ steps.image_state.outputs.digest }}
+          PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIGEST=${EXISTING_DIGEST:-$PUBLISHED_DIGEST}
+          [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid image digest: $DIGEST" >&2; exit 2; }
+          install -d -m 0700 .dev/image-digests
+          printf '%s\t%s\n' "$TARGET" "$DIGEST" >".dev/image-digests/$TARGET.digest"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simplus-image-digest-${{ matrix.target }}
+          path: .dev/image-digests/${{ matrix.target }}.digest
+          if-no-files-found: error
+
+  publish-image-manifest:
+    if: needs.metadata.outputs.publish == 'true'
+    needs: [metadata, publish-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: simplus-image-digest-*
+          path: image-digests
+          merge-multiple: true
+      - name: Build and publish the immutable image digest manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.bundle_tag }}
+          RELEASE_COMMIT: ${{ needs.metadata.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A digests=()
+          shopt -s nullglob
+          files=(image-digests/*.digest)
+          [[ ${#files[@]} -eq 3 ]] || { echo 'expected exactly three image digest artifacts' >&2; exit 2; }
+          for file in "${files[@]}"; do
+            IFS=$'\t' read -r target digest extra <"$file"
+            [[ -z ${extra:-} && $target =~ ^(control|agent|netd)$ && $digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "invalid digest record: $file" >&2
+              exit 2
+            }
+            [[ -z ${digests[$target]+set} ]] || { echo "duplicate digest target: $target" >&2; exit 2; }
+            digests[$target]=$digest
+          done
+          for target in control agent netd; do
+            [[ -n ${digests[$target]+set} ]] || { echo "missing digest target: $target" >&2; exit 2; }
+          done
+          manifest="simplus-images-${RELEASE_TAG}.json"
+          jq -n \
+            --arg version "$RELEASE_TAG" \
+            --arg commit "$RELEASE_COMMIT" \
+            --arg control_ref "ghcr.io/leonfox28/simplus-control:${RELEASE_TAG}" \
+            --arg control_digest "${digests[control]}" \
+            --arg agent_ref "ghcr.io/leonfox28/simplus-agent:${RELEASE_TAG}" \
+            --arg agent_digest "${digests[agent]}" \
+            --arg netd_ref "ghcr.io/leonfox28/simplus-netd:${RELEASE_TAG}" \
+            --arg netd_digest "${digests[netd]}" \
+            '{version: $version, commit: $commit, platform: "linux/amd64", images: [
+              {target: "control", reference: $control_ref, digest: $control_digest},
+              {target: "agent", reference: $agent_ref, digest: $agent_digest},
+              {target: "netd", reference: $netd_ref, digest: $netd_digest}
+            ]}' >"$manifest"
+          existing_assets=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+          state=$(gh release view "$RELEASE_TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft] | @tsv')
+          [[ $state == $'true\tfalse' ]] || { echo 'image manifest requires a published Pre-release' >&2; exit 2; }
+          if grep -Fxq "$manifest" <<<"$existing_assets"; then
+            comparison=$(mktemp -d)
+            gh release download "$RELEASE_TAG" --pattern "$manifest" --dir "$comparison"
+            cmp -s "$manifest" "$comparison/$manifest" || { echo "existing Release asset differs: $manifest" >&2; exit 2; }
+          else
+            gh release upload "$RELEASE_TAG" "$manifest"
+          fi

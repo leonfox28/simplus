@@ -1,0 +1,5 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Verify no drift in service topology, UID/capability/socket/mount boundaries, host preparation authorization, or HIL scope."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Verify deterministic bundle/release behavior, Make/CI alignment, tag policy, and source-before-image publication."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Verify the canonical install/decision/status documents were updated without duplicated manuals or false evidence claims."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Verify bundle and release assets contain only allowed public material and that publication gates are complete."}
+{"file":".trellis/tasks/08-21-ghcr-release-install/research/current-state.md","reason":"Cross-check implementation and final claims against the pre-change repository/GitHub state."}

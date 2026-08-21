@@ -46,21 +46,28 @@ AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独�
 remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信任局域网，不能直接暴露
 到公网。
 
-首次部署前，在仓库根目录完成一次性宿主准备和检查：
+生产安装不需要克隆源码或在宿主构建镜像。首个计划发布的部署候选为 GitHub
+Pre-release `v0.1.0`；发布资产和三个公开 GHCR package 完整后，从该 Release 下载
+版本化部署包及校验文件：
 
 ```bash
-sudo bash scripts/release/prepare-container-host.sh
-bash scripts/release/check-container-host.sh "$PWD"
+version=v0.1.0
+base="https://github.com/leonfox28/simplus/releases/download/$version"
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
+sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256"
+tar -xzf "simplus-compose-$version-linux-amd64.tar.gz"
+cd "simplus-compose-$version-linux-amd64"
+cp .env.example .env
 ```
 
-使用已经发布的固定版本启动，不要使用 `latest`。下面以 Compose 模板当前默认版本为例：
+审阅脚本和 `.env` 后，完成一次性宿主准备、只读检查并拉取部署包写死版本的三个 GHCR
+镜像；不要使用 `latest`，也不要在 `.env` 中增加镜像 tag：
 
 ```bash
-export SIMPLUS_IMAGE_TAG=v0.1.0
-export SIMPLUS_HTTP_PORT=8080
-export SIMPLUS_CONTROLLER_PORT=19090
-export SIMPLUS_DEVICE_GID=20
-
+sudo bash prepare-container-host.sh
+bash check-container-host.sh "$PWD"
+docker compose config --quiet
 docker compose pull
 docker compose up -d
 docker compose ps
@@ -75,14 +82,9 @@ docker compose logs bootstrap
 会删除容器和临时运行对象，但保留这些目录；容器部署不会自动读取或迁移旧原生安装的
 `/var/lib/simplus` 数据。
 
-如果尚无可拉取的发布 tag，或需要从当前源码验收容器，可以先在本地构建三个镜像：
-
-```bash
-make container-build CONTAINER_IMAGE_TAG=dev
-make container-config CONTAINER_IMAGE_TAG=dev
-export SIMPLUS_IMAGE_TAG=dev
-docker compose up -d
-```
+三个 GHCR package 首次发布后需由仓库所有者显式改为 public，之后匿名 `pull` 才是有效
+安装证据。发布包、对应源码和 `simplus-images-v0.1.0.json` digest 清单均保留在同一
+Pre-release；任一资产缺失时不要回退到生产机本地构建。
 
 完整的宿主要求、权限模型、生命周期、更新方式和故障处理见
 [Docker Compose 生产部署](docs/installation.md)。

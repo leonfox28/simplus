@@ -1,0 +1,5 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Production Compose topology, fixed identities, mounts, capabilities, lifecycle, and safe validation boundaries."}
+{"file":".trellis/spec/core/infra/build-and-generated-files.md","reason":"Make target semantics, reproducible release inputs, generated ownership, workflow alignment, and corresponding-source obligations."}
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Canonical owners for installation, ADR, active plan, handoff, and public status wording."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Release asset allowlist, private-data exclusions, redacted secret scanning, and publication review requirements."}
+{"file":".trellis/tasks/08-21-ghcr-release-install/research/current-state.md","reason":"Task-specific repository and remote publication evidence gathered before implementation."}
