@@ -18,16 +18,19 @@ manifest 探测随后在任何镜像构建/推送前失败，且没有生成 dig
 Compose config/pull。该证据只验证发布与匿名分发，没有执行 `compose up`、宿主准备或
 HIL，也不替代 clean-VM 生命周期验收。
 
-三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发 VM 完成
+三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发宿主完成
 smoke；该证据验证镜像、权限、netd preflight、bootstrap、Web 登录和数据保留重建，
 不等于 clean-VM 或真实模组验收，也没有执行 RF、VoWiFi、短信或电话动作。
-随后在同一开发 VM 的正式 Compose 切换中，已完成预期模组发现、Mihomo 国家出口、
-Host VoWiFi 注册和单段自号码短信回环 HIL；该证据没有请求 RF 写入，且不能外推为
-其他收件人互通、电话或 clean-VM 生命周期证据。
+随后在开发宿主上使用校验过的 `v0.1.1` Release 部署包和 GHCR 镜像完成了既有数据的
+停机快照、恢复、回滚演练、正式切换，以及容器健康、镜像摘要和数据挂载验收。本次切换
+未执行 HIL；另有独立受控证据覆盖预期模组发现、Mihomo 国家出口、Host VoWiFi 注册和
+单段自号码短信回环。独立 HIL 没有请求 RF 写入；部署切换和 HIL 都不能外推为 clean-VM
+生命周期、其他收件人互通或电话证据。
 
-容器部署创建全新实例，数据位于 Compose 文件旁的 `./data`，不会读取或迁移原生
-`/var/lib/simplus`。需要保留旧数据时应将它与 Compose 数据分开保存，不要手工复制
-数据库或运行目录到容器；仓库不提供自动迁移或恢复推断。
+容器部署默认创建全新实例，数据位于部署根旁的 `./data`，不会读取或迁移原生
+`/var/lib/simplus`。本文推荐把部署根固定为 `/opt/simplus`，对应数据为
+`/opt/simplus/data`。需要保留其他安装的数据时，应先停止写入并使用单独审查、可回滚的
+迁移方案；不要在运行中手工复制数据库或运行目录，仓库不提供自动迁移或恢复推断。
 
 ## 支持边界
 
@@ -45,23 +48,33 @@ Docker Engine 的安装按 [Docker 官方 Debian 指南](https://docs.docker.com
 ## 下载部署包
 
 每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。下面以替代部署候选 `v0.1.1`
-为例；版本变量必须同时决定下载目录和文件名，不要改为滚动的 `latest`：
+为例；普通安装只需下载一个 `.tar.gz` 部署归档和它的一个 `.sha256` 校验文件。Release
+页面中的 strongSwan/Mihomo 对应源码、包与镜像 digest manifest 用于发布审计、许可和
+可追溯性，不是需要逐个下载或解压的安装包；三个运行镜像由后续 `docker compose pull`
+直接从 GHCR 拉取。版本变量必须同时决定下载目录和文件名，不要改为滚动的 `latest`：
 
 ```bash
 version=v0.1.1
 base="https://github.com/leonfox28/simplus/releases/download/$version"
-curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
-curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
-sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256"
-tar -xzf "simplus-compose-$version-linux-amd64.tar.gz"
-cd "simplus-compose-$version-linux-amd64"
-cp .env.example .env
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz" &&
+  curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
+  sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
+  sudo mkdir -m 0755 /opt/simplus &&
+  sudo chown "$(id -u):$(id -g)" /opt/simplus &&
+  tar -xzf "simplus-compose-$version-linux-amd64.tar.gz" \
+    -C /opt/simplus --strip-components=1 &&
+  cd /opt/simplus &&
+  cp .env.example .env
 ```
 
-归档只包含写死同版本 GHCR tag 的 `compose.yaml`、三项安装参数示例、两条宿主脚本、
-简明说明、版本/commit 信息、根许可证和第三方 notices。校验必须在解包前完成；不要使用
-`curl | sh`。编辑 `.env` 时只设置 `SIMPLUS_HTTP_PORT`、`SIMPLUS_CONTROLLER_PORT` 和
-`SIMPLUS_DEVICE_GID`，生产安装不接受镜像版本变量。
+归档内的 `compose.yaml` 和 `.env.example` 是运行核心：前者写死同版本 GHCR tag，后者
+只提供三项安装参数。两条宿主准备/检查脚本、简明说明、版本/commit 信息、根许可证和
+第三方 notices 一并随包提供，以保持同版本的安全门禁、来源标识和合规材料；它们不是
+额外下载项。校验必须在解包前完成；不要使用 `curl | sh`。命令链会在下载、校验或创建
+目录失败时停止；`/opt/simplus` 应专用于这一实例，已有目录必须按“生命周期”一节升级，
+不能用全新安装覆盖。命令只修改新建目录本身的属主。编辑 `.env` 时只设置
+`SIMPLUS_HTTP_PORT`、
+`SIMPLUS_CONTROLLER_PORT` 和 `SIMPLUS_DEVICE_GID`，生产安装不接受镜像版本变量。
 
 tag workflow 会先把部署包、strongSwan 包/对应源码和 Mihomo 对应源码发布到同一
 GitHub Pre-release，随后才推送三张镜像。`v0.1.1` 三个 package 已可匿名访问；未来首次
@@ -77,8 +90,8 @@ Release 中的
 模块加载配置并执行本次 `modprobe`：
 
 ```bash
-sudo bash prepare-container-host.sh
-bash check-container-host.sh "$PWD"
+sudo bash prepare-container-host.sh &&
+  bash check-container-host.sh "$PWD"
 ```
 
 等价的持久配置是：
@@ -104,23 +117,30 @@ Agent，避免它们在当前或下次启动时与 Compose 争用模组、端口
 门禁，不要在生产机本地构建替代镜像。
 
 ```bash
-docker compose config --quiet
-docker compose pull
-docker compose up -d
-docker compose ps
-docker compose logs bootstrap
+docker compose config --quiet &&
+  docker compose pull &&
+  docker compose up -d &&
+  docker compose wait bootstrap &&
+  docker compose ps &&
+  docker compose logs bootstrap
 ```
 
-`SIMPLUS_DEVICE_GID` 必须等于宿主 ttyUSB 节点所属组的数字 GID；Debian 默认
-`dialout` 为 20。如果遗留 production 服务或开发 Agent 已运行或启用，应先明确停止并
-禁用它们，再启动 Compose；宿主准备和检查脚本不会替用户操作其他服务。
+`SIMPLUS_DEVICE_GID` 必须等于宿主 ttyUSB 节点所属组的数字 GID。用
+`stat -c '%g' /dev/ttyUSB0` 查询并将设备路径换成目标模组实际节点；Debian 默认
+`dialout` 通常为 20，但应以查询结果为准。如果遗留 production 服务或开发 Agent 已
+运行或启用，应先明确停止并禁用它们，再启动 Compose；宿主准备和检查脚本不会替用户
+操作其他服务。
 
 `data-init` 创建并固定：
 
 ```text
-./data/core   -> /var/lib/simplus
-./data/agent  -> /var/lib/simplus-agent
+/opt/simplus/data/core   -> /var/lib/simplus
+/opt/simplus/data/agent  -> /var/lib/simplus-agent
 ```
+
+Compose 实际使用相对于其文件的 `./data/core` 和 `./data/agent`；上面的绝对路径来自本文
+推荐的部署根。首次 `compose up` 前应确认该位置位于持久存储，并确定实例外、访问受限的
+备份位置。
 
 Agent 在这个私有目录下固定使用 `qdc507-sms/` 保存 QDC507 v2 SMS recovery ledger；container
 entrypoint 通过 `--state-root /var/lib/simplus-agent/qdc507-sms` 传入。缺失/不安全目录、
@@ -145,26 +165,35 @@ production Web/API 与 controller 都监听所有 IPv4 接口。项目仍只面�
 查看状态与日志：
 
 ```bash
+cd /opt/simplus
 docker compose ps
 docker compose logs agent netd app
 ```
 
-升级前停止写入并备份整个 `./data`。下载并校验新版部署包，在临时目录解包；保留当前
-部署根的 `.env` 和 `data/`，只用新版归档中的八个受管文件替换当前版本，然后拉取并
-重建容器：
+升级前停止业务写入并完整备份 `/opt/simplus/data` 到部署根之外的受限位置；备份必须
+包含 `core`、`agent` 及 SQLite 的 WAL/SHM 文件，并在继续前验证可以读取。下载并校验
+新版部署包，在临时目录解包；保留当前部署根的 `.env` 和 `data/`，只用新版归档中的
+八个受管文件替换当前版本，然后拉取并重建容器：
 
 ```bash
-new_bundle=/path/to/verified/simplus-compose-<new-version>-linux-amd64
-for file in compose.yaml .env.example prepare-container-host.sh check-container-host.sh README.md VERSION LICENSE THIRD_PARTY_NOTICES.md; do
-  install -m 0644 "$new_bundle/$file" "$file"
-done
-chmod 0755 prepare-container-host.sh check-container-host.sh
-docker compose config --quiet
-docker compose pull
-docker compose up -d
+new_bundle="/path/to/verified/simplus-compose-vX.Y.Z-linux-amd64"
+(
+  set -eu
+  cd /opt/simplus
+  for file in compose.yaml .env.example prepare-container-host.sh check-container-host.sh README.md VERSION LICENSE THIRD_PARTY_NOTICES.md; do
+    install -m 0644 "$new_bundle/$file" "$file"
+  done
+  chmod 0755 prepare-container-host.sh check-container-host.sh
+  bash check-container-host.sh "$PWD"
+  docker compose config --quiet
+  docker compose pull
+  docker compose up -d
+  docker compose wait bootstrap
+)
 ```
 
-上面的路径必须指向已经通过 SHA-256 校验的新归档；脚本的最终执行权限以 `chmod` 恢复。
+上面的子 shell 会在任一步失败时停止；路径必须指向已经通过 SHA-256 校验的新归档，脚本
+的最终执行权限以 `chmod` 恢复。
 数据库迁移只保证向前进行。仅把 Compose 或镜像 tag 切回旧版本不构成安全降级；只有已
 确认旧版本 schema 兼容，或恢复了升级前备份时，才可另行制定回退步骤。
 
@@ -175,8 +204,8 @@ docker compose down
 ```
 
 `agent-runtime` 和 `netd-runtime` 只保存 Unix socket 与临时状态，不是备份数据。只有
-确认不再需要实例时才删除 `./data`；不要把数据库、管理员凭据、订阅或运行日志提交
-到仓库。
+确认不再需要实例且备份满足保留要求时才删除 `/opt/simplus/data`；不要把数据库、管理员
+凭据、订阅或运行日志提交到仓库。
 
 ## 权限模型
 

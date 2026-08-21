@@ -39,12 +39,14 @@
   `simplus_admin`，密码只写首次容器日志；tag release 同时附带 Mihomo GPL 源码；
 - app/Agent/netd 的 typed health、Compose YAML 权限 contract、Shell 语法、workflow
   actionlint、目标 Go 测试和 Compose `config --quiet` 已通过；当前 Debian 13/amd64
-  开发 VM 还完成了三个 production target 构建，以及使用隔离空 USB/sysfs 的全栈
+  开发宿主还完成了三个 production target 构建，以及使用隔离空 USB/sysfs 的全栈
   Compose smoke：netd 临时 network namespace/veth/nft/XFRM preflight、固定 UID 与
   capability、首次管理员创建、Web 登录、幂等 bootstrap 和保留数据重建均通过；
-  正式切换后还完成真实模组发现、Mihomo 国家出口、ePDG、Digest AKA AUTS 重同步、
-  Gm XFRM、IMS 注册和单段自号码短信回环 HIL，全程没有请求 RF 写入；这仍不能替代
-  clean-VM 生命周期验收或其他收件人的短信互通证据。
+  随后使用校验过的 `v0.1.1` Release 部署包和 GHCR 镜像完成既有数据的停机快照、恢复、
+  回滚演练、正式切换，以及容器健康、镜像摘要和数据挂载验收，本次切换未执行 HIL；另有
+  独立受控 HIL 证据覆盖真实模组发现、Mihomo 国家出口、ePDG、Digest AKA AUTS 重同步、
+  Gm XFRM、IMS 注册和单段自号码短信回环，全程没有请求 RF 写入；这仍不能替代 clean-VM
+  安装、升级、卸载与跨环境恢复 Runtime 验收，也不能替代其他收件人的短信互通证据。
 
 ### Simulator 业务纵切
 

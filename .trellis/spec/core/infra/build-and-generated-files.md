@@ -147,6 +147,9 @@ assets, or production installation/upgrade instructions.
   `make container-config CONTAINER_IMAGE_TAG=<development-tag>`.
 - Production installation has no image-tag input. Its only editable keys are
   `SIMPLUS_HTTP_PORT`, `SIMPLUS_CONTROLLER_PORT`, and `SIMPLUS_DEVICE_GID`.
+- User-facing installation recommends `/opt/simplus` as the durable deployment
+  root. A fresh-install command must refuse an existing path; upgrades use the
+  separate lifecycle procedure and preserve `.env` plus `data/`.
 
 ### 3. Contracts
 
@@ -184,6 +187,18 @@ assets, or production installation/upgrade instructions.
   never `--request HEAD`. The latter changes the method but leaves curl
   expecting a response body; GHCR can then produce exit 18 for a valid
   bodyless HEAD response before the workflow can classify 200 versus 404.
+- Root, canonical, and bundled installation instructions keep download,
+  checksum, fresh-root creation, extraction, host validation, pull, and start
+  steps fail closed. Fresh installation changes ownership only on the newly
+  created root, never recursively on an existing deployment tree. Fresh start
+  and upgrade wait for the one-shot `bootstrap` container and propagate its
+  exit status before showing credentials or declaring the command successful.
+- Those instructions describe the ordinary operator input as exactly one
+  versioned deployment archive plus its checksum. They distinguish the two
+  runtime-entry files (`compose.yaml` and `.env.example`) from the bundled host
+  checks/version/license material, and from separate Release audit,
+  corresponding-source, package, and digest-manifest assets. Images are pulled
+  by Compose rather than downloaded as archives by the operator.
 
 ### 4. Validation & Error Matrix
 
@@ -200,18 +215,24 @@ assets, or production installation/upgrade instructions.
 | digest artifact is missing, duplicated, malformed, or not `sha256:<64-lowercase-hex>` | manifest publication fails |
 | first GHCR packages are still private | do not claim anonymous installation; owner must make all three public and visibility cannot be reverted to private |
 | a code change is needed after tagging | do not move/reuse the tag; publish the next patch version |
+| the recommended fresh-install root already exists | stop without extracting or changing ownership; direct the administrator to the lifecycle upgrade procedure |
+| checksum, host check, Compose render, or image pull fails | do not execute later install/start steps in the copy-paste command chain |
+| `bootstrap` has not exited or exits non-zero | wait or fail the command chain; do not show an empty log as successful initialization |
 
 ### 5. Good / Base / Bad Cases
 
 - Good: a strict tag first publishes deterministic install/source assets,
   then three `linux/amd64` images, then a complete digest manifest; an
   unauthenticated client can inspect and pull all three after owner visibility
-  approval.
-- Base: a PR or manual run renders the source and release Compose files and
-  builds each target without registry login or publication.
+  approval. A fresh install then creates a previously absent `/opt/simplus`,
+  extracts as the administrator, and stops on any failed gate before startup.
+- Base: an existing `/opt/simplus` is an upgrade candidate; fresh installation
+  stops without modifying it, while a PR or manual workflow run builds without
+  registry login or publication.
 - Bad: let production users set `SIMPLUS_IMAGE_TAG`, fall back to local builds,
-  publish a rolling tag, overwrite a differing asset, mark the candidate
-  stable, or treat an image rollback as a database-safe downgrade.
+  publish a rolling tag, recursively `chown` or extract over an existing
+  deployment, continue after a failed gate, mark the candidate stable, or
+  treat an image rollback as a database-safe downgrade.
 
 ### 6. Tests Required
 
@@ -223,6 +244,13 @@ assets, or production installation/upgrade instructions.
   PR/manual `push: false`, source-before-image dependency, amd64, OCI labels,
   SBOM/provenance, immutable digest manifest shape, exactly two real curl
   `--head` probes, and absence of `--request HEAD`.
+- Review `README.md`, `docs/installation.md`, and
+  `packaging/container/README.md` as one installation interface: durable root,
+  three editable keys, existing-root refusal, non-recursive ownership, and
+  stop-on-error command ordering plus successful `bootstrap` wait must remain
+  aligned. Each must also make the one-archive-plus-checksum operator input
+  clear without presenting Release audit/source assets as additional
+  installation downloads.
 - Run `make check-container-files`, `go test ./internal/containercontract`,
   `make container-config CONTAINER_IMAGE_TAG=dev`, `make check-docs`,
   `make lint`, `make test`, `make security`, and `git diff --check` before the
@@ -235,20 +263,26 @@ assets, or production installation/upgrade instructions.
 
 ### 7. Wrong vs Correct
 
-Wrong: make a source checkout or floating image input part of production:
+Wrong: make a source checkout or floating image input part of production, or
+extract recursively over an existing deployment:
 
 ```bash
 git clone https://github.com/leonfox28/simplus
 SIMPLUS_IMAGE_TAG=latest docker compose up -d
+sudo tar -xzf bundle.tar.gz -C /opt/simplus
+sudo chown -R "$USER" /opt/simplus
 ```
 
-Correct: verify a versioned bundle, retain its literal image references, and
-pull before any separately authorized start:
+Correct: verify a versioned bundle, require a new durable root, change only
+that root's ownership, and stop before later steps when any gate fails:
 
 ```bash
-sha256sum -c simplus-compose-v0.1.0-linux-amd64.tar.gz.sha256
-tar -xzf simplus-compose-v0.1.0-linux-amd64.tar.gz
-docker compose -f simplus-compose-v0.1.0-linux-amd64/compose.yaml pull
+version=vX.Y.Z
+sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
+  sudo mkdir -m 0755 /opt/simplus &&
+  sudo chown "$(id -u):$(id -g)" /opt/simplus &&
+  tar -xzf "simplus-compose-$version-linux-amd64.tar.gz" \
+    -C /opt/simplus --strip-components=1
 ```
 
 ## Avoid

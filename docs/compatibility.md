@@ -77,13 +77,17 @@ SMS over IMS 的 Fixture 证据覆盖条件 `+g.3gpp.smsip` 注册、SIM 短信�
   bootstrap、固定摘要 Mihomo seed 及其对应源码 release workflow；YAML 权限 contract、
   Shell 语法、typed health 和 Go 测试属于 Fixture 证据；
 - Compose 文件还通过了 Compose `config --quiet`。三个 production target 已在一台
-  Debian 13/amd64 开发 VM 本地构建，并以隔离空 USB/sysfs 启动完整 Compose：
+  Debian 13/amd64 开发宿主本地构建，并以隔离空 USB/sysfs 启动完整 Compose：
   Agent/app/netd typed health、Agent 降权、netd 临时 netns/veth/nft TPROXY/XFRM
   preflight 及清理、首次登录、bootstrap 幂等性和保留数据重建均通过；这是无真实设备
   的 Fixture smoke，不是 clean-VM Runtime 证据；
-- clean Debian VM 生命周期仍未完成；当前开发 VM 的
-  Compose 实例已完成真实 ML307A 只读发现、Mihomo 国家出口、ePDG、Digest AKA AUTS
-  重同步、Gm XFRM 与 IMS 注册纵切。Debian 13 的 `iproute2` XFRM selector 使用数值
+- 同一类开发宿主还使用校验过的 `v0.1.1` Release 部署包和 GHCR 镜像，完成了既有数据
+  的停机快照、恢复、回滚演练、正式切换，以及容器健康、镜像摘要和数据挂载验收。该
+  结论只证明现有开发宿主上的生产形态有数据切换，不是 clean-VM 安装、升级、卸载或
+  跨环境恢复 Runtime 证据；
+- clean Debian VM 生命周期仍未完成；与上述切换验收分开的开发宿主 Compose HIL 已覆盖
+  真实 ML307A 只读发现、Mihomo 国家出口、ePDG、Digest AKA AUTS 重同步、Gm XFRM 与
+  IMS 注册纵切。Debian 13 的 `iproute2` XFRM selector 使用数值
   UDP 协议号，并在每条 Line 的独立 netns 中以保留 priority/reqid 做幂等清理；随后
   又从公开 Web 完成单段自号码短信回环。该轮容器 HIL 没有请求 RF 写入，自回环不能
   外推为其他收件人互通，也不能替代尚未完成的 clean-VM 生命周期证据；

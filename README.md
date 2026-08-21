@@ -8,9 +8,9 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 为目标。
 
 > [!WARNING]
-> 本项目仍处于快速开发阶段。功能、接口、数据结构和部署方式可能随时迭代，且不保证
-> 现有功能的可用性、稳定性或向后兼容性。请勿将当前版本用于生产环境、关键通信或其他
-> 无法容忍服务中断和数据丢失的场景；升级或重建前请自行备份数据。
+> Docker Compose 是 Simplus 唯一受支持的正式部署形态，但当前 `v0.1.1` 仍是
+> Pre-release 部署候选，只适合受控评估。请勿用于关键通信或其他无法容忍服务中断、
+> 数据丢失的场景；升级或重建前必须自行备份数据。
 
 ## 当前状态
 
@@ -18,16 +18,17 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 `agent` 和 `netd` 三个镜像划分管理面、硬件访问与网络权限；Compose 中的 `app` 服务
 运行 control 镜像，并由 `data-init` 和 `bootstrap` 完成数据目录初始化及首次管理员创建。
 
-容器部署已经在 Debian 13/amd64 开发虚拟机完成镜像构建、隔离 smoke、真实模组发现、
-Mihomo、Host VoWiFi 和单段自号码短信回环验证；clean Debian 虚拟机上的完整安装、升级
-与卸载生命周期仍待验收。因此 Docker Compose 是唯一受支持的生产部署方式，但当前仍
-属于部署候选，而不是稳定发布版本。
+容器部署已经在 Debian 13/amd64 开发宿主完成镜像与隔离 smoke，并以 `v0.1.1` Release
+部署包和 GHCR 镜像完成有数据切换、回滚演练及最终健康、摘要、挂载验收。本次切换未执行
+HIL；真实模组发现、Mihomo、Host VoWiFi 和单段自号码短信回环另有独立受控证据。这不是
+clean VM 验证，完整安装、升级和卸载生命周期仍待验收，因此当前不是稳定发布版本。
 
 ## 当前能力
 
 - Go、SQLite，以及由 Vite、React Router、直接 Ant Design 和 TanStack Query 组成的管理后台；
 - 安装时生成唯一管理员和随机初始密码；
-- Simulator 中完整验证短信、电话、数字音频和 eUICC Profile 管理交互；
+- Simulator 中完整验证短信、电话、数字音频和 eUICC Profile 管理交互；这些能力不会
+  在 hardware backend 不可用时伪装成真实硬件成功；
 - QDC507 与 ML307A 的类型化硬件识别、固定端点角色和只读状态探测；
 - QDC507 经受控 HIL 验收并装配到 production Agent 的原生蜂窝短信收发；
 - Mihomo core、订阅、国家分组、共享 DoH、TPROXY 生命周期和 Zashboard 管理；
@@ -39,57 +40,78 @@ Mihomo、Host VoWiFi 和单段自号码短信回环验证；clean Debian 虚拟�
 eUICC 切换及其他蜂窝通信仍未开放。默认 Agent 不提供任意
 AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独立实现、验证和明确授权。
 
-## Docker Compose 部署
+## 5 分钟快速开始
 
 当前支持边界为 Debian 13、Linux amd64、rootful Docker Engine 和 Docker Compose
 2.24 或更新版本。Docker Desktop、Podman、ARM64、rootless Docker、user namespace
 remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信任局域网，不能直接暴露
 到公网。
 
-生产安装不需要克隆源码或在宿主构建镜像。不可移动的 `v0.1.0` 已保留为不完整
-Pre-release：部署/来源资产发布成功，但镜像发布在推送前失败，因此不得安装。替代版本
-`v0.1.1` 已完整发布为部署候选，并从未登录 GHCR 的环境通过三镜像 inspect/pull；它仍
-没有 clean-VM 生命周期证据，不能提升为稳定版。版本化部署包及校验文件位于：
+当前可安装候选是 `v0.1.1`；不要使用 `v0.1.0`、`latest` 或生产机本地构建的镜像。
+生产安装不需要克隆源码，也不需要逐个下载 Release 中的源码包或其他发布材料。安装者
+实际只需下载一个 `simplus-compose-*.tar.gz` 部署归档和它的一个 `.sha256` 校验文件；
+三个 GHCR 镜像稍后由 `docker compose pull` 自动拉取。先确认宿主符合支持边界并取得
+ttyUSB 设备的数字 GID：
+
+```bash
+test "$(dpkg --print-architecture)" = amd64
+. /etc/os-release && test "$ID" = debian && test "$VERSION_ID" = 13
+docker version
+docker compose version
+stat -c '%g' /dev/ttyUSB0
+```
+
+将 `/dev/ttyUSB0` 换成目标模组实际的 ttyUSB 节点。下载并校验部署包后，把内容安装到
+持久目录 `/opt/simplus`，不要长期从 Downloads、`/tmp` 或其他临时解包目录运行：
 
 ```bash
 version=v0.1.1
 base="https://github.com/leonfox28/simplus/releases/download/$version"
-curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
-curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
-sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256"
-tar -xzf "simplus-compose-$version-linux-amd64.tar.gz"
-cd "simplus-compose-$version-linux-amd64"
-cp .env.example .env
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz" &&
+  curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
+  sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
+  sudo mkdir -m 0755 /opt/simplus &&
+  sudo chown "$(id -u):$(id -g)" /opt/simplus &&
+  tar -xzf "simplus-compose-$version-linux-amd64.tar.gz" \
+    -C /opt/simplus --strip-components=1 &&
+  cd /opt/simplus &&
+  cp .env.example .env
 ```
 
-审阅脚本和 `.env` 后，完成一次性宿主准备、只读检查并拉取部署包写死版本的三个 GHCR
-镜像；不要使用 `latest`，也不要在 `.env` 中增加镜像 tag：
+命令链会在下载、校验或创建目录失败时停止；如果 `/opt/simplus` 已存在，请按下方链接的
+生命周期说明升级已有实例，不要把全新安装覆盖到该目录。
+
+部署归档内的 `compose.yaml` 和 `.env.example` 是运行入口；宿主准备/检查脚本、简明说明、
+版本信息、许可证和第三方 notices 随同归档提供，用于保持同版本的安全检查和合规材料，
+不代表还要下载多套安装包。
+
+启动前编辑 `.env` 中的 `SIMPLUS_HTTP_PORT`、`SIMPLUS_CONTROLLER_PORT` 和
+`SIMPLUS_DEVICE_GID`。`SIMPLUS_DEVICE_GID` 必须与上面 `stat` 得到的数字一致；Debian
+的 `dialout` 通常为 `20`，但应以实际设备为准。生产镜像版本由部署包固定，不要增加
+镜像 tag 变量。
+
+持久数据将写入 `/opt/simplus/data/core` 和 `/opt/simplus/data/agent`。这些目录包含
+数据库、管理员状态和运行数据；请在升级或恢复前停止写入并完整备份 `/opt/simplus/data`。
+确认数据位置后，审阅并执行宿主准备脚本，再渲染、拉取和启动：
 
 ```bash
-sudo bash prepare-container-host.sh
-bash check-container-host.sh "$PWD"
-docker compose config --quiet
-docker compose pull
-docker compose up -d
-docker compose ps
-docker compose logs bootstrap
+sudo bash prepare-container-host.sh &&
+  bash check-container-host.sh "$PWD" &&
+  docker compose config --quiet &&
+  docker compose pull &&
+  docker compose up -d &&
+  docker compose wait bootstrap &&
+  docker compose ps &&
+  docker compose logs bootstrap
 ```
 
-`SIMPLUS_DEVICE_GID` 必须与宿主 ttyUSB 设备所属组的数字 GID 一致；Debian 的 `dialout`
-通常为 `20`。`bootstrap` 只在全新实例首次启动时输出 `simplus_admin` 的随机密码，请立即
-保存并在首次登录后修改。管理后台默认位于 `http://<host-lan-ip>:8080`。
+`bootstrap` 只在全新实例首次启动时输出 `simplus_admin` 的一次性随机初始密码，请立即
+保存并在首次登录后修改。已有实例重建时不会覆盖密码，也不会再次输出原密码。管理后台
+默认位于 `http://<host-lan-ip>:8080`。
 
-持久数据保存在 Compose 文件旁的 `./data/core` 和 `./data/agent`。`docker compose down`
-会删除容器和临时运行对象，但保留这些目录；容器部署不会自动读取或迁移旧原生安装的
-`/var/lib/simplus` 数据。
-
-`v0.1.1` 三个 GHCR package 已在空 Docker 凭据环境通过匿名 `pull`。未来首次发布的新
-package 仍须逐一确认匿名访问；若保持 private，仓库所有者需显式改为 public，且该变更
-不可恢复为 private。发布包、对应源码和 `simplus-images-v0.1.1.json` digest 清单均保留
-在同一 Pre-release；任一资产缺失时不要回退到生产机本地构建。
-
-完整的宿主要求、权限模型、生命周期、更新方式和故障处理见
-[Docker Compose 生产部署](docs/installation.md)。
+完整的升级、备份、回滚、权限、遗留数据和故障处理见
+[生产部署与生命周期](docs/installation.md)，证据等级见
+[兼容性与验证边界](docs/compatibility.md)。
 
 ## 本地开发
 
@@ -118,7 +140,7 @@ make dev-sim
 - [兼容性与验证边界](docs/compatibility.md)
 - [通用排障指南](docs/troubleshooting.md)
 - [公开资料与隐私边界](docs/privacy-and-publication.md)
-- [安装与卸载](docs/installation.md)
+- [生产部署与生命周期](docs/installation.md)
 
 ## 许可证
 
