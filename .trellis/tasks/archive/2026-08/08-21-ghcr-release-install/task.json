@@ -3,7 +3,7 @@
   "name": "ghcr-release-install",
   "title": "GHCR release installation",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "infra,docs",
   "package": "core",
@@ -11,7 +11,7 @@
   "creator": "Leon",
   "assignee": "Leon",
   "createdAt": "2026-08-21",
-  "completedAt": null,
+  "completedAt": "2026-08-21",
   "branch": "docs/v0-1-1-release-evidence",
   "base_branch": "main",
   "worktree_path": null,
@@ -27,6 +27,8 @@
     "incomplete_release_tag": "v0.1.0",
     "initial_merge_commit": "d7aaa34aeb6936f3683f37bacbef71ca9a013f57",
     "initial_pr_url": "https://github.com/leonfox28/simplus/pull/5",
+    "evidence_pr_url": "https://github.com/leonfox28/simplus/pull/7",
+    "evidence_merge_commit": "bd09718f07e1026843da22bc1f69bbe6b0f52c74",
     "release_run": 32480362514,
     "release_url": "https://github.com/leonfox28/simplus/releases/tag/v0.1.1"
   }
