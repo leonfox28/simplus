@@ -575,3 +575,25 @@ Migrated the local Simplus Compose deployment from development images to the ver
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: Improve production onboarding docs
+
+**Date**: 2026-08-22
+**Task**: Improve production onboarding docs
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Clarified the single deployment bundle plus checksum workflow, durable /opt/simplus installation, fail-closed lifecycle commands, bootstrap completion, and sanitized existing-host evidence without changing immutable v0.1.1 assets.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e68b255` | (see git log) |
+
+### Status
+
+[OK] **Completed**
