@@ -553,3 +553,25 @@ Published the deterministic Release-bundle/GHCR installation flow; preserved the
 ### Next Steps
 
 - Complete the separately scoped clean Debian VM Compose lifecycle validation before claiming stable Runtime evidence.
+
+
+## Session 24: Local production container cutover
+
+**Date**: 2026-08-21
+**Task**: Local production container cutover
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Migrated the local Simplus Compose deployment from development images to the verified v0.1.1 GHCR release using a stopped snapshot restored into the production data root. Preserved source state and private rollback copies, verified health, public digests and exact mounts, and documented authoritative rollback-gate discipline.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b76a687` | (see git log) |
+
+### Status
+
+[OK] **Completed**
