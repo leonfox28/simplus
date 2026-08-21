@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Defines progressive disclosure and the canonical owners for root README, installation, compatibility, handoff, and release-facing documentation."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Constrains the new local-deployment conclusion to a sanitized evidence statement and prevents private host/runtime material from entering public docs."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Provides the supported release-bundle, persistent-data, host-preparation, lifecycle, and evidence boundaries that onboarding commands must preserve."}
+{"file":".trellis/tasks/archive/2026-08/08-21-migrate-local-production/research/current-state.md","reason":"Provides the already-sanitized observed deployment baseline without requiring rereading private runtime evidence."}

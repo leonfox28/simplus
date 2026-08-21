@@ -1,0 +1,3 @@
+{"file":".trellis/spec/core/docs/documentation-ownership.md","reason":"Review that the root README remains an entry point and canonical operational/evidence details stay in their owning documents."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Review the final public text for private deployment details, credentials, identities, topology, logs, or overclaimed evidence."}
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Review install commands, data paths, image/version behavior, permissions, and lifecycle claims against the production container contract."}
