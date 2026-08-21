@@ -1,0 +1,28 @@
+{
+  "id": "ghcr-release-install",
+  "name": "ghcr-release-install",
+  "title": "GHCR release installation",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "infra,docs",
+  "package": "core",
+  "priority": "P2",
+  "creator": "Leon",
+  "assignee": "Leon",
+  "createdAt": "2026-08-21",
+  "completedAt": null,
+  "branch": "feat/ghcr-release-install",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "release_tag": "v0.1.0"
+  }
+}

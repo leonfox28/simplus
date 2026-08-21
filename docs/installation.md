@@ -3,10 +3,11 @@
 ## 当前状态
 
 Docker Compose 是 Simplus 唯一受支持的生产部署方式，并保持 `simplusd`、`simplus-agent`、
-`simplus-netd` 三个权限边界。容器定义、镜像构建、宿主准备、数据初始化、typed
-healthcheck 和发布 workflow 已进入仓库；开发 VM 已完成真实硬件容器业务 HIL，但
-clean Debian VM 生命周期尚未验收，因此当前仍属于可审查的部署候选，而不是稳定发布
-版本。
+`simplus-netd` 三个权限边界。生产安装接口是 GitHub Pre-release 中的版本化部署包和
+GHCR 镜像，不要求源码 checkout、Git、Go、Node、pnpm、Make 或本地 `docker build`。
+容器定义、镜像构建、宿主准备、数据初始化、typed healthcheck 和发布 workflow 已进入
+仓库；开发 VM 已完成真实硬件容器业务 HIL，但 clean Debian VM 生命周期尚未验收，
+因此当前仍属于可审查的部署候选，而不是稳定发布版本。
 
 三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发 VM 完成
 smoke；该证据验证镜像、权限、netd preflight、bootstrap、Web 登录和数据保留重建，
@@ -32,14 +33,42 @@ Host VoWiFi 注册和单段自号码短信回环 HIL；该证据没有请求 RF 
 Docker Engine 的安装按 [Docker 官方 Debian 指南](https://docs.docker.com/engine/install/debian/)
 完成；Simplus 不替用户安装或修改 Docker daemon。
 
+## 下载部署包
+
+每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。下面以首个部署候选 `v0.1.0`
+为例；版本变量必须同时决定下载目录和文件名，不要改为滚动的 `latest`：
+
+```bash
+version=v0.1.0
+base="https://github.com/leonfox28/simplus/releases/download/$version"
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
+curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
+sha256sum -c "simplus-compose-$version-linux-amd64.tar.gz.sha256"
+tar -xzf "simplus-compose-$version-linux-amd64.tar.gz"
+cd "simplus-compose-$version-linux-amd64"
+cp .env.example .env
+```
+
+归档只包含写死同版本 GHCR tag 的 `compose.yaml`、三项安装参数示例、两条宿主脚本、
+简明说明、版本/commit 信息、根许可证和第三方 notices。校验必须在解包前完成；不要使用
+`curl | sh`。编辑 `.env` 时只设置 `SIMPLUS_HTTP_PORT`、`SIMPLUS_CONTROLLER_PORT` 和
+`SIMPLUS_DEVICE_GID`，生产安装不接受镜像版本变量。
+
+tag workflow 会先把部署包、strongSwan 包/对应源码和 Mihomo 对应源码发布到同一
+GitHub Pre-release，随后才推送三张镜像。三个 package 首次生成时默认 private，必须由
+仓库所有者逐个改为 public 并完成匿名 pull 验证；该 visibility 变更不能再恢复为
+private，在这一步完成前，部署候选不能宣称可匿名安装。Release 中的
+`simplus-images-v0.1.0.json` 记录实际 digest，供发布后审计，Compose 仍引用不可移动
+的版本 tag。
+
 ## 一次性宿主准备
 
-宿主必须在每次开机时加载 `option`，但不在宿主写动态 USB ID。仓库提供的脚本只创建
+宿主必须在每次开机时加载 `option`，但不在宿主写动态 USB ID。部署包中的脚本只创建
 模块加载配置并执行本次 `modprobe`：
 
 ```bash
-sudo bash scripts/release/prepare-container-host.sh
-bash scripts/release/check-container-host.sh "$PWD"
+sudo bash prepare-container-host.sh
+bash check-container-host.sh "$PWD"
 ```
 
 等价的持久配置是：
@@ -60,16 +89,12 @@ Agent，避免它们在当前或下次启动时与 Compose 争用模组、端口
 
 ## 启动全新实例
 
-正式部署使用一个已经发布的固定 tag。仓库模板默认 `v0.1.0`；其他版本通过环境变量
-覆盖，不要使用 `latest`。在首个 tag 尚未发布的开发验收阶段，先执行
-`make container-build CONTAINER_IMAGE_TAG=dev`，并在以下命令中使用 `dev`；这不等于
-正式发布证据。
+部署包的 Compose 已固定为同一 Release tag，不通过环境变量覆盖版本。确认 `.env` 中
+端口和设备 GID 后先渲染并拉取；若 GHCR 尚未公开，应停止并等待仓库所有者完成可见性
+门禁，不要在生产机本地构建替代镜像。
 
 ```bash
-export SIMPLUS_IMAGE_TAG=v0.1.0
-export SIMPLUS_HTTP_PORT=8080
-export SIMPLUS_CONTROLLER_PORT=19090
-export SIMPLUS_DEVICE_GID=20
+docker compose config --quiet
 docker compose pull
 docker compose up -d
 docker compose ps
@@ -114,13 +139,24 @@ docker compose ps
 docker compose logs agent netd app
 ```
 
-更新到另一个已发布固定 tag：
+升级前停止写入并备份整个 `./data`。下载并校验新版部署包，在临时目录解包；保留当前
+部署根的 `.env` 和 `data/`，只用新版归档中的八个受管文件替换当前版本，然后拉取并
+重建容器：
 
 ```bash
-export SIMPLUS_IMAGE_TAG=<published-version>
+new_bundle=/path/to/verified/simplus-compose-<new-version>-linux-amd64
+for file in compose.yaml .env.example prepare-container-host.sh check-container-host.sh README.md VERSION LICENSE THIRD_PARTY_NOTICES.md; do
+  install -m 0644 "$new_bundle/$file" "$file"
+done
+chmod 0755 prepare-container-host.sh check-container-host.sh
+docker compose config --quiet
 docker compose pull
 docker compose up -d
 ```
+
+上面的路径必须指向已经通过 SHA-256 校验的新归档；脚本的最终执行权限以 `chmod` 恢复。
+数据库迁移只保证向前进行。仅把 Compose 或镜像 tag 切回旧版本不构成安全降级；只有已
+确认旧版本 schema 兼容，或恢复了升级前备份时，才可另行制定回退步骤。
 
 停止并删除容器、bridge 和临时运行对象，同时保留 bind-mounted 数据：
 
@@ -150,6 +186,8 @@ netd 启动时创建临时 namespace/veth/nft/XFRM 探针并立即清理。探�
 ## 常见启动失败
 
 - `option1/new_id` 不存在：重新运行宿主准备脚本，并确认当前内核提供 option 模块；
+- GHCR 返回 denied/not found：确认该版本 Release 资产完整，并等待仓库所有者把三个
+  package 全部改为 public；不要改用 `latest` 或生产机本地构建；
 - Agent 不健康：检查 ttyUSB 的 GID、device cgroup、ModemManager 占用和 USB 枚举；
 - netd preflight 失败：检查 rootful Docker、AppArmor 设置和宿主内核的 veth、nft
   TPROXY、XFRM 支持；不要改为 privileged/host network 掩盖问题；

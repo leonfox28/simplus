@@ -99,12 +99,19 @@ checks that boundary, active or enabled legacy/development service conflicts,
 module loading and loads `option`, though it does not write a USB ID. Run it
 only with explicit deployment authorization.
 
-`make container-build` builds the three images and `make container-config`
-renders Compose. Starting Compose maps host devices and creates runtime
-network objects; it is deployment/HIL-adjacent and is not authorized merely by
-a request to lint or build container files. The host check must reject an
-active or enabled legacy production unit or `simplus-agent-dev` before Compose
-can own the modem and ports (`docs/installation.md`).
+Production administrators download a versioned GitHub Pre-release deployment
+bundle and pull its literal-tag GHCR images. They do not clone the source tree
+or build images locally. The root `compose.yaml`, `make container-build`, and
+`make container-config CONTAINER_IMAGE_TAG=dev` remain source-development
+validation interfaces only; the source Compose must not default to a production
+version.
+
+Starting Compose maps host devices and creates runtime network objects; it is
+deployment/HIL-adjacent and is not authorized merely by a request to lint,
+build, package, publish, inspect, or pull container artifacts. The host check
+must reject an active or enabled legacy production unit or
+`simplus-agent-dev` before Compose can own the modem and ports
+(`docs/installation.md`).
 
 ## Scenario: Container-only production and legacy service exclusion
 
@@ -121,11 +128,17 @@ registration path.
 - Container-only driver registration: `simplus-agent register-option-driver`,
   invoked by `containers/agent-entrypoint.sh`.
 - No supported native production bundle/build/install/uninstall command exists.
+- Container release bundle:
+  `scripts/release/build-container-release-bundle.sh <vX.Y.Z> <40-lowercase-hex-commit> <source-date-epoch> <existing-output-directory>`.
 
 ### 3. Contracts
 
 - Compose is the only production deployment owner; native Go/Node development,
   Simulator and `simplus-agent-dev` do not become production alternatives.
+- The production installation input is the versioned Release bundle. Its
+  Compose contains literal `ghcr.io/leonfox28/simplus-{control,agent,netd}:vX.Y.Z`
+  references; only the source-development Compose accepts
+  `SIMPLUS_IMAGE_TAG`.
 - Host preparation may install the fixed `option` module-load configuration and
   run `modprobe option`; it never writes a USB ID.
 - Host preflight rejects any active **or enabled**

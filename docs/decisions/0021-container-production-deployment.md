@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-06
 
-## 实施状态（2026-08-14）
+## 实施状态（2026-08-21）
 
 第 8 项约定的容器业务 HIL 条件已经满足，仓库已退出原生 Debian production bundle、
 安装器、卸载器与型号专用驱动绑定脚本；Docker Compose 现为唯一受支持的 production
@@ -11,6 +11,11 @@
 周期仍待验收，不能沿用旧原生 systemd 的 Runtime 结论。遗留私有 `/var/lib` 状态不被
 读取、迁移或删除；本机原生 Go/Node 开发、受限 `simplus-agent-dev` HIL 和 QDC507 原生
 蜂窝短信含义均不受影响。
+
+生产安装接口进一步收敛为 GitHub Pre-release 中的版本化 `linux/amd64` 部署包和 GHCR
+三镜像：管理员不再为生产部署克隆源码或本地构建。首个 `v0.1.0` 仍是部署候选；三个
+首次 GHCR package 必须由仓库所有者显式改为 public，并取得匿名 pull 证据后，才能
+宣称该候选可匿名安装。该发布变化不替代仍待完成的 clean-VM 生命周期验收。
 
 ## 背景
 
@@ -57,6 +62,11 @@ Simulator 或单元测试搬进开发容器的理由。
 8. 容器 HIL 通过前保留原生 production 安装器作为回退，但二者不得同时占用端口或
    模组。验收后 Compose 成为唯一正式部署方式，原生生产安装脚本退出默认发布；不
    删除本地开发 Agent 工作流。
+9. 正式安装使用严格 `vX.Y.Z` tag 生成的确定性部署包；包内 Compose 写死同版本
+   `ghcr.io/leonfox28/simplus-{control,agent,netd}` 引用，`.env` 只配置两个监听端口和
+   ttyUSB 数字 GID。tag workflow 必须先把部署包、许可证及对应源码发布为 Pre-release
+   资产，再推送 `linux/amd64` 镜像，最后记录三个实际 digest。PR 和手动 workflow 只
+   构建验证；不发布 `latest`、`main` 或分支滚动 tag。
 
 ## 后果
 
@@ -65,9 +75,11 @@ Simulator 或单元测试搬进开发容器的理由。
 - netd 仍是高权限组件，但权限和网络对象被限制在独立容器，app 与 Agent 不随之提权；
 - 固定 UID、设备 major 和 Debian 运行 ABI 成为首版容器兼容性的一部分，新增架构、
   rootless/Podman、SELinux 或新设备类型都需要独立设计与证据；
-- Compose 文件和镜像标签成为正式安装接口，业务 API、Line、模组、短信和 VoWiFi
-  契约不因部署方式改变；
+- 版本化部署包和其中写死的镜像标签成为正式安装接口；源码 Compose 的 tag 参数化只
+  服务开发验证。业务 API、Line、模组、短信和 VoWiFi 契约不因部署方式改变；
 - netd 镜像中的 Mihomo 版本和压缩/展开摘要是受审查的发布输入；对应 GPL-3.0 源码
   归档必须在发布镜像前验证，并随相同 tag 的 GitHub Release 提供；
+- 发布失败保持 Pre-release，不覆盖内容不同的同名资产，也不移动已经发布的 tag；代码
+  修复使用新的 patch 版本。数据库只保证向前迁移，镜像回退不等于数据安全降级；
 - 在 clean VM 和真实硬件完成容器验收前，只能声明实现与自动化 contract 证据，不能
   沿用原生 systemd 的 Runtime/HIL 结论。

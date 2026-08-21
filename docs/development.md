@@ -142,23 +142,28 @@ make check-container-files
 go test ./internal/containercontract
 ```
 
-开发机安装 Docker 后，可以构建三个生产目标并渲染 Compose：
+开发机安装 Docker 后，可以构建三个 production target 并用显式开发 tag 渲染源码
+Compose 模板：
 
 ```bash
 make container-build CONTAINER_IMAGE_TAG=dev
 make container-config CONTAINER_IMAGE_TAG=dev
 ```
 
-该过程生成 `simplus-control`、`simplus-agent` 和 `simplus-netd`，不会生成 dev image。
-Compose 真实启动会访问 host USB/sysfs 并为 netd 创建网络对象，必须先按
+该过程生成本地 `simplus-control`、`simplus-agent` 和 `simplus-netd` 验证镜像，不会
+生成通用 dev image，也不是生产安装回退。源码 `compose.yaml` 必须显式提供开发 tag；
+版本化 Release 部署包中的 Compose 则由构建器写死同版本 GHCR tag，生产用户不通过
+`.env` 选择镜像版本。Compose 真实启动会访问 host USB/sysfs 并为 netd 创建网络对象，必须先按
 [`installation.md`](installation.md) 完成宿主准备，并停止本机 `simplus-agent-dev`
 及遗留 production 服务，同时禁用对应 unit，避免它们在重启后争用资源。单纯构建或
 `docker compose config` 不执行 RF、SIM AKA、VoWiFi、短信或电话动作。
 
-基础镜像使用仓库固定的 Go/Node/Debian tag 与 manifest digest。正式 tag workflow
-只发布 `linux/amd64` GHCR 镜像，并把 strongSwan 插件 Debian 包、对应源码及镜像内
-固定 Mihomo 的校验后 GPL 源码附加到同一 GitHub Release；普通 CI 仍由 runner 上的
-原生 Go/Node 工具执行。
+基础镜像使用仓库固定的 Go/Node/Debian tag 与 manifest digest。PR 和手动容器 workflow
+只构建三张 `linux/amd64` 镜像及部署包合同，不推送镜像；只有严格 `vX.Y.Z` tag 才先
+创建 GitHub Pre-release 并发布部署包、strongSwan 插件 Debian 包/对应源码和镜像内
+固定 Mihomo 的校验后 GPL 源码，再推送同 tag GHCR 镜像。最后的
+`simplus-images-<tag>.json` 记录三张镜像的实际 digest。普通 CI 仍由 runner 上的原生
+Go/Node 工具执行。
 
 ## 6. 受控 Host VoWiFi HIL
 
