@@ -12,20 +12,22 @@
   "assignee": "Leon",
   "createdAt": "2026-08-21",
   "completedAt": null,
-  "branch": "fix/ghcr-head-probe",
+  "branch": "docs/v0-1-1-release-evidence",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "81d3f3ac3a7868ea39e90bb3533b599fd2939ccd",
+  "pr_url": "https://github.com/leonfox28/simplus/pull/6",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "v0.1.0 remains an incomplete immutable Pre-release. v0.1.1 completed release run 32480362514 and anonymous bundle/image verification.",
   "meta": {
     "release_tag": "v0.1.1",
     "incomplete_release_tag": "v0.1.0",
     "initial_merge_commit": "d7aaa34aeb6936f3683f37bacbef71ca9a013f57",
-    "initial_pr_url": "https://github.com/leonfox28/simplus/pull/5"
+    "initial_pr_url": "https://github.com/leonfox28/simplus/pull/5",
+    "release_run": 32480362514,
+    "release_url": "https://github.com/leonfox28/simplus/releases/tag/v0.1.1"
   }
 }

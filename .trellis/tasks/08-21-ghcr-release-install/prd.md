@@ -43,7 +43,8 @@ PR #5 在全部检查成功后以 `d7aaa34` 合并，并创建了不可移动的
   平台、完整 tag reference 和实际 `sha256` digest；本任务的完整清单应为
   `simplus-images-v0.1.1.json`。
 - 任一来源、资产或镜像步骤失败时不得把 GitHub Release 标记为稳定可用。
-- GitHub 首次生成的三个 private package 由仓库所有者显式改为 public；完成前不得宣告匿名安装可用。
+- 首次 package 必须逐一验证匿名访问；若保持 private，由仓库所有者显式改为 public，
+  完成前不得宣告匿名安装可用。
 
 ### R4 — Documentation and lifecycle
 
@@ -69,9 +70,9 @@ PR #5 在全部检查成功后以 `d7aaa34` 合并，并创建了不可移动的
 - [x] PR Actions 成功构建三个 target 但不推送；只有严格版本 tag 进入来源资产 → Pre-release → GHCR → image manifest 流程。
 - [x] `make check-container-files`、`go test ./internal/containercontract`、`make check-docs`、`make lint`、`make test`、`make security` 和 `git diff --check` 通过。
 - [x] 功能分支通过 PR #5 合并；`v0.1.0` workflow 成功生成 Pre-release/部署/源码资产，并在任何镜像推送前失败关闭，旧 tag 保持不可移动且不完整。
-- [ ] 修复分支通过 PR/CI 合并后，新合并提交的 `v0.1.1` workflow 成功生成完整 Pre-release、部署资产、源码资产、三个 GHCR 镜像和 digest manifest。
-- [ ] 三个 package 经所有者改为 public 后，无 GHCR 登录也能 inspect/pull `v0.1.1`，且 digest/OCI 元数据与 `simplus-images-v0.1.1.json` 一致。
-- [ ] 发布后仅执行解包、Compose config 和 pull 验证；不启动服务或接触真实硬件。
+- [x] 修复分支通过 PR #6/CI 合并后，新合并提交的 `v0.1.1` workflow 成功生成完整 Pre-release、部署资产、源码资产、三个 GHCR 镜像和 digest manifest。
+- [x] 三个 package 已可匿名访问；无 GHCR 登录也能 inspect/pull `v0.1.1`，且 digest/OCI 元数据与 `simplus-images-v0.1.1.json` 一致。
+- [x] 发布后仅执行解包、Compose config 和 pull 验证；未启动服务或接触真实硬件。
 
 ## Out of Scope
 

@@ -1,8 +1,8 @@
 # Simplus 当前开发交接
 
-> 更新：2026-08-14
+> 更新：2026-08-21
 >
-> 状态：V1 管理面、Vite/React Query 前端、持久模组/线路层、Host VoWiFi/SMS over IMS 与 QDC507 原生蜂窝短信纵切已完成；生产 Docker Compose 已在 Debian 13 开发 VM 完成三镜像构建和隔离 smoke，clean-VM 生命周期验收尚待完成。
+> 状态：V1 管理面、Vite/React Query 前端、持久模组/线路层、Host VoWiFi/SMS over IMS 与 QDC507 原生蜂窝短信纵切已完成；`v0.1.1` Pre-release 已提供匿名可拉取的三镜像与版本化部署包，clean-VM 生命周期验收尚待完成。
 
 本文只记录可以公开的代码状态、验证等级和下一步；现场与个人环境材料遵循 [`privacy-and-publication.md`](privacy-and-publication.md) 留在仓库外。产品范围以 [`product.md`](product.md) 为准，进程与安全不变量以 [`architecture.md`](architecture.md) 为准，任务状态以 [`plans/active/mvp.md`](plans/active/mvp.md) 为准。
 
@@ -22,6 +22,10 @@
 
 ### 容器部署候选
 
+- `v0.1.1` Pre-release 包含写死同版本 tag 的确定性 Compose 部署包、checksum、对应
+  strongSwan/Mihomo 来源资产和三镜像 digest manifest；在空 registry 凭据环境已完成
+  checksum、解包、Compose config、三镜像 OCI metadata/digest 核对和 pull，未执行
+  宿主准备、`compose up` 或 HIL；
 - 首版只面向 Debian 13/amd64、Compose 2.24+ 和 rootful、无 userns-remap 的 Docker；
   日常 Go/Node/pnpm 开发与 CI 不进入开发容器；
 - 宿主只持有 Docker、内核及开机加载的 `option`。Agent 容器精确映射 USB sysfs、

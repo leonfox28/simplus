@@ -47,9 +47,9 @@ Pre-release，但两个 registry manifest HEAD 调用错误使用 `curl --reques
 矩阵项均在任何镜像构建或推送前以 exit 18 失败，digest manifest 未生成。该 tag 和
 Pre-release 保持不完整，不重跑或补写；修复合并后用新 tag `v0.1.1` 完成首发。
 
-GitHub 首次创建的个人 GHCR package 默认 private，workflow 无法替代所有者的不可逆
-visibility 决策；`v0.1.1` 三个镜像完成后由所有者逐个改为 public，再从未登录 registry
-的环境执行 inspect/pull 验证。
+`v0.1.1` 实际发布后，三个 package 已可从未登录 registry 的空凭据环境 inspect/pull，
+因此没有执行额外的 visibility 修改。未来新 package 仍须逐一验证；若保持 private，
+workflow 无法替代所有者将其改为 public 的不可逆 visibility 决策。
 
 基础设施瞬时错误可对同一 tag/commit 重跑。此次失败需要改代码，所以不移动或复用
 `v0.1.0`，而是在 main 修复后使用 `v0.1.1`。首发保持 Pre-release，clean-VM 验收由
