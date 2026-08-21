@@ -180,6 +180,10 @@ assets, or production installation/upgrade instructions.
 - `contents: write` and `packages: write` remain job-scoped. Image builds keep
   the OCI source/version/revision/license labels, SBOM, provenance, and
   per-target cache scopes.
+- Registry manifest-existence probes use curl's real HEAD mode (`--head`) and
+  never `--request HEAD`. The latter changes the method but leaves curl
+  expecting a response body; GHCR can then produce exit 18 for a valid
+  bodyless HEAD response before the workflow can classify 200 versus 404.
 
 ### 4. Validation & Error Matrix
 
@@ -191,6 +195,7 @@ assets, or production installation/upgrade instructions.
 | an existing asset has different bytes | fail; never clobber it |
 | an existing image tag has different commit/platform/OCI metadata | fail before push; never move it |
 | a version tag appears after digest staging | fail before promotion; never overwrite the tag |
+| a registry existence probe uses `--request HEAD` instead of `--head` | contract tests fail; the release workflow must not depend on curl body-transfer semantics for HEAD |
 | one image build/push fails | Release remains a Pre-release and the digest manifest is not published |
 | digest artifact is missing, duplicated, malformed, or not `sha256:<64-lowercase-hex>` | manifest publication fails |
 | first GHCR packages are still private | do not claim anonymous installation; owner must make all three public and visibility cannot be reverted to private |
@@ -216,7 +221,8 @@ assets, or production installation/upgrade instructions.
   inputs.
 - Container workflow contracts assert the upstream/strict-tag gate,
   PR/manual `push: false`, source-before-image dependency, amd64, OCI labels,
-  SBOM/provenance, and immutable digest manifest shape.
+  SBOM/provenance, immutable digest manifest shape, exactly two real curl
+  `--head` probes, and absence of `--request HEAD`.
 - Run `make check-container-files`, `go test ./internal/containercontract`,
   `make container-config CONTAINER_IMAGE_TAG=dev`, `make check-docs`,
   `make lint`, `make test`, `make security`, and `git diff --check` before the

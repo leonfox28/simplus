@@ -9,6 +9,10 @@ GHCR 镜像，不要求源码 checkout、Git、Go、Node、pnpm、Make 或本地
 仓库；开发 VM 已完成真实硬件容器业务 HIL，但 clean Debian VM 生命周期尚未验收，
 因此当前仍属于可审查的部署候选，而不是稳定发布版本。
 
+不可移动的 `v0.1.0` 已保留为不完整 Pre-release：部署包及对应源码资产发布成功，GHCR
+manifest 探测随后在任何镜像构建/推送前失败，且没有生成 digest manifest。不要安装或
+补齐该版本；修复后的首个完整候选使用新 tag `v0.1.1`。
+
 三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发 VM 完成
 smoke；该证据验证镜像、权限、netd preflight、bootstrap、Web 登录和数据保留重建，
 不等于 clean-VM 或真实模组验收，也没有执行 RF、VoWiFi、短信或电话动作。
@@ -35,11 +39,11 @@ Docker Engine 的安装按 [Docker 官方 Debian 指南](https://docs.docker.com
 
 ## 下载部署包
 
-每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。下面以首个部署候选 `v0.1.0`
+每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。下面以替代部署候选 `v0.1.1`
 为例；版本变量必须同时决定下载目录和文件名，不要改为滚动的 `latest`：
 
 ```bash
-version=v0.1.0
+version=v0.1.1
 base="https://github.com/leonfox28/simplus/releases/download/$version"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
@@ -58,7 +62,7 @@ tag workflow 会先把部署包、strongSwan 包/对应源码和 Mihomo 对应�
 GitHub Pre-release，随后才推送三张镜像。三个 package 首次生成时默认 private，必须由
 仓库所有者逐个改为 public 并完成匿名 pull 验证；该 visibility 变更不能再恢复为
 private，在这一步完成前，部署候选不能宣称可匿名安装。Release 中的
-`simplus-images-v0.1.0.json` 记录实际 digest，供发布后审计，Compose 仍引用不可移动
+`simplus-images-v0.1.1.json` 记录实际 digest，供发布后审计，Compose 仍引用不可移动
 的版本 tag。
 
 ## 一次性宿主准备

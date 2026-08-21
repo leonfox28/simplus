@@ -46,12 +46,13 @@ AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独�
 remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信任局域网，不能直接暴露
 到公网。
 
-生产安装不需要克隆源码或在宿主构建镜像。首个计划发布的部署候选为 GitHub
-Pre-release `v0.1.0`；发布资产和三个公开 GHCR package 完整后，从该 Release 下载
-版本化部署包及校验文件：
+生产安装不需要克隆源码或在宿主构建镜像。不可移动的 `v0.1.0` 已保留为不完整
+Pre-release：部署/来源资产发布成功，但镜像发布在推送前失败，因此不得安装。首个完整
+部署候选改为 `v0.1.1`；只有发布资产和三个公开 GHCR package 全部完整后，才从该
+Release 下载版本化部署包及校验文件：
 
 ```bash
-version=v0.1.0
+version=v0.1.1
 base="https://github.com/leonfox28/simplus/releases/download/$version"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256"
@@ -83,7 +84,7 @@ docker compose logs bootstrap
 `/var/lib/simplus` 数据。
 
 三个 GHCR package 首次发布后需由仓库所有者显式改为 public，之后匿名 `pull` 才是有效
-安装证据。发布包、对应源码和 `simplus-images-v0.1.0.json` digest 清单均保留在同一
+安装证据。发布包、对应源码和 `simplus-images-v0.1.1.json` digest 清单均保留在同一
 Pre-release；任一资产缺失时不要回退到生产机本地构建。
 
 完整的宿主要求、权限模型、生命周期、更新方式和故障处理见

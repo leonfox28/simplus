@@ -12,7 +12,7 @@
   "assignee": "Leon",
   "createdAt": "2026-08-21",
   "completedAt": null,
-  "branch": "feat/ghcr-release-install",
+  "branch": "fix/ghcr-head-probe",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -23,6 +23,9 @@
   "relatedFiles": [],
   "notes": "",
   "meta": {
-    "release_tag": "v0.1.0"
+    "release_tag": "v0.1.1",
+    "incomplete_release_tag": "v0.1.0",
+    "initial_merge_commit": "d7aaa34aeb6936f3683f37bacbef71ca9a013f57",
+    "initial_pr_url": "https://github.com/leonfox28/simplus/pull/5"
   }
 }
