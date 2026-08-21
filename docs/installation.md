@@ -13,6 +13,11 @@ GHCR 镜像，不要求源码 checkout、Git、Go、Node、pnpm、Make 或本地
 manifest 探测随后在任何镜像构建/推送前失败，且没有生成 digest manifest。不要安装或
 补齐该版本；修复后的首个完整候选使用新 tag `v0.1.1`。
 
+`v0.1.1` 的八个 Release 资产、三张 `linux/amd64` 镜像和 digest manifest 已完整发布；
+未登录 GHCR 的空凭据环境已完成镜像 inspect、OCI metadata/digest 核对及解包后的
+Compose config/pull。该证据只验证发布与匿名分发，没有执行 `compose up`、宿主准备或
+HIL，也不替代 clean-VM 生命周期验收。
+
 三个 production target 和隔离无硬件 Compose 已在 Debian 13/amd64 开发 VM 完成
 smoke；该证据验证镜像、权限、netd preflight、bootstrap、Web 登录和数据保留重建，
 不等于 clean-VM 或真实模组验收，也没有执行 RF、VoWiFi、短信或电话动作。
@@ -59,9 +64,10 @@ cp .env.example .env
 `SIMPLUS_DEVICE_GID`，生产安装不接受镜像版本变量。
 
 tag workflow 会先把部署包、strongSwan 包/对应源码和 Mihomo 对应源码发布到同一
-GitHub Pre-release，随后才推送三张镜像。三个 package 首次生成时默认 private，必须由
-仓库所有者逐个改为 public 并完成匿名 pull 验证；该 visibility 变更不能再恢复为
-private，在这一步完成前，部署候选不能宣称可匿名安装。Release 中的
+GitHub Pre-release，随后才推送三张镜像。`v0.1.1` 三个 package 已可匿名访问；未来首次
+生成的新 package 仍须逐一验证，若保持 private，必须由仓库所有者改为 public，且该
+visibility 变更不能再恢复为 private。在匿名 pull 完成前，候选不能宣称可匿名安装。
+Release 中的
 `simplus-images-v0.1.1.json` 记录实际 digest，供发布后审计，Compose 仍引用不可移动
 的版本 tag。
 

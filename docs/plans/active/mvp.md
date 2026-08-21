@@ -199,10 +199,9 @@
   按部署包/对应源码 → 三张 GHCR 镜像 → digest manifest 的顺序保持 Pre-release；
 - [x] 保留不可移动但不完整的 `v0.1.0` Pre-release：部署/来源资产已发布，GHCR manifest
   探测在任何镜像构建或推送前失败，没有生成 digest manifest；不重跑、不补写该 tag；
-- [ ] 用修复后的新 tag `v0.1.1` 发布首个完整 Pre-release，由仓库所有者把三张首次
-  GHCR package 显式改为 public，并在未登录 registry 的环境核对匿名 pull、OCI
-  metadata、digest manifest 和解包后的 Compose config/pull；该项不得执行 `up`、
-  宿主准备或 HIL；
+- [x] 用修复后的新 tag `v0.1.1` 发布首个完整 Pre-release；三张 GHCR package 已可
+  匿名访问，并在未登录 registry 的环境核对 pull、OCI metadata、digest manifest 和
+  解包后的 Compose config/pull；该项未执行 `up`、宿主准备或 HIL；
 - [x] 保持日常开发、Simulator、Go/Web 测试和 CI 使用本机/runner 工具，不提供 dev
   image；保留受限 `simplus-agent-dev` 供本机 HIL；
 - [x] 在当前 Debian 13/amd64 开发 VM 构建三个 production target，并以隔离空
@@ -262,9 +261,6 @@
 8. 将 ePDG FQDN、IKE responder identity 和远端选择从当前已验证运营商接入 profile 中解耦，并分别完成其他运营商 HIL；动态 IMS Home Domain 本身不能作为多运营商兼容证据。
 9. 完成 Milestone 26 的 clean-VM Compose 生命周期验收；ARM64、rootless/userns、
    Podman、Docker Desktop 与 SELinux 发行版仍需独立设计和证据。
-10. 保留失败关闭的 `v0.1.0`，在修复合并提交上以 `v0.1.1` 完成 Pre-release/GHCR
-    首发和所有者 public visibility 门禁；后续仍不得移动或补写旧 tag。
-
 每项真实副作用都需要独立设计、最小实现、明确授权和与风险相称的 HIL；Web/API 不得暴露任意 AT/QMI、设备路径、网络命令或配置路径。
 
 ## 非目标

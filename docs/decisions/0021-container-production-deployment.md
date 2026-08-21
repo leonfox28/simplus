@@ -15,8 +15,9 @@
 生产安装接口进一步收敛为 GitHub Pre-release 中的版本化 `linux/amd64` 部署包和 GHCR
 三镜像：管理员不再为生产部署克隆源码或本地构建。不可移动的 `v0.1.0` 在来源资产发布
 后、任何镜像推送前失败并保持不完整 Pre-release；修复使用新 tag `v0.1.1`，不补写旧
-版本。三个首次 GHCR package 必须由仓库所有者显式改为 public，并取得匿名 pull 证据
-后，才能宣称新候选可匿名安装。该发布变化不替代仍待完成的 clean-VM 生命周期验收。
+版本。`v0.1.1` 三个 GHCR package、digest manifest 和八个 Release 资产已完整发布，
+并取得空凭据环境的匿名 inspect/pull 证据；未来 package 若保持 private，仍须由所有者
+显式改为 public。该发布变化不替代仍待完成的 clean-VM 生命周期验收。
 
 ## 背景
 

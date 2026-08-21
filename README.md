@@ -47,9 +47,9 @@ remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信�
 到公网。
 
 生产安装不需要克隆源码或在宿主构建镜像。不可移动的 `v0.1.0` 已保留为不完整
-Pre-release：部署/来源资产发布成功，但镜像发布在推送前失败，因此不得安装。首个完整
-部署候选改为 `v0.1.1`；只有发布资产和三个公开 GHCR package 全部完整后，才从该
-Release 下载版本化部署包及校验文件：
+Pre-release：部署/来源资产发布成功，但镜像发布在推送前失败，因此不得安装。替代版本
+`v0.1.1` 已完整发布为部署候选，并从未登录 GHCR 的环境通过三镜像 inspect/pull；它仍
+没有 clean-VM 生命周期证据，不能提升为稳定版。版本化部署包及校验文件位于：
 
 ```bash
 version=v0.1.1
@@ -83,9 +83,10 @@ docker compose logs bootstrap
 会删除容器和临时运行对象，但保留这些目录；容器部署不会自动读取或迁移旧原生安装的
 `/var/lib/simplus` 数据。
 
-三个 GHCR package 首次发布后需由仓库所有者显式改为 public，之后匿名 `pull` 才是有效
-安装证据。发布包、对应源码和 `simplus-images-v0.1.1.json` digest 清单均保留在同一
-Pre-release；任一资产缺失时不要回退到生产机本地构建。
+`v0.1.1` 三个 GHCR package 已在空 Docker 凭据环境通过匿名 `pull`。未来首次发布的新
+package 仍须逐一确认匿名访问；若保持 private，仓库所有者需显式改为 public，且该变更
+不可恢复为 private。发布包、对应源码和 `simplus-images-v0.1.1.json` digest 清单均保留
+在同一 Pre-release；任一资产缺失时不要回退到生产机本地构建。
 
 完整的宿主要求、权限模型、生命周期、更新方式和故障处理见
 [Docker Compose 生产部署](docs/installation.md)。

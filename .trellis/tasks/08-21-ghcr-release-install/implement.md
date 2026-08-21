@@ -33,10 +33,10 @@
 
 - [x] 对合并提交 `d7aaa34` 创建/推送不可移动的 `v0.1.0`；部署/来源资产发布成功，三个镜像 job 在构建/推送前失败，Release 保持不完整 Pre-release。
 - [x] 从 Actions 日志确认 `curl --request HEAD` 导致 exit 18；不重跑、移动或补写 `v0.1.0`，添加 `--head` 回归合同。
-- [ ] 修复分支经 PR/CI 合并后，对新合并提交创建并推送 `v0.1.1`，等待 containers workflow 完成。
-- [ ] 验证 `v0.1.1` Pre-release 部署包/checksum、strongSwan/Mihomo 来源资产、三个 GHCR tag 和 digest manifest。
-- [ ] 由仓库所有者把三个首次 package 改为 public；在无 GHCR 登录环境 inspect/pull 并核对 OCI metadata/digest。
-- [ ] 解包到临时目录，运行 checksum、`docker compose config --quiet` 和 `docker compose pull`；不得执行 up、宿主准备或 HIL。
+- [x] 修复 PR #6 的 6 个执行检查成功后，以 merge commit `81d3f3a` 合并并创建/推送 `v0.1.1`；containers run `32480362514` 全部成功。
+- [x] 验证 `v0.1.1` Pre-release 的八个部署/来源资产、checksum、三个 GHCR tag 和 digest manifest。
+- [x] 三个 package 已可匿名访问；在空 Docker 凭据环境 inspect 并核对单一 `linux/amd64`、OCI metadata 和三个 digest。
+- [x] 从临时目录匿名下载/校验/解包后运行 `docker compose config --quiet` 和 `docker compose pull`；未执行 up、宿主准备或 HIL。
 
 ## Rollback points
 
