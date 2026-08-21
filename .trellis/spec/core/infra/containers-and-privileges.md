@@ -228,3 +228,92 @@ Do not proceed from build/config to `docker compose up`, host preparation,
 clean-VM smoke, or hardware HIL without the task's explicit scope and the
 approval rules in
 `.trellis/spec/core/infra/hardware-and-hil-safety.md`.
+
+## Scenario: live Compose cutover acceptance and rollback gates
+
+### 1. Scope / Trigger
+
+Apply this contract when an authorized local deployment replaces a running
+Simplus Compose project, snapshots bind-mounted data, starts a versioned Release
+bundle, or automatically rolls back during the acceptance window.
+
+### 2. Signatures
+
+- Quiesce source: `docker compose -f <source-compose> down` without `-v`.
+- Start target: `docker compose -f <release-compose> up -d`.
+- Pre-start writer exclusion: running-container mount inspection plus a silent
+  root `lsof +D <source-data-root>` while source containers are stopped.
+- Post-start acceptance: safe Docker state, health, image/OCI label, Compose
+  label, and `.Mounts[].Source` inspection.
+
+### 3. Contracts
+
+- Freeze the authoritative acceptance commands during planning. A rollback trap
+  may wrap only those reviewed gates; exploratory diagnostics and extra
+  assertions run outside it and cannot stop a healthy deployment.
+- Prove snapshot/source and restore/snapshot equality while the source is
+  quiesced, before target startup. After startup, prove isolation with exact
+  target bind sources and the absence of source-config containers.
+- Do not use host `pgrep`/PID presence to distinguish a native Simplus process
+  after container startup: the host PID namespace normally exposes container
+  processes. Use systemd active/enabled checks before startup and Docker labels
+  after startup.
+- A rollback that restarts the source makes it live state again. Before another
+  cutover attempt, quarantine the failed target data, quiesce the source, and
+  create a new unique snapshot; never reuse the earlier cutover archive as the
+  current state.
+- Preserve failed target copies and every verified migration archive until a
+  separately authorized cleanup. Never use `down -v` or overwrite an existing
+  backup/quarantine path.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| reviewed pre-start bundle, host, writer, archive, or restore gate fails | keep/restart the source deployment; do not start target |
+| reviewed target health, image digest/OCI label, Compose label, or mount-source gate fails | stop target without `-v`, preserve evidence, restart source on its existing source-data tree |
+| ad-hoc diagnostic or an assertion absent from the approved plan fails | do not invoke the rollback trap; classify and review the diagnostic first |
+| host `pgrep` sees Simplus names after target startup | treat as ambiguous container-visible PIDs, not proof of a native conflict |
+| retry follows a rollback that restarted source | take a fresh stopped snapshot and restore; do not reuse the old archive |
+| new business writes may have reached target | stop automatic rollback and require an explicit data decision |
+
+### 5. Good / Base / Bad Cases
+
+- Good: stopped source has no open writer, snapshot and restore compare, target
+  uses the exact new bind paths/digests and becomes healthy -> accept target.
+- Base: a reviewed target gate fails before user writes -> automatic rollback
+  restores the healthy source; a later retry starts from a new snapshot.
+- Bad: add `pgrep -x simplusd` to a live-container acceptance script, let
+  `set -e` trigger rollback, then reuse an archive created before the restarted
+  source drifted.
+
+### 6. Tests Required
+
+- Review or fixture-test the rollback wrapper so only the named authoritative
+  gates can call rollback; diagnostic commands must not share its `ERR` trap.
+- Assert metadata inspection identifies containers by Compose config/service
+  labels and exact mount sources, not process names.
+- Exercise the retry branch with unique snapshot/quarantine paths and prove an
+  existing backup is never overwritten or deleted.
+- Keep real data filenames, contents, logs, credentials, identities, and
+  topology out of command output and repository artifacts.
+
+### 7. Wrong vs Correct
+
+Wrong: add an unreviewed PID assertion after starting containers and bind every
+non-zero command to rollback:
+
+```bash
+trap rollback ERR
+docker compose up -d
+! pgrep -x simplusd
+```
+
+Correct: make the reviewed Docker metadata gates authoritative and keep optional
+diagnostics outside the rollback wrapper:
+
+```bash
+docker compose up -d
+verify_reviewed_health_images_labels_and_mounts || rollback
+# Optional diagnostics report separately and never widen acceptance mid-cutover.
+```
