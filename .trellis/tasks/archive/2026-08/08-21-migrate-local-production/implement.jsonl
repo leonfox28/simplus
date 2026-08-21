@@ -1,0 +1,3 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Defines the production Compose shape, fixed data mounts, host preparation, release-bundle interface, and no-privilege-expansion boundary."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Defines the exact authorization and privacy boundary for Compose hardware startup and forbids unintended RF, messaging, SIM, or HIL actions."}
+{"file":".trellis/tasks/08-21-migrate-local-production/research/current-state.md","reason":"Provides the sanitized observed host, running-container, data-layout, and target-path facts needed for the cutover."}

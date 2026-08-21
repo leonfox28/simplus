@@ -1,0 +1,4 @@
+{"file":".trellis/spec/core/infra/containers-and-privileges.md","reason":"Review the final deployment against the fixed image, UID, mount, host-check, lifecycle, and rollback contracts."}
+{"file":".trellis/spec/core/infra/hardware-and-hil-safety.md","reason":"Review that execution stayed inside authorized production startup and did not expose or trigger prohibited hardware/private evidence paths."}
+{"file":".trellis/spec/core/docs/privacy-and-publication.md","reason":"Review all committed task and journal artifacts for credentials, identities, topology, raw logs, databases, or other private deployment evidence."}
+{"file":".trellis/tasks/08-21-migrate-local-production/research/current-state.md","reason":"Compare post-cutover metadata with the sanitized baseline without rereading private runtime state."}
