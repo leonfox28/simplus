@@ -732,6 +732,128 @@ if err != nil {
 }
 ```
 
+## Scenario: Mihomo subscription refresh compatibility and bounded failures
+
+### 1. Scope / Trigger
+
+Apply this contract when changing Mihomo subscription download headers,
+`SubscriptionService.Refresh`, subscription artifact generation, refresh-state
+persistence, `httpapi.writeMihomoSubscriptionError`, or the Web message for a
+refresh failure. Subscription URLs can contain credentials, while provider
+responses and transport errors can contain private topology or account detail;
+none of those values may cross the application boundary in an error or log.
+
+### 2. Signatures
+
+The application and HTTP boundary retain these shapes:
+
+```go
+const subscriptionUserAgent = "mihomo"
+
+type SubscriptionRefreshError struct {
+    Code string
+}
+
+func (*SubscriptionService) Refresh(
+    context.Context,
+    string,
+) (SubscriptionView, []domain.Node, error)
+
+func (*SubscriptionRefreshError) Error() string
+```
+
+The authenticated mutation remains
+`POST /api/v1/mihomo/subscriptions/{subscriptionID}/refresh`. A recognized
+`*SubscriptionRefreshError` maps to HTTP 502 with
+`MIHOMO_SUBSCRIPTION_REFRESH_FAILED` and `retryable: true`; no OpenAPI shape or
+generated source changes for the stage-specific application code.
+
+### 3. Contracts
+
+- Every subscription fetch sends exactly `User-Agent: mihomo` plus the fixed
+  existing `Accept` value. Do not add a hostname branch, version spoofing,
+  fallback User-Agent, credential rewrite, or automatic retry.
+- The default client remains proxy-free and HTTPS-only, rejects unsafe literal
+  or resolved addresses, revalidates every redirect, follows at most three
+  redirects, and retains its 10-second TLS handshake, 20-second response-header,
+  30-second total and 5 MiB response limits.
+- Fetch/request/status/read/size, parse, missing artifact manager, artifact
+  generation and artifact validation failures call the common failure path
+  with only their existing stable `SUBSCRIPTION_*` code. The typed error does
+  not wrap or retain the original URL, transport error, provider body, parsed
+  node, command output or filesystem path.
+- The failure path persists `failed`, the stable code and refresh timestamp
+  before returning `SubscriptionRefreshError`. If that write fails, return the
+  storage error instead; do not report that failure state was recorded.
+- Artifact construction remains before node replacement. A rejected download
+  or failed parse/build must not replace the stored nodes or last-known-good
+  immutable artifact.
+- HTTP identifies refresh failures with `errors.As`, logs only `error_code`,
+  and emits the existing bounded 502 response. Other storage failures retain
+  HTTP 500 / `MIHOMO_SUBSCRIPTION_PERSIST_FAILED` and the internal error log.
+- Web maps `MIHOMO_SUBSCRIPTION_REFRESH_FAILED` to bounded guidance about
+  subscription-source access or validity. It never renders an upstream status,
+  URL, credential, hostname or response body; the existing mutation
+  `onSettled` path clears its row-scoped busy state.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Invalid subscription ID/input | existing `ErrSubscriptionInvalid`; HTTP 400 |
+| Missing subscription | existing `ErrSubscriptionNotFound`; HTTP 404 |
+| Request construction, transport, timeout, non-200, read or size failure | persist `SUBSCRIPTION_FETCH_FAILED`; return bounded typed error; HTTP 502 |
+| YAML/base64 content cannot produce valid nodes | persist `SUBSCRIPTION_PARSE_FAILED`; return bounded typed error; HTTP 502 |
+| Artifact manager unavailable | persist `SUBSCRIPTION_CONFIG_UNAVAILABLE`; return bounded typed error; HTTP 502 |
+| Artifact generation fails | persist `SUBSCRIPTION_CONFIG_GENERATION_FAILED`; return bounded typed error; HTTP 502 |
+| Artifact validation fails with `ErrConfigValidationFailed` | persist `SUBSCRIPTION_CONFIG_VALIDATION_FAILED`; return bounded typed error; HTTP 502 |
+| Failure-state persistence fails | return the storage error; HTTP 500 `MIHOMO_SUBSCRIPTION_PERSIST_FAILED` |
+| Valid response and artifact | replace summarized nodes with `success / ""`; return the refreshed view and nodes |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a provider-neutral synthetic HTTPS request carries `mihomo`, produces
+  valid nodes, calls the artifact boundary once and replaces the node snapshot
+  with successful status.
+- Base: the provider rejects the request. The application persists only
+  `SUBSCRIPTION_FETCH_FAILED`, HTTP returns the existing 502 code, and Web
+  gives actionable source-validity guidance while retaining prior data.
+- Bad: retry with several browser/client identifiers, special-case a private
+  provider, use `strings.Contains(err.Error(), ...)` for HTTP mapping, or log a
+  `%w`-wrapped `url.Error` containing the credential-bearing URL.
+
+### 6. Tests Required
+
+- Application tests inject a synthetic `RoundTripper`; assert exact
+  User-Agent/Accept headers, success node/status/artifact calls, each stable
+  failure code and zero node replacement on failure.
+- Privacy assertions compare complete typed error text and reject markers from
+  the synthetic URL, transport error, provider body and artifact error.
+- HTTP tests pass a typed refresh error and an ordinary storage error; assert
+  502 versus 500 mappings and that the typed-error log has `error_code` but no
+  raw `error` attribute.
+- Web tests construct `ApiClientError` with the public refresh code and assert
+  the dedicated Chinese message; existing page behavior keeps URL hints only
+  and clears row busy state through `onSettled`.
+- Run application and HTTP packages under `go test -race`, full Web tests,
+  typecheck/build, generated-drift checks, and the supported repository
+  test/vet/lint targets. Use only synthetic providers and data; no production
+  refresh, hardware or HIL action is required.
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong: raw transport detail can contain the complete subscription URL, and
+// the HTTP layer depends on mutable prose.
+return fmt.Errorf("fetch Mihomo subscription: %w", err)
+if strings.Contains(err.Error(), "fetch Mihomo subscription") { /* 502 */ }
+
+// Correct: persist one bounded stage code and classify by application type.
+return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
+var refreshError *mihomo.SubscriptionRefreshError
+if errors.As(err, &refreshError) { /* bounded 502 + error_code log */ }
+```
+
 ## Scenario: Typed legacy Webhook delivery port
 
 ### 1. Scope / Trigger

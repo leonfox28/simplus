@@ -1,0 +1,6 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review the end-to-end provider-to-browser error and success flow."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Check backend dependency direction, privacy, and Mihomo safety invariants."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Verify stable HTTP status/error mapping and absence of raw internal errors."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Apply focused-to-broad tests, generated drift, and provider-secret regression rules."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Check generated client usage and authoritative HTTP state behavior."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Check visible Web behavior, type safety, builds, and synthetic-only fixtures."}

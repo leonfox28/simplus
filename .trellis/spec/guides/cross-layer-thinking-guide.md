@@ -140,6 +140,28 @@ When a browser has public, bootstrap/setup, and authenticated API surfaces:
 - [ ] Keep host validation at the backend boundary; do not accept forwarding
       headers merely to compensate for a proxy rewrite.
 
+### Credential-Bearing External Fetch Checklist
+
+When an application fetches a URL that may embed credentials and presents the
+result through API and Web layers:
+
+- [ ] Make compatibility headers an exact, provider-neutral contract backed by
+      synthetic tests and discriminating evidence; do not add per-host branches
+      or a browser-impersonation retry ladder.
+- [ ] Trace URL, transport, redirect, status, response-body and parser errors to
+      the service boundary. Reduce expected failures to a typed stable code
+      before any value can reach an API error or ordinary log.
+- [ ] Keep failure-state persistence distinct from the external failure: decide
+      explicitly what happens when recording the failure also fails.
+- [ ] Map application errors by type or sentinel, never mutable error text, and
+      verify the public status/code plus the Web message together.
+- [ ] Prove failure preserves the last-known-good state and clears transient UI
+      busy state. Assert complete error/log strings against synthetic private
+      markers, not only `errors.Is` or status codes.
+- [ ] Re-run the original SSRF, redirect, timeout and response-size tests after
+      any compatibility change. See the concrete Mihomo refresh contract in
+      `core/backend/application-boundaries.md`.
+
 ---
 
 ## Cross-Platform Template Consistency

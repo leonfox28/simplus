@@ -1,0 +1,6 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the subscription failure contract from provider request through application, HTTP, and Web presentation."}
+{"file":".trellis/spec/core/backend/index.md","reason":"Preserve backend ownership, privacy boundaries, and targeted validation order."}
+{"file":".trellis/spec/core/backend/api-contracts.md","reason":"Keep expected failures typed, stable, bounded, and OpenAPI-compatible."}
+{"file":".trellis/spec/core/backend/quality-and-testing.md","reason":"Use synthetic provider fixtures and assert secret-free error strings and logs."}
+{"file":".trellis/spec/web/frontend/index.md","reason":"Keep the generated API boundary and TanStack Query ownership unchanged."}
+{"file":".trellis/spec/web/frontend/quality-guidelines.md","reason":"Verify the dedicated visible error message with focused Vitest and Web checks."}
