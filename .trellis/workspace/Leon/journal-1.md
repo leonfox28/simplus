@@ -597,3 +597,26 @@ Clarified the single deployment bundle plus checksum workflow, durable /opt/simp
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: Fix Mihomo subscription refresh
+
+**Date**: 2026-09-14
+**Task**: Fix Mihomo subscription refresh
+**Package**: core
+**Branch**: `main`
+
+### Summary
+
+Use the provider-compatible Mihomo client identifier, classify refresh failures with bounded typed errors, show actionable Web guidance, and protect the flow with synthetic cross-layer regression tests and executable specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f458670` | (see git log) |
+| `f1fa0a9` | (see git log) |
+
+### Status
+
+[OK] **Completed**

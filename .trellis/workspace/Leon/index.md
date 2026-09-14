@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 25
-- **Last Active**: 2026-08-22
+- **Total Sessions**: 26
+- **Last Active**: 2026-09-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~599 | Active |
+| `journal-1.md` | ~622 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 26 | 2026-09-14 | Fix Mihomo subscription refresh | `f458670`, `f1fa0a9` | `main` |
 | 25 | 2026-08-22 | Improve production onboarding docs | `e68b255` | `main` |
 | 24 | 2026-08-21 | Local production container cutover | `b76a687` | `main` |
 | 23 | 2026-08-21 | Publish versioned GHCR deployment candidate | `901eabe`, `bc05259`, `04dc171` | `main` |
