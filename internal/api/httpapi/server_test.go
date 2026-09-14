@@ -27,6 +27,7 @@ import (
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineegressapp "github.com/leonfox28/simplus/internal/application/lineegress"
 	messageapp "github.com/leonfox28/simplus/internal/application/messaging"
+	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
 	notificationapp "github.com/leonfox28/simplus/internal/application/notification"
 	"github.com/leonfox28/simplus/internal/application/realtime"
 	setupapp "github.com/leonfox28/simplus/internal/application/setup"
@@ -187,6 +188,42 @@ func (manager *testLineEgressManager) List(context.Context) ([]lineegressapp.Vie
 func (manager *testLineEgressManager) Put(_ context.Context, lineID, mode, country string) (lineegressapp.View, error) {
 	manager.lineID, manager.mode, manager.country = lineID, mode, country
 	return lineegressapp.View{LineID: lineID, Mode: mode, CountryCode: country, CountryName: "英国", ListenerPort: 20157, Ready: true, ReadinessReason: "READY"}, nil
+}
+
+func TestMihomoSubscriptionErrorMappingUsesTypedRefreshError(t *testing.T) {
+	var logs bytes.Buffer
+	server := &Server{logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/mihomo/subscriptions/subscription_abcdefghijklmnopqrstuv/refresh", nil)
+
+	server.writeMihomoSubscriptionError(recorder, request, &mihomoapp.SubscriptionRefreshError{Code: "SUBSCRIPTION_FETCH_FAILED"})
+
+	var response openapi.ApiError
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusBadGateway || response.Code != "MIHOMO_SUBSCRIPTION_REFRESH_FAILED" || !response.Retryable {
+		t.Fatalf("status=%d response=%#v", recorder.Code, response)
+	}
+	if !strings.Contains(logs.String(), `"error_code":"SUBSCRIPTION_FETCH_FAILED"`) || strings.Contains(logs.String(), `"error":`) {
+		t.Fatalf("refresh log is not bounded: %s", logs.String())
+	}
+}
+
+func TestMihomoSubscriptionErrorMappingKeepsPersistenceFailureInternal(t *testing.T) {
+	server := &Server{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/mihomo/subscriptions/subscription_abcdefghijklmnopqrstuv/refresh", nil)
+
+	server.writeMihomoSubscriptionError(recorder, request, errors.New("storage unavailable"))
+
+	var response openapi.ApiError
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusInternalServerError || response.Code != "MIHOMO_SUBSCRIPTION_PERSIST_FAILED" || !response.Retryable {
+		t.Fatalf("status=%d response=%#v", recorder.Code, response)
+	}
 }
 
 type acceptingAuthenticator struct{}

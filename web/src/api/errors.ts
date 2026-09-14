@@ -35,6 +35,7 @@ const codeMessages: Record<string, string> = {
   LINE_NOT_FOUND: '线路不存在，请刷新后重试。',
   LINE_NOT_READY: '线路当前不可用，请检查模组和 SIM / Profile 状态。',
   MIHOMO_NOT_RUNNING: 'Mihomo 当前未运行。',
+  MIHOMO_SUBSCRIPTION_REFRESH_FAILED: '订阅源拒绝访问或返回了无法使用的内容，请检查订阅是否有效后重试。',
   MODEM_ALREADY_ADDED: '该模组已经添加。',
   MODEM_CANDIDATE_NOT_FOUND: '该模组已经离线，请重新扫描。',
   MODEM_CANDIDATE_NOT_READY: '该模组目前不满足添加条件。',

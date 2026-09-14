@@ -24,10 +24,23 @@ import (
 var subscriptionIDPattern = regexp.MustCompile(`^subscription_[A-Za-z0-9_-]{22}$`)
 var subscriptionDefaultNamePattern = regexp.MustCompile(`^[A-Z2-7]{6}$`)
 
+const subscriptionUserAgent = "mihomo"
+
 var (
 	ErrSubscriptionInvalid  = errors.New("Mihomo subscription request is invalid")
 	ErrSubscriptionNotFound = errors.New("Mihomo subscription not found")
 )
+
+type SubscriptionRefreshError struct {
+	Code string
+}
+
+func (err *SubscriptionRefreshError) Error() string {
+	if err == nil || err.Code == "" {
+		return "Mihomo subscription refresh failed"
+	}
+	return "Mihomo subscription refresh failed: " + err.Code
+}
 
 type SubscriptionStore interface {
 	ListMihomoSubscriptions(context.Context) ([]domain.Subscription, error)
@@ -294,35 +307,35 @@ func (service *SubscriptionService) Refresh(ctx context.Context, id string) (Sub
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return SubscriptionView{}, nil, err
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
 	}
 	request.Header.Set("Accept", "application/yaml,text/yaml,text/plain,application/octet-stream")
-	request.Header.Set("User-Agent", "Simplus")
+	request.Header.Set("User-Agent", subscriptionUserAgent)
 	response, err := service.HTTPClient.Do(request)
 	if err != nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED", fmt.Errorf("fetch Mihomo subscription: %w", err))
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED", fmt.Errorf("Mihomo subscription returned HTTP %d", response.StatusCode))
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 5<<20+1))
 	if err != nil || len(body) > 5<<20 {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED", errors.New("Mihomo subscription response exceeds limit"))
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
 	}
 	nodes, err := parseSubscriptionNodes(id, body)
 	if err != nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_PARSE_FAILED", err)
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_PARSE_FAILED")
 	}
 	if service.Artifacts == nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_CONFIG_UNAVAILABLE", ErrConfigNotReady)
+		return service.refreshFailed(ctx, item, "SUBSCRIPTION_CONFIG_UNAVAILABLE")
 	}
 	if _, err := service.Artifacts.BuildSubscription(ctx, id, body, nodes); err != nil {
 		code := "SUBSCRIPTION_CONFIG_GENERATION_FAILED"
 		if errors.Is(err, ErrConfigValidationFailed) {
 			code = "SUBSCRIPTION_CONFIG_VALIDATION_FAILED"
 		}
-		return service.refreshFailed(ctx, item, code, err)
+		return service.refreshFailed(ctx, item, code)
 	}
 	now := service.Now().UTC()
 	if err := service.Store.ReplaceMihomoSubscriptionNodes(ctx, id, nodes, now, "success", ""); err != nil {
@@ -337,11 +350,13 @@ func (service *SubscriptionService) Refresh(ctx context.Context, id string) (Sub
 	return subscriptionView(item), nodes, nil
 }
 
-func (service *SubscriptionService) refreshFailed(ctx context.Context, item domain.Subscription, code string, cause error) (SubscriptionView, []domain.Node, error) {
+func (service *SubscriptionService) refreshFailed(ctx context.Context, item domain.Subscription, code string) (SubscriptionView, []domain.Node, error) {
 	now := service.Now().UTC()
-	_ = service.Store.MarkMihomoSubscriptionRefreshFailure(ctx, item.ID, code, now)
+	if err := service.Store.MarkMihomoSubscriptionRefreshFailure(ctx, item.ID, code, now); err != nil {
+		return SubscriptionView{}, nil, err
+	}
 	item.LastRefreshAt, item.LastRefreshStatus, item.LastErrorCode, item.UpdatedAt = now, "failed", code, now
-	return subscriptionView(item), nil, cause
+	return subscriptionView(item), nil, &SubscriptionRefreshError{Code: code}
 }
 
 func parseSubscriptionNodes(subscriptionID string, body []byte) ([]domain.Node, error) {

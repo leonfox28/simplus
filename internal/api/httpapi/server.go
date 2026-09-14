@@ -1486,17 +1486,17 @@ func (server *Server) ListMihomoSubscriptionNodes(w http.ResponseWriter, r *http
 }
 
 func (server *Server) writeMihomoSubscriptionError(w http.ResponseWriter, r *http.Request, err error) {
+	var refreshError *mihomoapp.SubscriptionRefreshError
 	switch {
 	case errors.Is(err, mihomoapp.ErrSubscriptionInvalid):
 		writeJSON(w, http.StatusBadRequest, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_REQUEST_INVALID", Retryable: false})
 	case errors.Is(err, mihomoapp.ErrSubscriptionNotFound):
 		writeJSON(w, http.StatusNotFound, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_NOT_FOUND", Retryable: false})
+	case errors.As(err, &refreshError):
+		server.logger.WarnContext(r.Context(), "Mihomo subscription refresh failed", "error_code", refreshError.Code)
+		writeJSON(w, http.StatusBadGateway, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_REFRESH_FAILED", Retryable: true})
 	default:
 		server.logger.WarnContext(r.Context(), "Mihomo subscription operation failed", "error", err)
-		if strings.Contains(err.Error(), "fetch Mihomo subscription") || strings.Contains(err.Error(), "subscription response") || errors.Is(err, context.DeadlineExceeded) {
-			writeJSON(w, http.StatusBadGateway, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_REFRESH_FAILED", Retryable: true})
-			return
-		}
 		writeJSON(w, http.StatusInternalServerError, openapi.ApiError{Code: "MIHOMO_SUBSCRIPTION_PERSIST_FAILED", Retryable: true})
 	}
 }
