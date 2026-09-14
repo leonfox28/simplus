@@ -148,6 +148,13 @@ result through API and Web layers:
 - [ ] Make compatibility headers an exact, provider-neutral contract backed by
       synthetic tests and discriminating evidence; do not add per-host branches
       or a browser-impersonation retry ladder.
+- [ ] Treat HTTP success and boundary-parser success as intermediate evidence,
+      not end-to-end compatibility. Drive the negotiated representation through
+      its final consumer (for example, an artifact/config generator) so a
+      summary-only format cannot pass while dropping fields needed downstream.
+- [ ] When a request header negotiates representation shape, make a synthetic
+      provider return different valid formats for different header values and
+      assert that the selected value reaches the real downstream consumer.
 - [ ] Trace URL, transport, redirect, status, response-body and parser errors to
       the service boundary. Reduce expected failures to a typed stable code
       before any value can reach an API error or ordinary log.

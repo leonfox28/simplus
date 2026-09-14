@@ -748,7 +748,7 @@ none of those values may cross the application boundary in an error or log.
 The application and HTTP boundary retain these shapes:
 
 ```go
-const subscriptionUserAgent = "mihomo"
+const subscriptionUserAgent = "clash.meta"
 
 type SubscriptionRefreshError struct {
     Code string
@@ -770,8 +770,11 @@ generated source changes for the stage-specific application code.
 
 ### 3. Contracts
 
-- Every subscription fetch sends exactly `User-Agent: mihomo` plus the fixed
-  existing `Accept` value. Do not add a hostname branch, version spoofing,
+- Every subscription fetch sends exactly `User-Agent: clash.meta` plus the
+  fixed existing `Accept` value. This identifier is also an output-dialect
+  negotiation token: a plain `mihomo` identifier can yield a Base64 URI list
+  that produces node summaries but cannot preserve the complete proxy maps
+  required by `ConfigManager`. Do not add a hostname branch, version spoofing,
   fallback User-Agent, credential rewrite, or automatic retry.
 - The default client remains proxy-free and HTTPS-only, rejects unsafe literal
   or resolved addresses, revalidates every redirect, follows at most three
@@ -812,21 +815,26 @@ generated source changes for the stage-specific application code.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: a provider-neutral synthetic HTTPS request carries `mihomo`, produces
-  valid nodes, calls the artifact boundary once and replaces the node snapshot
-  with successful status.
+- Good: a provider-neutral synthetic HTTPS request carries `clash.meta`,
+  receives a complete Mihomo YAML document, passes the real artifact-generation
+  boundary and replaces the node snapshot with successful status.
 - Base: the provider rejects the request. The application persists only
   `SUBSCRIPTION_FETCH_FAILED`, HTTP returns the existing 502 code, and Web
   gives actionable source-validity guidance while retaining prior data.
-- Bad: retry with several browser/client identifiers, special-case a private
-  provider, use `strings.Contains(err.Error(), ...)` for HTTP mapping, or log a
-  `%w`-wrapped `url.Error` containing the credential-bearing URL.
+- Bad: treat HTTP 200 or successful node-summary parsing as proof that the
+  response can generate a runnable configuration; retry with several
+  browser/client identifiers; special-case a private provider; use
+  `strings.Contains(err.Error(), ...)` for HTTP mapping; or log a `%w`-wrapped
+  `url.Error` containing the credential-bearing URL.
 
 ### 6. Tests Required
 
-- Application tests inject a synthetic `RoundTripper`; assert exact
-  User-Agent/Accept headers, success node/status/artifact calls, each stable
-  failure code and zero node replacement on failure.
+- Application tests inject a synthetic `RoundTripper` that returns a parseable
+  Base64 URI list for other identifiers and complete YAML for `clash.meta`;
+  assert exact User-Agent/Accept headers and pass the response through the real
+  `ConfigManager` generation path before asserting successful node/status and
+  immutable-artifact publication. Continue to assert each stable failure code
+  and zero node replacement on failure.
 - Privacy assertions compare complete typed error text and reject markers from
   the synthetic URL, transport error, provider body and artifact error.
 - HTTP tests pass a typed refresh error and an ordinary storage error; assert
@@ -843,6 +851,13 @@ generated source changes for the stage-specific application code.
 ### 7. Wrong vs Correct
 
 ```go
+// Wrong: HTTP 200 can still contain a summary-only URI list that cannot be
+// turned back into complete proxy mappings.
+const subscriptionUserAgent = "mihomo"
+
+// Correct: negotiate the complete Mihomo YAML dialect required by artifacts.
+const subscriptionUserAgent = "clash.meta"
+
 // Wrong: raw transport detail can contain the complete subscription URL, and
 // the HTTP layer depends on mutable prose.
 return fmt.Errorf("fetch Mihomo subscription: %w", err)

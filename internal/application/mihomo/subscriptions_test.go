@@ -64,6 +64,10 @@ func (store *refreshStoreStub) MarkMihomoSubscriptionRefreshFailure(_ context.Co
 func (store *refreshStoreStub) ReadMihomoRuntimeSelection(context.Context) (string, string, error) {
 	return store.selected, "", nil
 }
+func (store *refreshStoreStub) WriteMihomoSelectedSubscription(_ context.Context, id string, _ time.Time) error {
+	store.selected = id
+	return nil
+}
 
 type refreshArtifactStub struct {
 	buildErr   error
@@ -176,20 +180,34 @@ func TestSubscriptionIdentifiersSeparateStableIdentityFromDefaultDisplayName(t *
 	}
 }
 
-func TestSubscriptionRefreshUsesMihomoUserAgentAndPublishesValidNodes(t *testing.T) {
-	const fixture = "proxies:\n  - name: US Synthetic\n    type: ss\n    server: proxy.example\n    port: 443\n    cipher: aes-128-gcm\n    password: synthetic-secret\n"
-	artifacts := &refreshArtifactStub{}
+func TestSubscriptionRefreshNegotiatesGeneratableMihomoYAML(t *testing.T) {
+	const yamlFixture = "proxies:\n  - name: US Synthetic\n    type: ss\n    server: proxy.example\n    port: 443\n    cipher: aes-128-gcm\n    password: synthetic-secret\n"
+	uriFixture := base64.StdEncoding.EncodeToString([]byte("trojan://synthetic-secret@proxy.example:443#US%20Synthetic\n"))
 	var userAgent, accept string
 	service, store := newRefreshTestService(subscriptionRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		userAgent, accept = request.UserAgent(), request.Header.Get("Accept")
-		return subscriptionResponse(http.StatusOK, fixture), nil
-	}), artifacts)
+		if userAgent != "clash.meta" {
+			return subscriptionResponse(http.StatusOK, uriFixture), nil
+		}
+		return subscriptionResponse(http.StatusOK, yamlFixture), nil
+	}), nil)
+	artifacts := &ConfigManager{
+		Root:  t.TempDir(),
+		Store: store,
+		Core:  coreStatusStub{CoreStatus{Installed: true, Version: "v1.19.29", BinaryPath: "/installed/mihomo"}},
+		Run: func(context.Context, string, ...string) ([]byte, error) {
+			return []byte("configuration test is successful"), nil
+		},
+		Now:               service.Now,
+		ControllerAddress: "127.0.0.1:19090",
+	}
+	service.Artifacts = artifacts
 
 	view, nodes, err := service.Refresh(context.Background(), refreshTestSubscriptionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subscriptionUserAgent != "mihomo" {
+	if subscriptionUserAgent != "clash.meta" {
 		t.Fatalf("subscription User-Agent constant = %q", subscriptionUserAgent)
 	}
 	if userAgent != subscriptionUserAgent {
@@ -204,8 +222,11 @@ func TestSubscriptionRefreshUsesMihomoUserAgentAndPublishesValidNodes(t *testing
 	if view.LastRefreshStatus != "success" || view.LastErrorCode != "" || view.NodeCount != 1 {
 		t.Fatalf("view = %#v", view)
 	}
-	if artifacts.buildCalls != 1 || len(artifacts.raw) == 0 || len(artifacts.nodes) != 1 {
-		t.Fatalf("artifact calls=%d raw=%d nodes=%d", artifacts.buildCalls, len(artifacts.raw), len(artifacts.nodes))
+	if len(nodes) != 1 || nodes[0].ProxyYAML == "" {
+		t.Fatalf("downloaded nodes are not usable for config generation: %#v", nodes)
+	}
+	if metadata, _, artifactErr := artifacts.Artifact(refreshTestSubscriptionID); artifactErr != nil || metadata.ConfigSHA256 == "" {
+		t.Fatalf("artifact metadata=%#v err=%v", metadata, artifactErr)
 	}
 }
 

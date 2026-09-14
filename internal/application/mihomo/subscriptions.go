@@ -24,7 +24,10 @@ import (
 var subscriptionIDPattern = regexp.MustCompile(`^subscription_[A-Za-z0-9_-]{22}$`)
 var subscriptionDefaultNamePattern = regexp.MustCompile(`^[A-Z2-7]{6}$`)
 
-const subscriptionUserAgent = "mihomo"
+// Subscription providers use the client identifier to choose an output
+// dialect. clash.meta requests the complete YAML document needed to preserve
+// proxy fields when building the generated Mihomo configuration.
+const subscriptionUserAgent = "clash.meta"
 
 var (
 	ErrSubscriptionInvalid  = errors.New("Mihomo subscription request is invalid")
