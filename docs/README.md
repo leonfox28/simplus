@@ -11,6 +11,7 @@
 | [`plans/active/mvp.md`](plans/active/mvp.md) | 唯一活跃执行计划和下一步 | 规范性 |
 | [`handoff.zh-CN.md`](handoff.zh-CN.md) | 脱敏后的当前实现进度和接手提示 | 现场摘要 |
 | [`development.md`](development.md) | 通用 Linux 本地开发、测试和受控 HIL 命令 | 操作指南 |
+| [`engineering/README.md`](engineering/README.md) | 后端、前端与基础设施的编码约定、边界合同和回归检查 | 工程规范 |
 | [`installation.md`](installation.md) | Docker Compose 生产部署、宿主准备和生命周期 | 操作指南 |
 | [`compatibility.md`](compatibility.md) | 公开兼容性结论和证据等级 | 参考证据 |
 | [`troubleshooting.md`](troubleshooting.md) | 不包含私人现场信息的稳定错误码和复查顺序 | 操作指南 |
@@ -22,6 +23,7 @@
 - 改产品范围：先读 `product.md`，并新增或更新 decision；
 - 改进程、领域或数据流：读 `architecture.md`；
 - 开始功能实现：读 `plans/active/mvp.md` 和 `handoff.zh-CN.md`；
+- 修改代码或构建配置：按 `engineering/README.md` 阅读相关规范；
 - 启动、测试或连接真实硬件：读 `development.md`；
 - 判断某项能力是否真实验证：读 `compatibility.md`；
 - 排查正式运行态：读 `troubleshooting.md`；

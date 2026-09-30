@@ -1,24 +1,33 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+# Simplus Agent Instructions
 
-These instructions are for AI assistants working in this project.
+## Project Map
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+- Start with [the documentation map](docs/README.md).
+- Product scope and non-goals: [product.md](docs/product.md).
+- Process ownership and data flow: [architecture.md](docs/architecture.md).
+- Current work and implementation status: [active plan](docs/plans/active/mvp.md) and [handoff](docs/handoff.zh-CN.md).
+- Before editing code, read the relevant [engineering guidelines](docs/engineering/README.md) and nearby tests.
+- Development commands and their side effects: [development.md](docs/development.md).
+- Production deployment: [installation.md](docs/installation.md).
+- Evidence levels and public records: [compatibility.md](docs/compatibility.md) and [privacy-and-publication.md](docs/privacy-and-publication.md).
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+## Working Conventions
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+- Keep product scope, architecture, and operational knowledge in their canonical documents; update links and summaries when those owners change.
+- Use [decision records](docs/decisions/) for durable scope or architecture changes and follow [the plan guide](docs/plans/README.md) for complex or high-risk work.
+- Search for existing narrow ports, helpers, and tests before adding abstractions. Keep application services separate from hardware protocols and persistence adapters.
+- Start public API changes in `api/openapi.yaml`. Update generated Go, TypeScript, and sqlc outputs through their declared generators.
+- Keep HTTP snapshots authoritative; browser realtime events only invalidate queries or signal attention.
 
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
+## Validation
 
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
-<!-- TRELLIS:END -->
+- Choose checks for the affected surface; start with focused tests and expand according to risk.
+- Documentation: `make check-docs`.
+- Go: affected package tests, then `make check-format`, `make lint`, and `make test` as needed.
+- Web: `corepack pnpm --dir web typecheck`, `test`, `build`, and relevant fixture-based `e2e` checks.
+- API, sqlc, or generator changes: `make verify-generated`.
+- Container contracts: `make check-container-files` and `go test ./internal/containercontract`.
+- Ordinary validation does not authorize deployment or real hardware side effects.
 
 ## Simplus Safety Boundaries
 
