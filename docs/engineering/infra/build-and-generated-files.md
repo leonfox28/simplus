@@ -48,6 +48,11 @@ Prefer these targets over reconstructing tool invocations in a new script.
 When a new repeatable operation is needed, add one clear Make target and reuse
 it from CI/docs instead of creating divergent command sequences.
 
+The pnpm store is fixed in `pnpm-workspace.yaml`; do not switch store locations
+between generation/build invocations. Build does not regenerate API files.
+Vitest uses two workers; Playwright Simulator tests use one. Vite separates the
+React runtime and generated Zod validation chunks while keeping route imports lazy.
+
 ## Generated Sources and Outputs
 
 The `generate` target has three owners:
@@ -55,7 +60,7 @@ The `generate` target has three owners:
 | Source | Generator definition | Output |
 | --- | --- | --- |
 | `api/openapi.yaml` | `internal/api/openapi/generate.go` + `api/oapi-codegen.yaml` | `internal/api/openapi/generated.go` |
-| `internal/storage/sqlite/migrations/core/**` + `internal/storage/sqlite/queries/core/**` | `sqlc.yaml` | `internal/storage/sqlite/generated/core/*.go` |
+| `internal/storage/sqlite/migrations/control/**` + `internal/storage/sqlite/queries/core/**` | `sqlc.yaml` | `internal/storage/sqlite/generated/core/*.go` |
 | `api/openapi.yaml` | `web/openapi-ts.config.ts` via root `api:generate` -> Web `generate:api` | `web/src/api/generated/` Fetch SDK, TypeScript, Zod, and TanStack Query output |
 
 `Makefile` `GENERATED_PATHS` is the drift-check registry. `verify-generated`
@@ -78,14 +83,13 @@ trusted-LAN preview. The Web remains same-origin: browser `/api` and SSE traffic
 flows through Vite to the loopback API.
 
 The proxy must use `changeOrigin: false`. `simplusd` validates the request Host
-as loopback/private trusted-LAN authority, and setup completion derives its
-browser-facing `managementUrl` from that validated authority. Rewriting Host to
-the API target can redirect a remote browser to its own loopback interface.
+as loopback/private trusted-LAN authority; preserve the browser-facing authority
+for Origin and same-origin checks. Rewriting Host changes that trust boundary.
 Do not replace this contract with unvalidated `X-Forwarded-Host` handling.
 
 Keep `web/src/viteConfig.test.ts` and a real proxy smoke when changing this
 wiring. Authentication-context and redirect assertions are specified in
-[`frontend/state-management.md`](../frontend/state-management.md#scenario-separate-setup-and-administrator-authorization).
+[`frontend/state-management.md`](../frontend/state-management.md#installation-and-authentication).
 
 ## Third-Party and Packaging Inputs
 
@@ -191,7 +195,7 @@ assets, or production installation/upgrade instructions.
   checksum, fresh-root creation, extraction, host validation, pull, and start
   steps fail closed. Fresh installation changes ownership only on the newly
   created root, never recursively on an existing deployment tree. Fresh start
-  and upgrade wait for the one-shot `bootstrap` container and propagate its
+  and upgrade wait for the one-shot `provision` container and propagate its
   exit status before showing credentials or declaring the command successful.
 - Those instructions describe the ordinary operator input as exactly one
   versioned deployment archive plus its checksum. They distinguish the two
@@ -217,7 +221,7 @@ assets, or production installation/upgrade instructions.
 | a code change is needed after tagging | do not move/reuse the tag; publish the next patch version |
 | the recommended fresh-install root already exists | stop without extracting or changing ownership; direct the administrator to the lifecycle upgrade procedure |
 | checksum, host check, Compose render, or image pull fails | do not execute later install/start steps in the copy-paste command chain |
-| `bootstrap` has not exited or exits non-zero | wait or fail the command chain; do not show an empty log as successful initialization |
+| `provision` has not exited or exits non-zero | wait or fail the command chain; do not show an empty log as successful initialization |
 
 ### 5. Good / Base / Bad Cases
 
@@ -247,7 +251,7 @@ assets, or production installation/upgrade instructions.
 - Review `README.md`, `docs/installation.md`, and
   `packaging/container/README.md` as one installation interface: durable root,
   three editable keys, existing-root refusal, non-recursive ownership, and
-  stop-on-error command ordering plus successful `bootstrap` wait must remain
+  stop-on-error command ordering plus successful `provision` wait must remain
   aligned. Each must also make the one-archive-plus-checksum operator input
   clear without presenting Release audit/source assets as additional
   installation downloads.

@@ -45,11 +45,6 @@ type Inventory interface {
 	Topology(context.Context) (inventory.Topology, error)
 }
 
-type RFController interface {
-	State(context.Context, string) (string, error)
-	Set(context.Context, string, bool) (string, error)
-}
-
 type RuntimeStatusReader interface {
 	Read(context.Context, string) (domain.RuntimeStatus, error)
 }
@@ -74,42 +69,26 @@ type Service struct {
 	now        func() time.Time
 	rf         RFSetter
 	runtime    RuntimeStatusReader
-	legacyRF   RFController
 	identity   EquipmentIdentityReader
 
 	mu sync.Mutex
 }
 
-func (service *Service) UseRFController(controller RFController) {
-	if service != nil {
-		service.rf = controller
-		service.legacyRF = controller
-		service.runtime, _ = controller.(RuntimeStatusReader)
-	}
-}
-
-func (service *Service) UseRuntimeStatusReader(reader RuntimeStatusReader) {
-	if service != nil {
-		service.runtime = reader
-	}
-}
-func (service *Service) UseRFSetter(setter RFSetter) {
-	if service != nil {
-		service.rf = setter
-	}
-}
-
-func (service *Service) UseEquipmentIdentityReader(reader EquipmentIdentityReader) {
-	if service != nil {
-		service.identity = reader
-	}
-}
-
-func New(repository Repository, inventoryService Inventory) (*Service, error) {
+func New(repository Repository, inventoryService Inventory, options ...Options) (*Service, error) {
 	if repository == nil || inventoryService == nil {
 		return nil, errors.New("managed modem service is not configured")
 	}
-	return &Service{repository: repository, inventory: inventoryService, random: rand.Reader, now: time.Now}, nil
+	ports := Options{RF: DisabledHardware{}, Runtime: DisabledHardware{}, Identity: DisabledIdentity{}}
+	if len(options) > 1 {
+		return nil, errors.New("multiple modem configurations")
+	}
+	if len(options) == 1 {
+		ports = options[0]
+	}
+	if ports.RF == nil || ports.Runtime == nil || ports.Identity == nil {
+		return nil, errors.New("modem capability implementation is required")
+	}
+	return &Service{repository: repository, inventory: inventoryService, random: rand.Reader, now: time.Now, rf: ports.RF, runtime: ports.Runtime, identity: ports.Identity}, nil
 }
 
 func (service *Service) List(ctx context.Context) ([]domain.View, error) {
@@ -147,10 +126,6 @@ func (service *Service) List(ctx context.Context) ([]domain.View, error) {
 					view.RFState = status.RFState
 					view.SIMPresence = status.SIMPresence
 					view.Cellular = status.Cellular
-				}
-			} else if service.legacyRF != nil && view.Capabilities.RFControl {
-				if state, stateErr := service.legacyRF.State(ctx, current.id); stateErr == nil {
-					view.RFState = state
 				}
 			}
 		}
@@ -564,4 +539,24 @@ func mergeCapabilities(left, right hardware.Capabilities) hardware.Capabilities 
 		PIN1Verify:             left.PIN1Verify || right.PIN1Verify, PUK1Unblock: left.PUK1Unblock || right.PUK1Unblock,
 		EUICCProfiles: left.EUICCProfiles || right.EUICCProfiles,
 	}
+}
+
+type Options struct {
+	RF       RFSetter
+	Runtime  RuntimeStatusReader
+	Identity EquipmentIdentityReader
+}
+type DisabledHardware struct{}
+
+func (DisabledHardware) Read(context.Context, string) (domain.RuntimeStatus, error) {
+	return domain.RuntimeStatus{}, ErrRFUnavailable
+}
+func (DisabledHardware) Set(context.Context, string, bool) (string, error) {
+	return "", ErrRFUnavailable
+}
+
+type DisabledIdentity struct{}
+
+func (DisabledIdentity) Read(context.Context, string) (EquipmentIdentity, error) {
+	return EquipmentIdentity{}, ErrEquipmentIdentityUnavailable
 }

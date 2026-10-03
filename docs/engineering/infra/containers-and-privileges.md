@@ -17,8 +17,8 @@ there is no native production bundle, installer, or uninstaller.
   `simplus-netd`, kept root because it owns per-Line network objects.
 
 `compose.yaml` orchestrates those images through five services:
-`data-init`, `agent`, `netd`, `app`, and one-shot `bootstrap`. This does not
-collapse the runtime into five business processes: data-init/bootstrap are
+`data-init`, `agent`, `netd`, `app`, and one-shot `provision`. This does not
+collapse the runtime into five business processes: data-init/provision are
 bounded lifecycle steps around the three responsibility boundaries described
 in `docs/architecture.md` and
 `docs/decisions/0021-container-production-deployment.md`.
@@ -58,7 +58,7 @@ access, or an arbitrary command/path input.
 `containers/netd-preflight.sh` before starting the supervisor. The preflight
 creates disposable netns, veth, nft TPROXY, and XFRM objects inside the netd
 container namespace and then removes them. Failure keeps netd unhealthy, so
-app/bootstrap do not proceed.
+app/provision do not proceed.
 
 `cmd/simplus-netd/main.go` exposes fixed supervisor operations over an
 authenticated Unix socket. Per-Line workers receive validated stable Line ID,
@@ -71,7 +71,12 @@ canonical architecture/install docs together.
 
 ## Data and Initialization
 
-Compose uses bind-mounted `./data/core` and `./data/agent`. `data-init` fixes
+Netd mounts only the Mihomo subtree and runtime volume; it cannot read the control
+database or key directory. The initializer rejects `data/core` and legacy `db/`
+layouts before modification. Administrator creation and instance readiness are
+one transaction; subsequent login enters management directly.
+
+Compose uses bind-mounted `./data/control-v2` and `./data/agent`. `data-init` fixes
 ownership/modes, installs the checked Zashboard tree, and seeds the pinned
 Mihomo core only for unambiguous new state. It refuses symlinks and refuses to
 guess an active version when existing version data lacks a current manifest
@@ -83,8 +88,8 @@ backups. Database files, credentials, subscriptions, logs, and Compose data
 remain private and excluded by `.gitignore`/`.dockerignore` as described in
 `docs/installation.md` and `docs/privacy-and-publication.md`.
 
-The one-shot bootstrap waits for typed app health, then idempotently provisions
-the sole administrator. Initial credentials appear only on first bootstrap;
+The one-shot provision waits for typed app health, then idempotently provisions
+the sole administrator. Initial credentials appear only on first provisioning;
 never copy them into docs, fixtures, commands, or issue output.
 
 ## Host and Lifecycle Boundary

@@ -11,3 +11,5 @@ overrides:
 audit:
   level: moderate
   ignore: []
+
+storeDir: ~/.cache/simplus/pnpm-store

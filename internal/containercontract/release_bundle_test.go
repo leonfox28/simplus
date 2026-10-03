@@ -117,7 +117,7 @@ func TestContainerReleaseBundleIsDeterministicAndAllowlisted(t *testing.T) {
 		"agent":     "ghcr.io/leonfox28/simplus-agent:v0.1.0",
 		"netd":      "ghcr.io/leonfox28/simplus-netd:v0.1.0",
 		"app":       "ghcr.io/leonfox28/simplus-control:v0.1.0",
-		"bootstrap": "ghcr.io/leonfox28/simplus-control:v0.1.0",
+		"provision": "ghcr.io/leonfox28/simplus-control:v0.1.0",
 	}
 	for name, wantImage := range wantImages {
 		if got := compose.Services[name].Image; got != wantImage {

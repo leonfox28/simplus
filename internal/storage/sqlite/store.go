@@ -18,23 +18,13 @@ import (
 )
 
 const (
-	CoreDataset     = "core"
-	ContactsDataset = "contacts"
-	MessagesDataset = "messages"
-	CallsDataset    = "calls"
-	RuntimeDataset  = "runtime"
+	ControlDataset = "control"
 
 	storageMarkerName    = ".simplus-storage-root"
-	storageMarkerContent = "simplus-storage-root-v1\n"
+	storageMarkerContent = "simplus-control-state-v2\n"
 )
 
-var datasetNames = []string{
-	CoreDataset,
-	ContactsDataset,
-	MessagesDataset,
-	CallsDataset,
-	RuntimeDataset,
-}
+var datasetNames = []string{ControlDataset}
 
 //go:embed migrations/*/*.sql
 var migrationFiles embed.FS
@@ -42,12 +32,8 @@ var migrationFiles embed.FS
 var migrationMu sync.Mutex
 
 type Set struct {
-	Root     string
-	Core     *sql.DB
-	Contacts *sql.DB
-	Messages *sql.DB
-	Calls    *sql.DB
-	Runtime  *sql.DB
+	Root string
+	DB   *sql.DB
 }
 
 type fileIdentity struct {
@@ -75,43 +61,19 @@ func OpenSet(ctx context.Context, root string) (*Set, error) {
 		return nil, err
 	}
 
-	opened := make(map[string]*sql.DB, len(datasetNames))
-	for _, name := range datasetNames {
-		db, err := openDataset(ctx, canonicalRoot, name)
-		if err != nil {
-			for _, existing := range opened {
-				_ = existing.Close()
-			}
-			return nil, err
-		}
-		opened[name] = db
+	db, err := openDataset(ctx, canonicalRoot, ControlDataset)
+	if err != nil {
+		return nil, err
 	}
-
-	return &Set{
-		Root:     canonicalRoot,
-		Core:     opened[CoreDataset],
-		Contacts: opened[ContactsDataset],
-		Messages: opened[MessagesDataset],
-		Calls:    opened[CallsDataset],
-		Runtime:  opened[RuntimeDataset],
-	}, nil
+	return &Set{Root: canonicalRoot, DB: db}, nil
 }
 
 func (set *Set) Close() error {
-	if set == nil {
+	if set == nil || set.DB == nil {
 		return nil
 	}
-	var joined error
-	for _, db := range []*sql.DB{set.Runtime, set.Calls, set.Messages, set.Contacts, set.Core} {
-		if db == nil {
-			continue
-		}
-		if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-			joined = errors.Join(joined, err)
-		}
-		joined = errors.Join(joined, db.Close())
-	}
-	return joined
+	_, err := set.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return errors.Join(err, set.DB.Close())
 }
 
 func prepareRoot(root string) (string, error) {

@@ -9,11 +9,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
+
+var ErrSMSNotDispatched = errors.New("SMS request was not dispatched")
 
 type Client struct {
 	http       *http.Client
@@ -96,17 +100,6 @@ func (client *Client) Probe(ctx context.Context, request ProbeRequest) (ProbeRes
 	return response, nil
 }
 
-func (client *Client) EnsureRadioOff(ctx context.Context, request RadioEnsureOffRequest) (RadioEnsureOffResponse, error) {
-	var response RadioEnsureOffResponse
-	if err := client.request(ctx, http.MethodPost, "/v1/commands/radio/ensure-off", request, &response); err != nil {
-		return RadioEnsureOffResponse{}, err
-	}
-	if err := validateRadioEnsureOffResponse(response, request.OperationID); err != nil {
-		return RadioEnsureOffResponse{}, fmt.Errorf("invalid radio.ensure-off response: %w", err)
-	}
-	return response, nil
-}
-
 func (client *Client) SetRFState(ctx context.Context, request RFSetRequest) (RFSetResponse, error) {
 	var response RFSetResponse
 	if err := client.request(ctx, http.MethodPost, "/v1/radio/state", request, &response); err != nil {
@@ -166,12 +159,23 @@ func (client *Client) SendSMS(ctx context.Context, request SMSSendRequest) (SMSS
 	if err := validateSMSSendRequest(request); err != nil {
 		return SMSSendResponse{}, err
 	}
+	var connected atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	var response SMSSendResponse
 	if err := client.request(ctx, http.MethodPost, "/v1/sms/send", request, &response); err != nil {
-		return SMSSendResponse{}, err
+		var remote *ErrorResponse
+		if errors.As(err, &remote) {
+			switch remote.Code {
+			case "REQUEST_INVALID", "AGENT_INSTANCE_STALE", "SMS_DEVICE_NOT_FOUND", "SMS_UNSUPPORTED", "OPERATION_REPLAY_CONFLICT", "SMS_DEVICE_STALE", "SMS_EQUIPMENT_IDENTITY_CHANGED", "SMS_SIM_NOT_READY", "SMS_SIM_IDENTITY_CHANGED", "SMS_RF_OFF", "SMS_REGISTRATION_DENIED", "SMS_NOT_REGISTERED", "SMS_STATUS_UNAVAILABLE":
+				return SMSSendResponse{}, err
+			}
+		} else if !connected.Load() {
+			return SMSSendResponse{}, ErrSMSNotDispatched
+		}
+		return SMSSendResponse{}, ErrSMSOutcomeUnknown
 	}
 	if err := validateSMSSendResponse(response, request); err != nil {
-		return SMSSendResponse{}, fmt.Errorf("invalid SMS send response: %w", err)
+		return SMSSendResponse{}, ErrSMSOutcomeUnknown
 	}
 	return response, nil
 }
@@ -224,8 +228,12 @@ func (client *Client) request(ctx context.Context, method, path string, body, ou
 		return &apiError
 	}
 	decoder := json.NewDecoder(limited)
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(output); err != nil {
 		return fmt.Errorf("decode agent response: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid trailing Agent response")
 	}
 	return nil
 }

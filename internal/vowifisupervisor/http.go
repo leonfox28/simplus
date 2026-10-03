@@ -14,6 +14,8 @@ type errorResponse struct {
 
 func NewHandler(supervisor API, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
+	changes, _ := supervisor.(ChangeAPI)
+	registerConnectionHandlers(mux, changes)
 	sms, _ := supervisor.(SMSAPI)
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		statuses, err := supervisor.List(r.Context())

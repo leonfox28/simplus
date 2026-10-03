@@ -8,9 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -24,13 +21,8 @@ import (
 var subscriptionIDPattern = regexp.MustCompile(`^subscription_[A-Za-z0-9_-]{22}$`)
 var subscriptionDefaultNamePattern = regexp.MustCompile(`^[A-Z2-7]{6}$`)
 
-// Subscription providers use the client identifier to choose an output
-// dialect. clash.meta requests the complete YAML document needed to preserve
-// proxy fields when building the generated Mihomo configuration.
-const subscriptionUserAgent = "clash.meta"
-
 var (
-	ErrSubscriptionInvalid  = errors.New("Mihomo subscription request is invalid")
+	ErrSubscriptionInvalid  = domain.ErrSubscriptionInvalid
 	ErrSubscriptionNotFound = errors.New("Mihomo subscription not found")
 )
 
@@ -78,19 +70,28 @@ type SubscriptionView struct {
 }
 
 type SubscriptionService struct {
-	Store      SubscriptionStore
-	Secrets    SecretCipher
-	Now        func() time.Time
-	HTTPClient *http.Client
-	Artifacts  SubscriptionArtifactManager
+	Store     SubscriptionStore
+	Secrets   SecretCipher
+	Now       func() time.Time
+	Fetcher   SubscriptionFetcher
+	Artifacts SubscriptionArtifactManager
 }
 
-func NewSubscriptionService(store SubscriptionStore, secrets SecretCipher, artifacts ...SubscriptionArtifactManager) *SubscriptionService {
-	service := &SubscriptionService{Store: store, Secrets: secrets, Now: time.Now, HTTPClient: newSubscriptionHTTPClient()}
-	if len(artifacts) != 0 {
-		service.Artifacts = artifacts[0]
+func NewSubscriptionService(store SubscriptionStore, secrets SecretCipher, fetcher SubscriptionFetcher, artifacts ...SubscriptionArtifactManager) (*SubscriptionService, error) {
+	if store == nil || fetcher == nil || len(artifacts) > 1 {
+		return nil, errors.New("Mihomo subscription dependencies are incomplete")
 	}
-	return service
+	if secrets == nil {
+		secrets = disabledSubscriptionSecrets{}
+	}
+	var artifact SubscriptionArtifactManager = DisabledSubscriptionArtifacts{}
+	if len(artifacts) == 1 {
+		if artifacts[0] == nil {
+			return nil, errors.New("Mihomo artifact implementation is required")
+		}
+		artifact = artifacts[0]
+	}
+	return &SubscriptionService{Store: store, Secrets: secrets, Fetcher: fetcher, Artifacts: artifact, Now: time.Now}, nil
 }
 
 func (service *SubscriptionService) List(ctx context.Context) ([]SubscriptionView, error) {
@@ -148,7 +149,7 @@ func (service *SubscriptionService) Create(ctx context.Context, name, rawURL str
 	if strings.TrimSpace(name) == "" {
 		name = defaultSubscriptionDisplayName(id)
 	}
-	name, parsed, err := validateSubscriptionInput(name, rawURL)
+	name, parsed, err := domain.ValidateSubscriptionInput(name, rawURL)
 	if err != nil {
 		return SubscriptionView{}, err
 	}
@@ -184,7 +185,7 @@ func (service *SubscriptionService) Update(ctx context.Context, id, name, rawURL
 	}
 	current.DisplayName, current.Enabled, current.UpdatedAt = name, enabled, service.Now().UTC()
 	if strings.TrimSpace(rawURL) != "" {
-		_, parsed, err := validateSubscriptionInput(name, rawURL)
+		_, parsed, err := domain.ValidateSubscriptionInput(name, rawURL)
 		if err != nil {
 			return SubscriptionView{}, err
 		}
@@ -261,27 +262,8 @@ func (service *SubscriptionService) subscriptionURL(ctx context.Context, id stri
 			return nil, item, fmt.Errorf("migrate Mihomo subscription URL to plaintext: %w", err)
 		}
 	}
-	_, parsed, err := validateSubscriptionInput(item.DisplayName, plaintext)
+	_, parsed, err := domain.ValidateSubscriptionInput(item.DisplayName, plaintext)
 	return parsed, item, err
-}
-
-func validateSubscriptionInput(name, rawURL string) (string, *url.URL, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || len([]rune(name)) > 80 || len(rawURL) > 4096 {
-		return "", nil, ErrSubscriptionInvalid
-	}
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
-		return "", nil, ErrSubscriptionInvalid
-	}
-	host := parsed.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return "", nil, ErrSubscriptionInvalid
-	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsMulticast()) {
-		return "", nil, ErrSubscriptionInvalid
-	}
-	return name, parsed, nil
 }
 
 func newSubscriptionID() (string, error) {
@@ -301,40 +283,26 @@ func subscriptionView(item domain.Subscription) SubscriptionView {
 }
 
 func (service *SubscriptionService) Refresh(ctx context.Context, id string) (SubscriptionView, []domain.Node, error) {
-	if service == nil || service.HTTPClient == nil || service.Now == nil || !subscriptionIDPattern.MatchString(id) {
+	if service == nil || service.Fetcher == nil || service.Now == nil || !subscriptionIDPattern.MatchString(id) {
 		return SubscriptionView{}, nil, ErrSubscriptionInvalid
 	}
 	target, item, err := service.subscriptionURL(ctx, id)
 	if err != nil {
 		return SubscriptionView{}, nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	body, err := service.Fetcher.Fetch(ctx, target.String())
 	if err != nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
-	}
-	request.Header.Set("Accept", "application/yaml,text/yaml,text/plain,application/octet-stream")
-	request.Header.Set("User-Agent", subscriptionUserAgent)
-	response, err := service.HTTPClient.Do(request)
-	if err != nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 5<<20+1))
-	if err != nil || len(body) > 5<<20 {
 		return service.refreshFailed(ctx, item, "SUBSCRIPTION_FETCH_FAILED")
 	}
 	nodes, err := parseSubscriptionNodes(id, body)
 	if err != nil {
 		return service.refreshFailed(ctx, item, "SUBSCRIPTION_PARSE_FAILED")
 	}
-	if service.Artifacts == nil {
-		return service.refreshFailed(ctx, item, "SUBSCRIPTION_CONFIG_UNAVAILABLE")
-	}
 	if _, err := service.Artifacts.BuildSubscription(ctx, id, body, nodes); err != nil {
 		code := "SUBSCRIPTION_CONFIG_GENERATION_FAILED"
+		if errors.Is(err, errSubscriptionArtifactsDisabled) {
+			code = "SUBSCRIPTION_CONFIG_UNAVAILABLE"
+		}
 		if errors.Is(err, ErrConfigValidationFailed) {
 			code = "SUBSCRIPTION_CONFIG_VALIDATION_FAILED"
 		}
@@ -535,36 +503,36 @@ func summarizedNode(subscriptionID, name, kind string) (domain.Node, error) {
 	return domain.Node{SubscriptionID: subscriptionID, ID: id, DisplayName: name, Kind: kind}, nil
 }
 
-func newSubscriptionHTTPClient() *http.Client {
-	transport := &http.Transport{Proxy: nil, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 20 * time.Second}
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil || len(addresses) == 0 {
-			return nil, fmt.Errorf("resolve subscription host: %w", err)
-		}
-		for _, address := range addresses {
-			if isUnsafeSubscriptionIP(address.IP) {
-				return nil, errors.New("subscription host resolved to a private or local address")
-			}
-		}
-		var dialer net.Dialer
-		return dialer.DialContext(ctx, network, net.JoinHostPort(addresses[0].IP.String(), port))
-	}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
-	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		if len(via) > 3 {
-			return errors.New("too many subscription redirects")
-		}
-		_, _, err := validateSubscriptionInput("redirect", request.URL.String())
-		return err
-	}
-	return client
+type SubscriptionFetcher interface {
+	Fetch(context.Context, string) ([]byte, error)
 }
 
-func isUnsafeSubscriptionIP(ip net.IP) bool {
-	return ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsMulticast()
+var errSubscriptionArtifactsDisabled = errors.New("Mihomo subscription artifacts are disabled")
+
+type DisabledSubscriptionFetcher struct{}
+
+func (DisabledSubscriptionFetcher) Fetch(context.Context, string) ([]byte, error) {
+	return nil, errors.New("Mihomo subscription fetching is disabled")
+}
+
+type DisabledSubscriptionArtifacts struct{}
+
+func (DisabledSubscriptionArtifacts) BuildSubscription(context.Context, string, []byte, []domain.Node) (ArtifactMetadata, error) {
+	return ArtifactMetadata{}, errSubscriptionArtifactsDisabled
+}
+func (DisabledSubscriptionArtifacts) Select(context.Context, string) (ConfigStatus, error) {
+	return ConfigStatus{}, errSubscriptionArtifactsDisabled
+}
+func (DisabledSubscriptionArtifacts) DeleteSubscriptionArtifacts(string) error { return nil }
+func (DisabledSubscriptionArtifacts) Artifact(string) (ArtifactMetadata, string, error) {
+	return ArtifactMetadata{}, "", errSubscriptionArtifactsDisabled
+}
+
+type disabledSubscriptionSecrets struct{}
+
+func (disabledSubscriptionSecrets) Encrypt(string, []byte) ([]byte, error) {
+	return nil, ErrSubscriptionInvalid
+}
+func (disabledSubscriptionSecrets) Decrypt(string, []byte) ([]byte, error) {
+	return nil, ErrSubscriptionInvalid
 }

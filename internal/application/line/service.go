@@ -65,17 +65,21 @@ type Service struct {
 	mu sync.Mutex
 }
 
-func (service *Service) UsePhoneNumberSource(source PhoneNumberSource) {
-	if service != nil {
-		service.phoneNumbers = source
-	}
-}
-
-func New(repository Repository, inventoryService Inventory) (*Service, error) {
+func New(repository Repository, inventoryService Inventory, sources ...PhoneNumberSource) (*Service, error) {
 	if repository == nil || inventoryService == nil {
 		return nil, errors.New("managed line service is not configured")
 	}
-	return &Service{repository: repository, inventory: inventoryService, random: rand.Reader, now: time.Now}, nil
+	var source PhoneNumberSource = DisabledPhoneNumbers{}
+	if len(sources) > 1 {
+		return nil, errors.New("multiple phone number sources")
+	}
+	if len(sources) == 1 {
+		source = sources[0]
+	}
+	if source == nil {
+		return nil, errors.New("phone number source is required")
+	}
+	return &Service{repository: repository, inventory: inventoryService, random: rand.Reader, now: time.Now, phoneNumbers: source}, nil
 }
 
 func (service *Service) List(ctx context.Context) ([]domain.View, error) {
@@ -535,4 +539,10 @@ func (service *Service) newID() (string, error) {
 		return "", err
 	}
 	return "line_" + base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+type DisabledPhoneNumbers struct{}
+
+func (DisabledPhoneNumbers) CurrentPhoneNumbers(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
 }

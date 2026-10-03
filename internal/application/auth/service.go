@@ -101,7 +101,7 @@ func (service *Service) Login(ctx context.Context, username, secret string) (Log
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("read installation state for login: %w", err)
 	}
-	if state != "ready" && state != "uninitialized" {
+	if state != "ready" {
 		return LoginResult{}, ErrInstanceNotReady
 	}
 	now := service.now().UTC()

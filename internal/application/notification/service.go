@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,7 +19,7 @@ var ErrChannelInvalid = errors.New("notification channel request is invalid")
 var ErrChannelNotFound = errors.New("notification channel not found")
 var ErrDependenciesInvalid = errors.New("notification dependencies are invalid")
 var ErrWebhookResultInvalid = errors.New("notification webhook delivery result is invalid")
-var allowedEvents = map[string]struct{}{"sms.received": {}, "sms.failed": {}, "call.incoming": {}, "call.missed": {}, "system.degraded": {}}
+var allowedEvents = map[string]struct{}{"vowifi.connected": {}, "vowifi.disconnected": {}, "cellular.connected": {}, "cellular.disconnected": {}, "sms.received": {}, "sms.failed": {}, "call.incoming": {}, "call.missed": {}, "system.degraded": {}}
 
 const (
 	WebhookURLByteLimit       = 4096
@@ -67,6 +66,7 @@ type WebhookPort interface {
 }
 
 type Store interface {
+	DeliveryQueue
 	ListNotificationChannels(context.Context) ([]domain.Channel, error)
 	ReadNotificationChannel(context.Context, string) (domain.Channel, bool, error)
 	UpsertNotificationChannel(context.Context, domain.Channel) error
@@ -78,11 +78,16 @@ type SecretCipher interface {
 	Decrypt(string, []byte) ([]byte, error)
 }
 type Dependencies struct {
-	Store    Store
-	Secrets  SecretCipher
-	Webhooks WebhookPort
+	ProcessContext context.Context
+	Registrar      FeishuRegistrar
+	Messenger      FeishuMessenger
+	OnChange       func()
+	Store          Store
+	Secrets        SecretCipher
+	Webhooks       WebhookPort
 }
 type ChannelView struct {
+	PendingCount, FailedCount                           int64
 	ID, Provider, DisplayName, DeliveryMode, TargetType string
 	WebhookHint, LastDeliveryStatus, LastErrorCode      string
 	Enabled, SigningSecretConfigured                    bool
@@ -100,33 +105,29 @@ type Service struct {
 }
 
 func New(dependencies Dependencies) (*Service, error) {
-	if notificationDependencyMissing(dependencies.Store) {
+	if dependencies.Store == nil {
 		return nil, fmt.Errorf("%w: store is required", ErrDependenciesInvalid)
 	}
-	if notificationDependencyMissing(dependencies.Secrets) {
+	if dependencies.Secrets == nil {
 		return nil, fmt.Errorf("%w: secret cipher is required", ErrDependenciesInvalid)
 	}
-	if notificationDependencyMissing(dependencies.Webhooks) {
+	if dependencies.Webhooks == nil {
 		return nil, fmt.Errorf("%w: webhook port is required", ErrDependenciesInvalid)
 	}
-	return &Service{
+	service := &Service{
 		Store: dependencies.Store, Secrets: dependencies.Secrets, Webhooks: dependencies.Webhooks,
 		Now: time.Now, binding: newBindingController(),
-	}, nil
+	}
+	if dependencies.Registrar == nil && dependencies.Messenger == nil {
+		dependencies.Registrar, dependencies.Messenger = DisabledFeishu{}, DisabledFeishu{}
+	}
+	if dependencies.Registrar == nil || dependencies.Messenger == nil {
+		return nil, ErrDependenciesInvalid
+	}
+	service.configureFeishuBinding(dependencies.ProcessContext, dependencies.Registrar, dependencies.Messenger, dependencies.OnChange)
+	return service, nil
 }
 
-func notificationDependencyMissing(dependency any) bool {
-	if dependency == nil {
-		return true
-	}
-	value := reflect.ValueOf(dependency)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
-}
 func (s *Service) List(ctx context.Context) ([]ChannelView, error) {
 	items, err := s.Store.ListNotificationChannels(ctx)
 	if err != nil {
@@ -134,7 +135,13 @@ func (s *Service) List(ctx context.Context) ([]ChannelView, error) {
 	}
 	result := make([]ChannelView, 0, len(items))
 	for _, item := range items {
-		result = append(result, view(item))
+		v := view(item)
+		counts, countErr := s.Store.NotificationDeliveryCounts(ctx, item.ID)
+		if countErr != nil {
+			return nil, countErr
+		}
+		v.PendingCount, v.FailedCount = counts.Pending, counts.Failed
+		result = append(result, v)
 	}
 	return result, nil
 }
@@ -240,48 +247,22 @@ func (s *Service) Test(ctx context.Context, id string) (ChannelView, error) {
 	return s.deliverOne(ctx, id, "Simplus 通知渠道测试成功")
 }
 func (s *Service) Notify(ctx context.Context, event, message string) error {
-	return s.notify(ctx, event, message, nil)
-}
-
-func (s *Service) NotifyReceivedSMS(ctx context.Context, sender, body string) error {
-	if sender == "" || body == "" {
-		return ErrChannelInvalid
-	}
-	message := fmt.Sprintf("[Simplus] 新短信\n发件人：%s\n内容：\n%s", sender, body)
-	return s.notify(ctx, "sms.received", message, func(item domain.Channel) bool {
-		return item.Provider == string(WebhookProviderFeishu)
-	})
-}
-
-func (s *Service) NotifyReceivedSMSSummary(ctx context.Context, count int) error {
-	if count <= 0 {
-		return ErrChannelInvalid
-	}
-	message := fmt.Sprintf("[Simplus] 收到 %d 条新短信", count)
-	return s.notify(ctx, "sms.received", message, func(item domain.Channel) bool {
-		return item.Provider != string(WebhookProviderFeishu)
-	})
-}
-
-func (s *Service) notify(ctx context.Context, event, message string, include func(domain.Channel) bool) error {
 	if _, ok := allowedEvents[event]; !ok || message == "" || len([]rune(message)) > WebhookMessageRuneLimit {
 		return ErrChannelInvalid
 	}
-	items, err := s.Store.ListNotificationChannels(ctx)
+	id, err := newChannelID()
 	if err != nil {
 		return err
 	}
-	var failures []error
-	for _, item := range items {
-		if !item.Enabled || !contains(item.EventKinds, event) || include != nil && !include(item) {
-			continue
-		}
-		if _, err := s.deliver(ctx, item, message); err != nil {
-			failures = append(failures, fmt.Errorf("channel %s: %w", item.ID, err))
-		}
-	}
-	return errors.Join(failures...)
+	return s.Enqueue(ctx, domain.Event{Key: id, Kind: event, ObjectID: "system", Message: message, ObservedAt: s.Now().UTC()})
 }
+func (s *Service) Enqueue(ctx context.Context, event domain.Event) error {
+	if _, ok := allowedEvents[event.Kind]; !ok || event.Key == "" || event.ObjectID == "" || event.Message == "" || len([]rune(event.Message)) > WebhookMessageRuneLimit || event.ObservedAt.IsZero() {
+		return ErrChannelInvalid
+	}
+	return s.Store.EnqueueNotification(ctx, event)
+}
+
 func (s *Service) deliverOne(ctx context.Context, id, message string) (ChannelView, error) {
 	item, found, err := s.Store.ReadNotificationChannel(ctx, id)
 	if err != nil {
@@ -343,7 +324,7 @@ func (s *Service) deliverWebhook(ctx context.Context, item domain.Channel, messa
 			return view(item), ErrWebhookResultInvalid
 		}
 		_ = s.Store.RecordNotificationDelivery(ctx, item.ID, "failed", "DELIVERY_REJECTED", now)
-		return view(item), err
+		return view(item), errors.Join(ErrDeliveryPermanent, err)
 	case "":
 		if err != nil {
 			return view(item), err

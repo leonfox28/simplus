@@ -10,10 +10,10 @@ import (
 )
 
 func (set *Set) ListManagedModems(ctx context.Context) ([]domain.Record, error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return nil, fmt.Errorf("core database is not open")
 	}
-	rows, err := set.Core.QueryContext(ctx, `
+	rows, err := set.DB.QueryContext(ctx, `
 SELECT id, legacy_hardware_device_id, equipment_identity_fingerprint, usb_serial_fingerprint,
        display_name, model, transport, capability_mask, created_at_utc, updated_at_utc
 FROM managed_modems
@@ -49,10 +49,10 @@ ORDER BY created_at_utc, id`)
 }
 
 func (set *Set) CreateManagedModem(ctx context.Context, record domain.Record) error {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("core database is not open")
 	}
-	_, err := set.Core.ExecContext(ctx, `
+	_, err := set.DB.ExecContext(ctx, `
 INSERT INTO managed_modems (
   id, legacy_hardware_device_id, equipment_identity_fingerprint, usb_serial_fingerprint,
   display_name, model, transport, capability_mask, created_at_utc, updated_at_utc
@@ -67,10 +67,10 @@ INSERT INTO managed_modems (
 }
 
 func (set *Set) BindManagedModemIdentity(ctx context.Context, modemID, equipmentFingerprint, usbSerialFingerprint string, updatedAt time.Time) error {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("core database is not open")
 	}
-	result, err := set.Core.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE managed_modems
 SET legacy_hardware_device_id = '', equipment_identity_fingerprint = ?, usb_serial_fingerprint = ?, updated_at_utc = ?
 WHERE id = ? AND (equipment_identity_fingerprint = '' OR equipment_identity_fingerprint = ?)`,

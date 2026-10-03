@@ -1,35 +1,12 @@
 package mihomosupervisor
 
-import (
-	"context"
-	"errors"
-	"time"
-)
+import "github.com/leonfox28/simplus/internal/domain/mihomo"
 
-var (
-	ErrAlreadyRunning = errors.New("Mihomo is already running")
-	ErrNotRunning     = errors.New("Mihomo is not running")
-	ErrRequestInvalid = errors.New("Mihomo supervisor request is invalid")
-	ErrStartupFailed  = errors.New("Mihomo startup failed")
-)
+type StartRequest = mihomo.StartRequest
+type Status = mihomo.Status
+type API = mihomo.API
 
-type StartRequest struct {
-	SubscriptionID string `json:"subscriptionId"`
-	BinaryPath     string `json:"binaryPath"`
-	ConfigPath     string `json:"configPath"`
-}
-
-type Status struct {
-	Running        bool      `json:"running"`
-	PID            int       `json:"pid"`
-	SubscriptionID string    `json:"subscriptionId"`
-	BinaryPath     string    `json:"binaryPath"`
-	ConfigPath     string    `json:"configPath"`
-	StartedAt      time.Time `json:"startedAt"`
-}
-
-type API interface {
-	Status(context.Context) (Status, error)
-	Start(context.Context, StartRequest) (Status, error)
-	Stop(context.Context) error
-}
+var ErrAlreadyRunning = mihomo.ErrAlreadyRunning
+var ErrNotRunning = mihomo.ErrNotRunning
+var ErrRequestInvalid = mihomo.ErrRequestInvalid
+var ErrStartupFailed = mihomo.ErrStartupFailed

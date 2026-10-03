@@ -3,9 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from 'antd'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getSetupStatusQueryKey } from '@/api/generated/@tanstack/react-query.gen'
-import type { SetupStatusResponse } from '@/api/generated/types.gen'
-import { configureApiClient } from '@/api/setupClient'
+import { configureApiClient } from '@/api/configureClient'
 import { json } from '@/test/render'
 import LoginPage from './Login'
 
@@ -39,18 +37,7 @@ describe('LoginPage password-manager semantics', () => {
     expect(password).toHaveAttribute('autocomplete', 'current-password')
   })
 
-  it.each([
-    ['setup is incomplete', true, '/setup'],
-    ['setup is complete', false, '/dashboard'],
-  ] as const)('uses cached setup status after login when %s', async (_label, setupRequired, expectedPath) => {
-    const setup: SetupStatusResponse = {
-      installationState: setupRequired ? 'uninitialized' : 'ready',
-      phase: setupRequired ? 'bootstrap-required' : 'complete',
-      setupRequired,
-      businessApiAvailable: !setupRequired,
-      bootstrapGenerationAvailable: false,
-      supportedFlows: ['create-new'],
-    }
+  it('opens the dashboard after administrator login', async () => {
     const requests: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (request: Request) => {
       const path = new URL(request.url).pathname
@@ -61,12 +48,10 @@ describe('LoginPage password-manager semantics', () => {
       throw new Error(`unexpected ${path}`)
     }))
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-    queryClient.setQueryData(getSetupStatusQueryKey(), setup)
     render(<App><QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/login']}>
       <CurrentPath />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/setup" element={<div>初始化页面</div>} />
         <Route path="/dashboard" element={<div>概览页面</div>} />
       </Routes>
     </MemoryRouter></QueryClientProvider></App>)
@@ -75,7 +60,7 @@ describe('LoginPage password-manager semantics', () => {
     fireEvent.change(screen.getByPlaceholderText('密码'), { target: { value: 'synthetic-password' } })
     fireEvent.click(screen.getByRole('button', { name: /登\s*录/ }))
 
-    await waitFor(() => expect(screen.getByLabelText('当前路径')).toHaveTextContent(expectedPath))
+    await waitFor(() => expect(screen.getByLabelText('当前路径')).toHaveTextContent('/dashboard'))
     expect(requests).toEqual(['/api/v1/auth/login'])
   })
 })

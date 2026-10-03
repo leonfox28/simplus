@@ -117,7 +117,7 @@ func TestLoginAuthenticateCSRFAndLogout(t *testing.T) {
 }
 
 func TestLoginGuardsStateCredentialsAndRate(t *testing.T) {
-	if _, err := NewService(authTestState{state: "uninitialized"}, &authTestStore{}, authTestVerifier{}).Login(context.Background(), "admin", "correct"); err != nil {
+	if _, err := NewService(authTestState{state: "uninitialized"}, &authTestStore{}, authTestVerifier{}).Login(context.Background(), "admin", "correct"); !errors.Is(err, ErrInstanceNotReady) {
 		t.Fatalf("uninitialized administrator login error = %v", err)
 	}
 	service := NewService(authTestState{state: "ready"}, &authTestStore{}, authTestVerifier{})

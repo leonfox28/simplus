@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getAuthSession, getSetupSession, login, sendMessage } from './generated/sdk.gen'
-import { configureApiClient } from './setupClient'
-import { onSessionExpired } from './session'
+import { getAuthSession, login, sendMessage } from './generated/sdk.gen'
+import { configureApiClient } from './configureClient'
+import { advanceSession, onSessionExpired } from './session'
 import { runtimeFetch } from './runtime'
 
 describe('API runtime', () => {
@@ -24,12 +24,11 @@ describe('API runtime', () => {
     expect(request.headers.get('X-Simplus-CSRF')).toBe('test-token')
   })
 
-  it('never adds CSRF to login or setup mutations', async () => {
+  it('never adds CSRF to login', async () => {
     const fetch = vi.fn(async (_request: Request) => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetch)
     await runtimeFetch('/api/v1/auth/login', { method: 'POST', body: '{}' })
-    await runtimeFetch('/api/v1/setup/bootstrap/consume', { method: 'POST', body: '{}' })
-    expect(fetch.mock.calls).toHaveLength(2)
+    expect(fetch.mock.calls).toHaveLength(1)
     for (const [request] of fetch.mock.calls) expect(request.headers.has('X-Simplus-CSRF')).toBe(false)
   })
 
@@ -41,17 +40,6 @@ describe('API runtime', () => {
       kind: 'http', code: 'AUTH_SESSION_UNAUTHORIZED', retryable: false, status: 401,
     })
     expect(expired).toHaveBeenCalledOnce()
-    unsubscribe()
-  })
-
-  it('keeps setup-session authorization separate from administrator expiry', async () => {
-    const expired = vi.fn()
-    const unsubscribe = onSessionExpired(expired)
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'SETUP_SESSION_UNAUTHORIZED', retryable: false }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
-    await expect(getSetupSession({ throwOnError: true })).rejects.toMatchObject({
-      kind: 'http', code: 'SETUP_SESSION_UNAUTHORIZED', retryable: false, status: 401,
-    })
-    expect(expired).not.toHaveBeenCalled()
     unsubscribe()
   })
 
@@ -93,6 +81,16 @@ describe('API runtime', () => {
     await expect(getAuthSession({ throwOnError: true })).rejects.toMatchObject({
       kind: 'invalid-response', code: 'API_RESPONSE_INVALID', retryable: false,
     })
+  })
+
+  it('discards responses from an earlier administrator session', async () => {
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+    const pending = getAuthSession({ throwOnError: true })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    advanceSession()
+    finish(new Response(JSON.stringify({ username: 'old-admin', locale: 'zh-CN', expiresAt: '2099-01-01T00:00:00Z' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await expect(pending).rejects.toMatchObject({ kind: 'aborted', code: 'REQUEST_ABORTED' })
   })
 
   it('distinguishes an explicit abort from a network failure', async () => {

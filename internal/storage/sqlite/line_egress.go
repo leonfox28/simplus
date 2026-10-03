@@ -9,7 +9,7 @@ import (
 )
 
 func (set *Set) ListLineEgressBindings(ctx context.Context) ([]lineegress.Binding, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT line_id, mode, country_code, updated_at_utc FROM line_egress_bindings ORDER BY line_id`)
+	rows, err := set.DB.QueryContext(ctx, `SELECT line_id, mode, country_code, updated_at_utc FROM line_egress_bindings ORDER BY line_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list line egress bindings: %w", err)
 	}
@@ -34,7 +34,7 @@ func (set *Set) ListLineEgressBindings(ctx context.Context) ([]lineegress.Bindin
 }
 
 func (set *Set) UpsertLineEgressBinding(ctx context.Context, binding lineegress.Binding) error {
-	_, err := set.Core.ExecContext(ctx, `
+	_, err := set.DB.ExecContext(ctx, `
 INSERT INTO line_egress_bindings (line_id, mode, country_code, updated_at_utc)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(line_id) DO UPDATE SET

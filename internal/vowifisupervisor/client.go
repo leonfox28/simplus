@@ -9,7 +9,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,12 +53,20 @@ func (client *Client) SendSMS(ctx context.Context, request SMSSendRequest) (SMSS
 	if !validSMSSendRequest(request) {
 		return SMSSendResponse{}, ErrRequestInvalid
 	}
+	var connected atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	var response SMSSendResponse
 	if err := client.request(ctx, http.MethodPost, "/v1/vowifi/sms/send", request, &response); err != nil {
-		return SMSSendResponse{}, err
+		if errors.Is(err, ErrSMSRejected) || errors.Is(err, ErrRequestInvalid) || errors.Is(err, ErrNotRunning) || errors.Is(err, ErrSMSUnavailable) {
+			return SMSSendResponse{}, err
+		}
+		if !connected.Load() {
+			return SMSSendResponse{}, ErrSMSNotDispatched
+		}
+		return SMSSendResponse{}, ErrSMSOutcomeUnknown
 	}
 	if !validSMSSendResponse(response) {
-		return SMSSendResponse{}, ErrSMSUnavailable
+		return SMSSendResponse{}, ErrSMSOutcomeUnknown
 	}
 	return response, nil
 }
@@ -177,7 +187,14 @@ func (client *Client) request(ctx context.Context, method, path string, input, o
 		}
 	}
 	if output != nil {
-		return json.NewDecoder(io.LimitReader(response.Body, maxSMSResponseBytes)).Decode(output)
+		decoder := json.NewDecoder(io.LimitReader(response.Body, maxSMSResponseBytes))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(output); err != nil {
+			return err
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return errors.New("invalid trailing supervisor response")
+		}
 	}
 	return nil
 }

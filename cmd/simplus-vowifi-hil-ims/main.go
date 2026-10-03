@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/vowifihil"
+
+	"github.com/leonfox28/simplus/internal/ims"
 )
 
 type result struct {
@@ -74,7 +76,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		return output, false
 	}
 
-	unprotected, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice()), Port: vowifihil.IMSSIPPort})
+	unprotected, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(source.AsSlice()), Port: ims.IMSSIPPort})
 	if err != nil {
 		output.Stage = "unprotected-port"
 		return output, false
@@ -124,7 +126,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		return output, false
 	}
 	unprotectedPort := uint16(unprotected.LocalAddr().(*net.UDPAddr).Port)
-	input := vowifihil.IMSInitialRegisterInput{
+	input := ims.IMSInitialRegisterInput{
 		Source: source, UnprotectedPort: unprotectedPort,
 		ProtectedClientPort: uint16(protectedClient.LocalAddr().(*net.UDPAddr).Port),
 		ProtectedServerPort: uint16(protectedServer.LocalAddr().(*net.UDPAddr).Port),
@@ -135,7 +137,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		Branch:          branch, FromTag: fromTag, CallID: callToken + "@" + source.String(), ContactUser: contactUser,
 		WLANNodeID: wlanNodeID,
 	}
-	packet, securityClient, err := vowifihil.BuildIMSInitialRegister(input)
+	packet, securityClient, err := ims.BuildIMSInitialRegister(input)
 	if err != nil {
 		output.Stage = "register-build"
 		return output, false
@@ -152,7 +154,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 	}
 	defer zero(response)
 	output.ResponseReceived = true
-	summary, parseErr := vowifihil.ParseIMSInitialResponse(response, input.CallID, input.HomeDomain)
+	summary, parseErr := ims.ParseIMSInitialResponse(response, input.CallID, input.HomeDomain)
 	output.Status = summary.Status
 	output.MinExpires = summary.MinExpires
 	output.AKAAlgorithm = summary.AKAAlgorithm
@@ -163,7 +165,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		return output, false
 	}
 
-	challenge, err := vowifihil.ExtractIMSRegistrationChallenge(response, input.CallID, input.HomeDomain)
+	challenge, err := ims.ExtractIMSRegistrationChallenge(response, input.CallID, input.HomeDomain)
 	if err != nil {
 		output.Stage = "challenge-parse"
 		return output, false
@@ -171,29 +173,29 @@ func run(source, pcscf netip.Addr) (result, bool) {
 	defer zero(challenge.RAND[:])
 	defer zero(challenge.AUTN[:])
 	authContext, cancelAuth := context.WithTimeout(context.Background(), 15*time.Second)
-	material, akaState, err := vowifihil.AuthenticateIMSChallenge(authContext, inspection.Target, challenge)
+	material, akaState, err := ims.AuthenticateIMSChallenge(authContext, inspection.Target, challenge)
 	cancelAuth()
 	output.AKAState = akaState
 	if err != nil {
-		vowifihil.DiscardIMSAKASynchronizationFailure(err)
+		ims.DiscardIMSAKASynchronizationFailure(err)
 		output.Stage = "ims-aka"
 		return output, false
 	}
 	defer material.Destroy()
 
 	tunnelContext, cancelTunnel := context.WithTimeout(context.Background(), 3*time.Second)
-	tunnel, err := vowifihil.DiscoverEPDGTunnel(tunnelContext, source)
+	tunnel, err := ims.DiscoverEPDGTunnel(tunnelContext, source)
 	cancelTunnel()
 	if err != nil {
 		output.Stage = "epdg-policy"
 		return output, false
 	}
-	clientSecurity := vowifihil.IMSClientIPSecParameters{
+	clientSecurity := ims.IMSClientIPSecParameters{
 		ClientSPI: input.ClientSPI, ServerSPI: input.ServerSPI,
 		ProtectedClientPort: input.ProtectedClientPort, ProtectedServerPort: input.ProtectedServerPort,
 	}
 	installContext, cancelInstall := context.WithTimeout(context.Background(), 4*time.Second)
-	installation, err := vowifihil.InstallIMSXFRM(installContext, source, pcscf, tunnel,
+	installation, err := ims.InstallIMSXFRM(installContext, source, pcscf, tunnel,
 		clientSecurity, challenge.SecurityServer, &material)
 	cancelInstall()
 	if err != nil {
@@ -213,7 +215,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 		output.Stage = "random"
 		return output, false
 	}
-	protectedPacket, err := vowifihil.BuildIMSAuthenticatedRegister(input, challenge, material.RES,
+	protectedPacket, err := ims.BuildIMSAuthenticatedRegister(input, challenge, material.RES,
 		securityClient, protectedBranch, cnonce)
 	if err != nil {
 		output.Stage = "authenticated-register-build"
@@ -242,7 +244,7 @@ func run(source, pcscf netip.Addr) (result, bool) {
 }
 
 func exchangeInitialRegister(connection *net.UDPConn, pcscf netip.Addr, packet []byte) ([]byte, bool, string) {
-	target := &net.UDPAddr{IP: net.IP(pcscf.AsSlice()), Port: vowifihil.IMSSIPPort}
+	target := &net.UDPAddr{IP: net.IP(pcscf.AsSlice()), Port: ims.IMSSIPPort}
 	buffer := make([]byte, 64<<10)
 	deadline := time.Now().Add(10 * time.Second)
 	backoff := 500 * time.Millisecond
@@ -277,7 +279,7 @@ func exchangeInitialRegister(connection *net.UDPConn, pcscf netip.Addr, packet [
 }
 
 func exchangeAuthenticatedRegister(client, server *net.UDPConn, pcscf netip.Addr,
-	security vowifihil.IMSIPSecParameters, packet []byte, callID string) (int, bool, string, string) {
+	security ims.IMSIPSecParameters, packet []byte, callID string) (int, bool, string, string) {
 	target := &net.UDPAddr{IP: net.IP(pcscf.AsSlice()), Port: int(security.ProtectedServerPort)}
 	buffer := make([]byte, 64<<10)
 	defer zero(buffer)
@@ -326,7 +328,7 @@ func exchangeAuthenticatedRegister(client, server *net.UDPConn, pcscf netip.Addr
 				zero(buffer[:count])
 				continue
 			}
-			status, parseErr := vowifihil.ParseIMSAuthenticatedResponse(buffer[:count], callID)
+			status, parseErr := ims.ParseIMSAuthenticatedResponse(buffer[:count], callID)
 			zero(buffer[:count])
 			if parseErr != nil || status < 200 {
 				continue

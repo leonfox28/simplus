@@ -43,10 +43,10 @@ part of the current stack.
 ```text
 web/src/main.tsx
   -> AppProviders (Ant Design + QueryClient + BrowserRouter)
-  -> BootstrapGate (setup/session routing)
+  -> SessionGate (installation/session routing)
   -> AppRouter (explicit lazy routes)
   -> AppShell (desktop Sider / mobile Drawer + Outlet + RealtimeBridge)
-  -> pages/*.tsx
+  -> features/*/*.tsx and pages/*.tsx
        -> generated TanStack Query options/mutations
        -> generated SDK -> configured Fetch runtime -> /api/v1 HTTP
 
@@ -62,8 +62,8 @@ web/src/main.tsx
 - Import routing APIs from `react-router`, UI primitives from `antd`, and icons
   from `@ant-design/icons`; do not introduce Umi or Pro Components.
 - Define routes explicitly in `web/src/app/AppRouter.tsx` and navigation in
-  `web/src/app/navigation.tsx`. Authentication/setup redirects belong in
-  `BootstrapGate`, not in individual business pages.
+  `web/src/app/navigation.tsx`. Authentication and installation guards belong in
+  `SessionGate`, not in individual business pages.
 - Use generated `*Options`, `*InfiniteOptions`, and `*Mutation` helpers. Build
   query invalidation from generated keys/tags rather than handwritten endpoint
   strings.

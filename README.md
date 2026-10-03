@@ -16,7 +16,7 @@ Simplus 是一个运行在 Linux 主机上的可信局域网通信控制后台�
 
 当前部署运行形态已从宿主机原生进程迁移到 Docker Compose。仓库通过 `control`、
 `agent` 和 `netd` 三个镜像划分管理面、硬件访问与网络权限；Compose 中的 `app` 服务
-运行 control 镜像，并由 `data-init` 和 `bootstrap` 完成数据目录初始化及首次管理员创建。
+运行 control 镜像，并由 `data-init` 和 `provision` 完成数据目录初始化及首次管理员创建。
 
 容器部署已经在 Debian 13/amd64 开发宿主完成镜像与隔离 smoke，并以 `v0.1.1` Release
 部署包和 GHCR 镜像完成有数据切换、回滚演练及最终健康、摘要、挂载验收。本次切换未执行
@@ -47,7 +47,9 @@ AT/QMI、设备路径或通用硬件写入口；真实副作用必须经过独�
 remap 及其他发行版尚未验证。Web 与 controller 只应开放给受信任局域网，不能直接暴露
 到公网。
 
-当前可安装候选是 `v0.1.1`；不要使用 `v0.1.0`、`latest` 或生产机本地构建的镜像。
+当前源码的单库、provision 与新通知重构尚未发布。`v0.1.1` 属于旧布局，不能使用
+本文的新布局步骤；请等待包含 [ADR 0028](docs/decisions/0028-control-state-and-durable-notifications.md)
+的新版本，将下文 `vX.Y.Z` 替换为该明确版本。不要使用 `v0.1.0`、`latest` 或生产机本地构建的镜像。
 生产安装不需要克隆源码，也不需要逐个下载 Release 中的源码包或其他发布材料。安装者
 实际只需下载一个 `simplus-compose-*.tar.gz` 部署归档和它的一个 `.sha256` 校验文件；
 三个 GHCR 镜像稍后由 `docker compose pull` 自动拉取。先确认宿主符合支持边界并取得
@@ -65,7 +67,7 @@ stat -c '%g' /dev/ttyUSB0
 持久目录 `/opt/simplus`，不要长期从 Downloads、`/tmp` 或其他临时解包目录运行：
 
 ```bash
-version=v0.1.1
+version=vX.Y.Z
 base="https://github.com/leonfox28/simplus/releases/download/$version"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz" &&
   curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
@@ -90,7 +92,7 @@ curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz" &&
 的 `dialout` 通常为 `20`，但应以实际设备为准。生产镜像版本由部署包固定，不要增加
 镜像 tag 变量。
 
-持久数据将写入 `/opt/simplus/data/core` 和 `/opt/simplus/data/agent`。这些目录包含
+持久数据将写入 `/opt/simplus/data/control-v2` 和 `/opt/simplus/data/agent`。这些目录包含
 数据库、管理员状态和运行数据；请在升级或恢复前停止写入并完整备份 `/opt/simplus/data`。
 确认数据位置后，审阅并执行宿主准备脚本，再渲染、拉取和启动：
 
@@ -100,12 +102,12 @@ sudo bash prepare-container-host.sh &&
   docker compose config --quiet &&
   docker compose pull &&
   docker compose up -d &&
-  docker compose wait bootstrap &&
+  docker compose wait provision &&
   docker compose ps &&
-  docker compose logs bootstrap
+  docker compose logs provision
 ```
 
-`bootstrap` 只在全新实例首次启动时输出 `simplus_admin` 的一次性随机初始密码，请立即
+`provision` 只在全新实例首次启动时输出 `simplus_admin` 的一次性随机初始密码，请立即
 保存并在首次登录后修改。已有实例重建时不会覆盖密码，也不会再次输出原密码。管理后台
 默认位于 `http://<host-lan-ip>:8080`。
 

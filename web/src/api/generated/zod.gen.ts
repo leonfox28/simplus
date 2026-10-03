@@ -2,12 +2,6 @@
 
 import * as z from 'zod';
 
-export const zSetupCompletionResponse = z.object({
-    installationState: z.enum(['ready']),
-    managementUrl: z.string().min(1).max(2048),
-    loginRequired: z.literal(true)
-});
-
 export const zHealthStatus = z.enum(['ok', 'degraded']);
 
 export const zInstallationState = z.enum([
@@ -16,80 +10,7 @@ export const zInstallationState = z.enum([
     'maintenance'
 ]);
 
-export const zSetupPhase = z.enum([
-    'bootstrap-required',
-    'complete',
-    'maintenance'
-]);
-
-export const zSetupFlow = z.enum(['create-new']);
-
-export const zConsumeBootstrapRequest = z.object({
-    bootstrapCode: z.string().regex(/^[A-Za-z0-9_-]{43}$/)
-});
-
-export const zConfigureSetupAdministratorRequest = z.object({
-    username: z.string().min(3).max(32).regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/),
-    password: z.string().min(12).max(128),
-    passwordConfirmation: z.string().min(12).max(128),
-    instanceDefaultLocale: z.enum(['zh-CN', 'en-US'])
-});
-
-export const zConfigureSetupStorageRequest = z.object({
-    recordingsRoot: z.string().min(1).max(4096).regex(/^\//)
-});
-
-export const zSetupHttpsMode = z.enum(['loopback-only', 'local-ca']);
-
-export const zConfigureSetupHttpsRequest = z.object({
-    mode: zSetupHttpsMode,
-    listenHost: z.string().min(1).max(255),
-    listenPort: z.int().gte(1).lte(65535),
-    subjectAlternativeNames: z.array(z.string().min(1).max(253)).max(16)
-});
-
-export const zConfirmSetupHttpsRequest = z.object({
-    rootFingerprintSha256: z.string().regex(/^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/)
-});
-
-export const zSetupRootCertificateResponse = z.object({
-    pem: z.string().min(1),
-    rootFingerprintSha256: z.string().regex(/^[0-9A-F]{2}(:[0-9A-F]{2}){31}$/)
-});
-
-export const zSetupSessionResponse = z.object({
-    authorized: z.literal(true),
-    expiresAt: z.iso.datetime(),
-    selectedFlow: zSetupFlow,
-    supportedFlows: z.tuple([zSetupFlow]),
-    administratorConfigured: z.boolean(),
-    administratorUsername: z.string().max(32),
-    instanceDefaultLocale: z.enum(['zh-CN', 'en-US']),
-    storageConfigured: z.boolean(),
-    dataRoot: z.string().max(4096),
-    recordingsRoot: z.string().max(4096),
-    httpsConfigured: z.boolean(),
-    httpsConfirmed: z.boolean(),
-    httpsMode: z.enum([
-        '',
-        'loopback-only',
-        'local-ca',
-        'imported'
-    ]),
-    httpsListenUrl: z.string().max(2048),
-    httpsRootFingerprint: z.string().max(95),
-    httpsLeafNotAfter: z.string().max(64),
-    hardwareReviewed: z.boolean(),
-    hardwareDeviceCount: z.int().gte(0),
-    hardwareLineCount: z.int().gte(0),
-    hardwareInventoryDigest: z.string().max(64)
-});
-
-export const zBackendKind = z.enum([
-    'simulator',
-    'hardware',
-    'replay'
-]);
+export const zBackendKind = z.enum(['simulator', 'hardware']);
 
 export const zDeviceTransport = z.enum([
     'simulated',
@@ -628,15 +549,6 @@ export const zSendSmsRequest = z.object({
     body: z.string().min(1).max(1600)
 });
 
-export const zSetupStatusResponse = z.object({
-    installationState: zInstallationState,
-    phase: zSetupPhase,
-    setupRequired: z.boolean(),
-    businessApiAvailable: z.boolean(),
-    bootstrapGenerationAvailable: z.boolean(),
-    supportedFlows: z.array(zSetupFlow).max(1)
-});
-
 export const zHealthResponse = z.object({
     status: zHealthStatus,
     version: z.string(),
@@ -837,10 +749,16 @@ export const zNotificationEventKind = z.enum([
     'sms.failed',
     'call.incoming',
     'call.missed',
-    'system.degraded'
+    'system.degraded',
+    'vowifi.connected',
+    'vowifi.disconnected',
+    'cellular.connected',
+    'cellular.disconnected'
 ]);
 
 export const zNotificationChannel = z.object({
+    pendingCount: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    failedCount: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     id: z.string().regex(/^channel_[A-Za-z0-9_-]{22}$/),
     provider: z.enum(['wecom', 'feishu']),
     deliveryMode: z.enum(['webhook', 'feishu_app']),
@@ -849,7 +767,7 @@ export const zNotificationChannel = z.object({
     webhookHint: z.enum(['qyapi.weixin.qq.com', 'open.feishu.cn']),
     signingSecretConfigured: z.boolean(),
     enabled: z.boolean(),
-    eventKinds: z.array(zNotificationEventKind).min(1).max(5),
+    eventKinds: z.array(zNotificationEventKind).min(1).max(9),
     lastDeliveryAt: z.string().max(64),
     lastDeliveryStatus: z.enum([
         'never',
@@ -865,7 +783,7 @@ export const zNotificationChannelMutation = z.object({
     webhookUrl: z.string().max(4096),
     signingSecret: z.string().max(512),
     enabled: z.boolean(),
-    eventKinds: z.array(zNotificationEventKind).min(1).max(5)
+    eventKinds: z.array(zNotificationEventKind).min(1).max(9)
 });
 
 export const zNotificationChannelList = z.object({
@@ -1343,76 +1261,6 @@ export const zReadManagedModemEquipmentIdentityPath = z.object({
  * Current IMEI read directly from the resolved modem; never persisted
  */
 export const zReadManagedModemEquipmentIdentityResponse = zManagedModemEquipmentIdentity;
-
-/**
- * Current first-run boundary
- */
-export const zGetSetupStatusResponse = zSetupStatusResponse;
-
-export const zConsumeSetupBootstrapBody = zConsumeBootstrapRequest;
-
-/**
- * Authorized setup session; the opaque session token is stored only in an HttpOnly cookie
- */
-export const zConsumeSetupBootstrapResponse = zSetupSessionResponse;
-
-/**
- * Current restricted setup session
- */
-export const zGetSetupSessionResponse = zSetupSessionResponse;
-
-export const zPutSetupAdministratorBody = zConfigureSetupAdministratorRequest;
-
-/**
- * Initial administrator configuration persisted; password material is never returned
- */
-export const zPutSetupAdministratorResponse = zSetupSessionResponse;
-
-export const zPutSetupStorageBody = zConfigureSetupStorageRequest;
-
-/**
- * Storage roots were identity-checked, write-tested, and persisted
- */
-export const zPutSetupStorageResponse = zSetupSessionResponse;
-
-export const zPutSetupHttpsBody = zConfigureSetupHttpsRequest;
-
-/**
- * Management endpoint configuration persisted
- */
-export const zPutSetupHttpsResponse = zSetupSessionResponse;
-
-export const zConfirmSetupHttpsBody = zConfirmSetupHttpsRequest;
-
-/**
- * The HTTPS candidate was confirmed
- */
-export const zConfirmSetupHttpsResponse = zSetupSessionResponse;
-
-/**
- * Public root certificate and independently displayed fingerprint
- */
-export const zGetSetupHttpsRootCertificateResponse = zSetupRootCertificateResponse;
-
-/**
- * Current read-only device and line snapshot
- */
-export const zGetSetupInventoryResponse = zInventoryResponse;
-
-/**
- * Current normalized RF-Off hardware topology
- */
-export const zGetSetupHardwareTopologyResponse = zHardwareTopologyResponse;
-
-/**
- * Current hardware inventory digest was persisted
- */
-export const zConfirmSetupHardwareResponse = zSetupSessionResponse;
-
-/**
- * The instance is ready and requires normal administrator login
- */
-export const zCompleteSetupResponse = zSetupCompletionResponse;
 
 /**
  * Current health snapshot

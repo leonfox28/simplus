@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/leonfox28/simplus/internal/vowifihil"
+	"github.com/leonfox28/simplus/internal/ims"
 )
 
 var pcscfLogPattern = regexp.MustCompile(`received P-CSCF server IP ([0-9]{1,3}(?:\.[0-9]{1,3}){3})`)
@@ -93,16 +93,16 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 	defer os.RemoveAll(attemptDir)
 
 	preflightCtx, cancelPreflight := context.WithTimeout(ctx, 35*time.Second)
-	inspection, err := vowifihil.InspectHostVoWiFiLine(preflightCtx, config.HardwareLineID)
+	inspection, err := ims.InspectHostVoWiFiLine(preflightCtx, config.HardwareLineID)
 	cancelPreflight()
 	if err != nil {
 		return attemptFailure{"SIM_PREFLIGHT_FAILED"}
 	}
-	paths, err := vowifihil.PathsFor(attemptDir)
+	paths, err := ims.PathsFor(attemptDir)
 	if err != nil {
 		return attemptFailure{"RUNTIME_PATH_INVALID"}
 	}
-	strongSwan, err := vowifihil.BuildAt(vowifihil.Input{Target: inspection.Target, IMSI: inspection.IMSI}, paths)
+	strongSwan, err := ims.BuildAt(ims.Input{Target: inspection.Target, IMSI: inspection.IMSI}, paths)
 	inspection.IMSI = ""
 	if err != nil {
 		return attemptFailure{"STRONGSWAN_CONFIG_FAILED"}
@@ -148,13 +148,13 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 	if !waitForSocket(ctx, paths.VICISocket, charonDone, 8*time.Second) {
 		return attemptFailure{"STRONGSWAN_NOT_READY"}
 	}
-	input, err := vowifihil.ParseConnectionInput(strongSwan.VICI)
+	input, err := ims.ParseConnectionInput(strongSwan.VICI)
 	if err != nil {
 		return attemptFailure{"STRONGSWAN_CONFIG_FAILED"}
 	}
 	emit(workerEvent{State: StateConnecting, Stage: "EPDG", Attempt: attempt})
 	initiateCtx, cancelInitiate := context.WithTimeout(ctx, 55*time.Second)
-	err = vowifihil.Initiate(initiateCtx, paths.VICISocket, input)
+	err = ims.Initiate(initiateCtx, paths.VICISocket, input)
 	cancelInitiate()
 	if err != nil {
 		return attemptFailure{latestDiagnostic(diagnostics, func() string { return trace.failureCode(initiateErrorCode(err)) })}
@@ -168,18 +168,18 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 		return attemptFailure{"PCSCF_MISSING"}
 	}
 	emit(workerEvent{State: StateRegistering, Stage: "IMS", Attempt: attempt})
-	var session *vowifihil.IMSSession
-	var registration vowifihil.IMSRegistrationResult
+	var session *ims.IMSSession
+	var registration ims.IMSRegistrationResult
 	for _, address := range pcscfAddresses {
 		registerCtx, cancelRegister := context.WithTimeout(ctx, 50*time.Second)
-		session, registration, err = vowifihil.EstablishIMSSession(registerCtx, source, address, inspection)
+		session, registration, err = ims.EstablishIMSSession(registerCtx, source, address, inspection)
 		cancelRegister()
 		if err == nil {
 			break
 		}
 	}
 	if session == nil || err != nil {
-		code := vowifihil.IMSRegistrationFailureCode(err)
+		code := ims.IMSRegistrationFailureCode(err)
 		if code == "" {
 			code = "IMS_REGISTER_FAILED"
 		}
@@ -217,7 +217,7 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 			pollCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 			err := session.PollSMS(pollCtx)
 			cancel()
-			if err != nil && !errors.Is(err, vowifihil.ErrIMSSMSUnavailable) {
+			if err != nil && !errors.Is(err, ims.ErrIMSSMSUnavailable) {
 				return attemptFailure{"IMS_SMS_RECEIVE_FAILED"}
 			}
 		case <-keepalive.C:
@@ -248,15 +248,15 @@ func runWorkerAttempt(ctx context.Context, config WorkerConfig, attempt int, emi
 
 func imsRefreshErrorCode(err error) string {
 	switch {
-	case errors.Is(err, vowifihil.ErrIMSReauthenticationRequired):
+	case errors.Is(err, ims.ErrIMSReauthenticationRequired):
 		return "IMS_REAUTH_REQUIRED"
-	case errors.Is(err, vowifihil.ErrIMSRefreshIntervalRejected):
+	case errors.Is(err, ims.ErrIMSRefreshIntervalRejected):
 		return "IMS_REFRESH_INTERVAL_REJECTED"
-	case errors.Is(err, vowifihil.ErrIMSRefreshRejected):
+	case errors.Is(err, ims.ErrIMSRefreshRejected):
 		return "IMS_REFRESH_REJECTED"
-	case errors.Is(err, vowifihil.ErrIMSRefreshNoResponse):
+	case errors.Is(err, ims.ErrIMSRefreshNoResponse):
 		return "IMS_REFRESH_NO_RESPONSE"
-	case errors.Is(err, vowifihil.ErrIMSRefreshResponseUnmatched):
+	case errors.Is(err, ims.ErrIMSRefreshResponseUnmatched):
 		return "IMS_REFRESH_RESPONSE_UNMATCHED"
 	default:
 		return "IMS_REFRESH_FAILED"
@@ -265,15 +265,15 @@ func imsRefreshErrorCode(err error) string {
 
 func initiateErrorCode(err error) string {
 	switch {
-	case errors.Is(err, vowifihil.ErrVICIUnavailable):
+	case errors.Is(err, ims.ErrVICIUnavailable):
 		return "STRONGSWAN_VICI_UNAVAILABLE"
-	case errors.Is(err, vowifihil.ErrRequiredPluginsUnavailable):
+	case errors.Is(err, ims.ErrRequiredPluginsUnavailable):
 		return "STRONGSWAN_PLUGINS_MISSING"
-	case errors.Is(err, vowifihil.ErrConnectionLoadFailed):
+	case errors.Is(err, ims.ErrConnectionLoadFailed):
 		return "STRONGSWAN_CONNECTION_LOAD_FAILED"
-	case errors.Is(err, vowifihil.ErrConnectionVerifyFailed):
+	case errors.Is(err, ims.ErrConnectionVerifyFailed):
 		return "STRONGSWAN_CONNECTION_VERIFY_FAILED"
-	case errors.Is(err, vowifihil.ErrConnectionInitiateFailed):
+	case errors.Is(err, ims.ErrConnectionInitiateFailed):
 		return "EPDG_CONNECT_FAILED"
 	default:
 		return "EPDG_CONNECT_FAILED"

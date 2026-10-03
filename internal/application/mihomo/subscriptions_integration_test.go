@@ -22,7 +22,10 @@ func TestSubscriptionCRUDStoresAndReturnsPlaintextURLInPrivateDatabase(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := app.NewSubscriptionService(stores, keyring)
+	service, err := app.NewSubscriptionService(stores, keyring, app.DisabledSubscriptionFetcher{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	created, err := service.Create(ctx, "", "https://subscription.example/api?token=highly-secret-token", true)
 	if err != nil {
 		t.Fatal(err)

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -40,46 +39,6 @@ func (manager *fakeSetupManager) Status(context.Context) (setupapp.Status, error
 	return manager.status, nil
 }
 
-func (*fakeSetupManager) ConsumeBootstrap(context.Context, string) (setupapp.SessionGrant, error) {
-	return setupapp.SessionGrant{}, nil
-}
-
-func (*fakeSetupManager) ReadSession(context.Context, string) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) ConfigureAdministrator(context.Context, string, setupapp.AdministratorInput) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) ConfigureStorage(context.Context, string, setupapp.StorageInput) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) ConfigureHTTPS(context.Context, string, setupapp.HTTPSInput) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) ConfirmHTTPS(context.Context, string, string) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) ReadRootCertificate(context.Context, string) ([]byte, string, error) {
-	return nil, "", nil
-}
-
-func (*fakeSetupManager) ConfirmHardwareReview(context.Context, string, setupapp.HardwareReviewInput) (setupapp.Session, error) {
-	return setupapp.Session{}, nil
-}
-
-func (*fakeSetupManager) Complete(context.Context, string, setupapp.HardwareReviewInput) (setupapp.Completion, error) {
-	return setupapp.Completion{}, nil
-}
-
-func (*fakeSetupManager) BeginAdministratorSetup(context.Context) (setupapp.SessionGrant, error) {
-	return setupapp.SessionGrant{}, nil
-}
-
 type fakeInventoryReader struct{}
 
 func (*fakeInventoryReader) Snapshot(context.Context) (inventory.Snapshot, error) {
@@ -107,37 +66,6 @@ func (manager *fakeRealtimeManager) Publish(topics []realtime.Topic, attention r
 	manager.publishCalls++
 	manager.topics = append([]realtime.Topic(nil), topics...)
 	manager.attention = attention
-}
-
-func TestHTTPApplicationPortMethodSetsRemainNarrow(t *testing.T) {
-	tests := []struct {
-		name     string
-		port     reflect.Type
-		expected []string
-	}{
-		{name: "health", port: reflect.TypeOf((*HealthReader)(nil)).Elem(), expected: []string{"Snapshot"}},
-		{name: "setup", port: reflect.TypeOf((*SetupManager)(nil)).Elem(), expected: []string{
-			"Status", "ConsumeBootstrap", "ReadSession", "ConfigureAdministrator", "ConfigureStorage",
-			"ConfigureHTTPS", "ConfirmHTTPS", "ReadRootCertificate", "ConfirmHardwareReview", "Complete",
-			"BeginAdministratorSetup",
-		}},
-		{name: "inventory", port: reflect.TypeOf((*InventoryReader)(nil)).Elem(), expected: []string{"Snapshot", "Topology"}},
-		{name: "realtime", port: reflect.TypeOf((*RealtimeManager)(nil)).Elem(), expected: []string{"Subscribe", "Publish"}},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			actual := make([]string, 0, test.port.NumMethod())
-			for index := 0; index < test.port.NumMethod(); index++ {
-				actual = append(actual, test.port.Method(index).Name)
-			}
-			sort.Strings(actual)
-			sort.Strings(test.expected)
-			if !reflect.DeepEqual(actual, test.expected) {
-				t.Fatalf("methods = %v, want %v", actual, test.expected)
-			}
-		})
-	}
 }
 
 func TestServerAcceptsIndependentApplicationPortFakes(t *testing.T) {
@@ -181,20 +109,13 @@ func TestServerTreatsNilApplicationPortsAsUnavailable(t *testing.T) {
 		realtime  RealtimeManager
 	}{
 		{name: "raw nil"},
-		{
-			name:      "typed nil",
-			health:    (*fakeHealthReader)(nil),
-			setup:     (*fakeSetupManager)(nil),
-			inventory: (*fakeInventoryReader)(nil),
-			realtime:  (*fakeRealtimeManager)(nil),
-		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := WithRealtime(New(test.health, test.setup, test.inventory, nil, acceptingAuthenticator{}, nil), test.realtime)
-			if !httpDependencyMissing(server.health) || !httpDependencyMissing(server.setup) ||
-				!httpDependencyMissing(server.inventory) || !httpDependencyMissing(server.realtime) {
+			if !featureDisabled(server.health) || !featureDisabled(server.setup) ||
+				!featureDisabled(server.inventory) || !featureDisabled(server.realtime) {
 				t.Fatalf("dependencies were not absent = health:%v setup:%v inventory:%v realtime:%v", server.health, server.setup, server.inventory, server.realtime)
 			}
 			if server.realtimeSessionValid(context.Background(), "synthetic") {

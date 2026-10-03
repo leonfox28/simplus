@@ -35,7 +35,7 @@ var (
 	ErrBindingUnavailable   = errors.New("feishu binding is unavailable")
 )
 
-var defaultBindingEvents = []string{"call.incoming", "call.missed", "sms.failed", "sms.received", "system.degraded"}
+var defaultBindingEvents = append([]string(nil), domain.EventKinds...)
 
 type BindingView struct {
 	State, VerificationURL, ChannelID, ErrorCode string
@@ -43,6 +43,8 @@ type BindingView struct {
 }
 
 type bindingController struct {
+	work       sync.WaitGroup
+	closed     bool
 	mu         sync.Mutex
 	generation uint64
 	state      BindingView
@@ -55,7 +57,7 @@ func newBindingController() *bindingController {
 	return &bindingController{processCtx: context.Background(), state: BindingView{State: BindingStateIdle}}
 }
 
-func (s *Service) ConfigureFeishuBinding(processCtx context.Context, registrar FeishuRegistrar, messenger FeishuMessenger, onChange func()) {
+func (s *Service) configureFeishuBinding(processCtx context.Context, registrar FeishuRegistrar, messenger FeishuMessenger, onChange func()) {
 	if processCtx == nil {
 		processCtx = context.Background()
 	}
@@ -76,6 +78,10 @@ func (s *Service) StartFeishuBinding(_ context.Context) (BindingView, error) {
 		return BindingView{}, ErrBindingUnavailable
 	}
 	s.binding.mu.Lock()
+	if s.binding.closed {
+		s.binding.mu.Unlock()
+		return BindingView{}, ErrBindingUnavailable
+	}
 	if s.binding.state.State == BindingStateWaiting || s.binding.state.State == BindingStateTesting {
 		state := s.binding.state
 		s.binding.mu.Unlock()
@@ -107,8 +113,9 @@ func (s *Service) StartFeishuBinding(_ context.Context) (BindingView, error) {
 	s.binding.state.VerificationURL = registration.VerificationURL
 	s.binding.state.ExpiresAt = registration.ExpiresAt.UTC()
 	state := s.binding.state
+	s.binding.work.Add(1)
 	s.binding.mu.Unlock()
-	go s.completeFeishuBinding(attemptCtx, generation, registration)
+	go func() { defer s.binding.work.Done(); s.completeFeishuBinding(attemptCtx, generation, registration) }()
 	return state, nil
 }
 
@@ -136,7 +143,7 @@ func (s *Service) completeFeishuBinding(ctx context.Context, generation uint64, 
 		s.finishBindingFailure(generation, err)
 		return
 	}
-	if err := validateFeishuResult(result); err != nil {
+	if err := ValidateFeishuResult(result); err != nil {
 		s.finishBindingFailure(generation, err)
 		return
 	}
@@ -251,4 +258,16 @@ func bindingFailureCode(err error) string {
 	default:
 		return BindingErrorProviderFailed
 	}
+}
+
+// Close stops admission and waits before the process closes its database.
+func (s *Service) Close() {
+	s.binding.mu.Lock()
+	s.binding.closed = true
+	s.binding.generation++
+	if s.binding.cancel != nil {
+		s.binding.cancel()
+	}
+	s.binding.mu.Unlock()
+	s.binding.work.Wait()
 }

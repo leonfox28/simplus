@@ -5,19 +5,17 @@ import { AppShell } from './AppShell'
 
 const Calls = lazy(() => import('@/pages/Calls'))
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
-const Lines = lazy(() => import('@/pages/Lines'))
+const Lines = lazy(() => import('@/features/lines/Lines'))
 const Login = lazy(() => import('@/pages/Login'))
-const Messages = lazy(() => import('@/pages/Messages'))
+const Messages = lazy(() => import('@/features/messages/Messages'))
 const Mihomo = lazy(() => import('@/pages/Mihomo'))
 const Modems = lazy(() => import('@/pages/Modems'))
-const Notifications = lazy(() => import('@/pages/Notifications'))
+const Notifications = lazy(() => import('@/features/notifications/Notifications'))
 const Settings = lazy(() => import('@/pages/Settings'))
-const Setup = lazy(() => import('@/pages/Setup'))
 
 export function AppRouter() {
   return <Suspense fallback={<div className="full-page-state"><Spin size="large" /></div>}><Routes>
     <Route path="/login" element={<Login />} />
-    <Route path="/setup" element={<Setup />} />
     <Route element={<AppShell />}>
       <Route index element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Dashboard />} />

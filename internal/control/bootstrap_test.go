@@ -14,23 +14,6 @@ import (
 	"github.com/leonfox28/simplus/internal/storage/sqlite"
 )
 
-func newBootstrapSetupService(t *testing.T, stores *sqlite.Set, withAdministrator bool) *setup.Service {
-	t.Helper()
-	dependencies := setup.Dependencies{
-		StateStore:         stores,
-		AuthorizationStore: stores,
-	}
-	if withAdministrator {
-		dependencies.AdministratorStore = stores
-		dependencies.PasswordHasher = password.NewDefaultHasher()
-	}
-	service, err := setup.New(dependencies)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service
-}
-
 func TestBootstrapControlRejectsUnauthorizedUnixPeer(t *testing.T) {
 	ctx := context.Background()
 	temporaryRoot, err := os.MkdirTemp("/tmp", "simplus-control-denied-")
@@ -54,15 +37,15 @@ func TestBootstrapControlRejectsUnauthorizedUnixPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, false), slog.Default())}
+	server := &http.Server{Handler: control.NewProvisionHandler(newBootstrapSetupService(t, stores, false), slog.Default())}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 
-	if _, err := control.GenerateBootstrap(ctx, socketPath); err == nil {
+	if _, err := control.ProvisionAdministrator(ctx, socketPath, control.ProvisionAdministratorRequest{}); err == nil {
 		t.Fatal("unauthorized Unix peer generated a bootstrap grant")
 	}
 	var grants int
-	if err := stores.Runtime.QueryRow(`SELECT count(*) FROM setup_bootstrap_grant`).Scan(&grants); err != nil {
+	if err := stores.DB.QueryRow(`SELECT count(*) FROM administrators`).Scan(&grants); err != nil {
 		t.Fatal(err)
 	}
 	if grants != 0 {
@@ -73,50 +56,6 @@ func TestBootstrapControlRejectsUnauthorizedUnixPeer(t *testing.T) {
 	}
 	if err := <-serveDone; err != nil && err != http.ErrServerClosed {
 		t.Fatal(err)
-	}
-}
-
-func TestBootstrapControlRoundTripOverAuthorizedUnixPeer(t *testing.T) {
-	ctx := context.Background()
-	temporaryRoot, err := os.MkdirTemp("/tmp", "simplus-control-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(temporaryRoot) })
-	dataRoot := filepath.Join(temporaryRoot, "data")
-	if err := os.Mkdir(dataRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	stores, err := sqlite.OpenSet(ctx, filepath.Join(dataRoot, "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stores.Close()
-
-	socketPath := control.SocketPath(dataRoot)
-	listener, err := control.ListenRootOnly(socketPath, uint32(os.Geteuid()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, false), slog.Default())}
-	serveDone := make(chan error, 1)
-	go func() { serveDone <- server.Serve(listener) }()
-
-	response, err := control.GenerateBootstrap(ctx, socketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Code) != 43 || response.ExpiresAt.IsZero() {
-		t.Fatalf("bootstrap response = %#v", response)
-	}
-	if err := server.Shutdown(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-serveDone; err != nil && err != http.ErrServerClosed {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(socketPath); !os.IsNotExist(err) {
-		t.Fatalf("control socket remained after shutdown: %v", err)
 	}
 }
 
@@ -141,7 +80,7 @@ func TestAdministratorProvisioningIsOneTimeOverRootControlSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: control.NewBootstrapHandler(newBootstrapSetupService(t, stores, true), slog.Default())}
+	server := &http.Server{Handler: control.NewProvisionHandler(newBootstrapSetupService(t, stores, true), slog.Default())}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 	request := control.ProvisionAdministratorRequest{Username: "simplus_admin", Password: "first-generated-password-123", Locale: "zh-CN"}
@@ -168,4 +107,13 @@ func TestAdministratorProvisioningIsOneTimeOverRootControlSocket(t *testing.T) {
 	if err := <-serveDone; err != nil && err != http.ErrServerClosed {
 		t.Fatal(err)
 	}
+}
+
+func newBootstrapSetupService(t *testing.T, stores *sqlite.Set, _ bool) *setup.Service {
+	t.Helper()
+	service, err := setup.New(setup.Dependencies{StateStore: stores, AdministratorStore: stores, PasswordHasher: password.NewDefaultHasher()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
 }

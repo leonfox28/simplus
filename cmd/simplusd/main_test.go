@@ -42,7 +42,7 @@ func TestHardwareRuntimeRequiresTypedRFControlAndRejectsUnapprovedMutationFeatur
 		{agentapi.FeatureRFControl, agentapi.FeatureEquipmentIdentityRead},
 		{agentapi.FeatureRFControl, agentapi.FeatureSMS},
 		{agentapi.FeatureEquipmentIdentityRead, agentapi.FeatureSMS},
-		append(append([]string(nil), required...), agentapi.CommandRadioEnsureOff),
+		append(append([]string(nil), required...), "radio.ensure-off"),
 		append(append([]string(nil), required...), "durable-command-outcomes"),
 	} {
 		if err := requireTypedHardwareAgent(agentapi.Hello{Features: features}); err == nil {

@@ -3,7 +3,7 @@ import { App } from 'antd'
 import type { ReactElement } from 'react'
 import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { configureApiClient } from '@/api/setupClient'
+import { configureApiClient } from '@/api/configureClient'
 import type { HardwareCapabilities, ManagedLine } from '@/api/generated/types.gen'
 
 configureApiClient()

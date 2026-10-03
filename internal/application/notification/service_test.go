@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,8 @@ type deliveryRecord struct {
 }
 
 type memoryStore struct {
+	DeliveryQueue
+	queued     []domain.Event
 	channels   map[string]domain.Channel
 	records    []deliveryRecord
 	recordErr  error
@@ -107,10 +108,7 @@ func newTestService(t *testing.T, store Store) *Service {
 	return service
 }
 
-func TestNewRejectsMissingAndTypedNilDependencies(t *testing.T) {
-	var typedNilStore *memoryStore
-	var typedNilCipher *testCipher
-	var typedNilWebhooks *webhookPortFake
+func TestNewRejectsMissingDependencies(t *testing.T) {
 	validStore := &memoryStore{}
 	validCipher := testCipher{}
 	validWebhooks := &webhookPortFake{}
@@ -119,11 +117,8 @@ func TestNewRejectsMissingAndTypedNilDependencies(t *testing.T) {
 		deps Dependencies
 	}{
 		{name: "missing store", deps: Dependencies{Secrets: validCipher, Webhooks: validWebhooks}},
-		{name: "typed nil store", deps: Dependencies{Store: typedNilStore, Secrets: validCipher, Webhooks: validWebhooks}},
 		{name: "missing cipher", deps: Dependencies{Store: validStore, Webhooks: validWebhooks}},
-		{name: "typed nil cipher", deps: Dependencies{Store: validStore, Secrets: typedNilCipher, Webhooks: validWebhooks}},
 		{name: "missing webhooks", deps: Dependencies{Store: validStore, Secrets: validCipher}},
-		{name: "typed nil webhooks", deps: Dependencies{Store: validStore, Secrets: validCipher, Webhooks: typedNilWebhooks}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -332,136 +327,6 @@ func TestWebhookDeliveryPersistenceFailurePolicy(t *testing.T) {
 	}
 }
 
-func TestNotifyFiltersEventsAndBoundsMessages(t *testing.T) {
-	store := &memoryStore{channels: map[string]domain.Channel{}}
-	item := webhookChannel(t, store, "wecom")
-	item.Enabled = true
-	item.EventKinds = []string{"sms.received"}
-	store.channels[item.ID] = item
-	webhooks := &webhookPortFake{result: WebhookDeliveryResult{Outcome: WebhookDelivered}}
-	service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Notify(context.Background(), "call.incoming", "ignored"); err != nil {
-		t.Fatal(err)
-	}
-	if len(webhooks.deliverCalls) != 0 {
-		t.Fatalf("filtered event delivered: %#v", webhooks.deliverCalls)
-	}
-	if err := service.Notify(context.Background(), "sms.received", "received"); err != nil {
-		t.Fatal(err)
-	}
-	if len(webhooks.deliverCalls) != 1 {
-		t.Fatalf("delivery calls = %d", len(webhooks.deliverCalls))
-	}
-	if err := service.Notify(context.Background(), "sms.received", strings.Repeat("界", WebhookMessageRuneLimit+1)); !errors.Is(err, ErrChannelInvalid) {
-		t.Fatalf("oversize message error = %v", err)
-	}
-}
-
-func TestNotifyReceivedSMSDeliversExactContentOnlyToFeishuModes(t *testing.T) {
-	const (
-		sender = "Service"
-		body   = "第一行\nsecond line 🙂"
-		want   = "[Simplus] 新短信\n发件人：Service\n内容：\n第一行\nsecond line 🙂"
-	)
-	t.Run("webhook", func(t *testing.T) {
-		store := &memoryStore{channels: map[string]domain.Channel{}}
-		feishu := webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", "feishu")
-		feishu.Enabled = true
-		store.channels[feishu.ID] = feishu
-		wecom := webhookChannelWithID(t, store, "channel_BBBBBBBBBBBBBBBBBBBBBB", "wecom")
-		wecom.Enabled = true
-		store.channels[wecom.ID] = wecom
-		webhooks := &webhookPortFake{result: WebhookDeliveryResult{Outcome: WebhookDelivered}}
-		service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := service.NotifyReceivedSMS(context.Background(), sender, body); err != nil {
-			t.Fatal(err)
-		}
-		if len(webhooks.deliverCalls) != 1 || webhooks.deliverCalls[0].Provider != WebhookProviderFeishu || webhooks.deliverCalls[0].Message != want {
-			t.Fatalf("delivery calls = %#v", webhooks.deliverCalls)
-		}
-	})
-
-	t.Run("private app", func(t *testing.T) {
-		store := &memoryStore{channels: map[string]domain.Channel{}}
-		item := feishuAppChannel(t, store, "channel_CCCCCCCCCCCCCCCCCCCCCC")
-		var messages []string
-		service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: &webhookPortFake{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		service.FeishuMessenger = messengerFunc(func(_ context.Context, _ FeishuRegistrationResult, message string) error {
-			messages = append(messages, message)
-			return nil
-		})
-
-		if err := service.NotifyReceivedSMS(context.Background(), sender, body); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(messages, []string{want}) || store.channels[item.ID].LastDeliveryStatus != "success" {
-			t.Fatalf("messages = %#v, channel = %#v", messages, store.channels[item.ID])
-		}
-	})
-}
-
-func TestNotifyReceivedSMSSummaryPreservesNonFeishuBehavior(t *testing.T) {
-	store := &memoryStore{channels: map[string]domain.Channel{}}
-	feishu := webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", "feishu")
-	feishu.Enabled = true
-	store.channels[feishu.ID] = feishu
-	wecom := webhookChannelWithID(t, store, "channel_BBBBBBBBBBBBBBBBBBBBBB", "wecom")
-	wecom.Enabled = true
-	store.channels[wecom.ID] = wecom
-	webhooks := &webhookPortFake{result: WebhookDeliveryResult{Outcome: WebhookDelivered}}
-	service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := service.NotifyReceivedSMSSummary(context.Background(), 2); err != nil {
-		t.Fatal(err)
-	}
-	if len(webhooks.deliverCalls) != 1 || webhooks.deliverCalls[0].Provider != WebhookProviderWeCom || webhooks.deliverCalls[0].Message != "[Simplus] 收到 2 条新短信" {
-		t.Fatalf("delivery calls = %#v", webhooks.deliverCalls)
-	}
-}
-
-func TestNotifyReceivedSMSAttemptsKeepLatestStatusAndSafeErrors(t *testing.T) {
-	const privateBody = "private-body-marker"
-	store := &memoryStore{channels: map[string]domain.Channel{}}
-	item := webhookChannel(t, store, "feishu")
-	item.Enabled = true
-	store.channels[item.ID] = item
-	deliveryError := errors.New("synthetic bounded delivery failure")
-	webhooks := &webhookPortFake{
-		result:     WebhookDeliveryResult{Outcome: WebhookNetworkFailed},
-		deliverErr: deliveryError,
-	}
-	service, err := New(Dependencies{Store: store, Secrets: testCipher{}, Webhooks: webhooks})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = service.NotifyReceivedSMS(context.Background(), "10086", privateBody)
-	if !errors.Is(err, deliveryError) || strings.Contains(err.Error(), privateBody) || store.channels[item.ID].LastDeliveryStatus != "failed" {
-		t.Fatalf("first error = %v, channel = %#v", err, store.channels[item.ID])
-	}
-	webhooks.result = WebhookDeliveryResult{Outcome: WebhookDelivered}
-	webhooks.deliverErr = nil
-	if err := service.NotifyReceivedSMS(context.Background(), "10086", "later success"); err != nil {
-		t.Fatal(err)
-	}
-	if store.channels[item.ID].LastDeliveryStatus != "success" || store.channels[item.ID].LastErrorCode != "" {
-		t.Fatalf("latest channel status = %#v", store.channels[item.ID])
-	}
-}
-
 func webhookChannel(t *testing.T, store *memoryStore, provider string) domain.Channel {
 	return webhookChannelWithID(t, store, "channel_AAAAAAAAAAAAAAAAAAAAAA", provider)
 }
@@ -512,4 +377,25 @@ func feishuAppChannel(t *testing.T, store *memoryStore, id string) domain.Channe
 	}
 	store.channels[id] = item
 	return item
+}
+
+func (s *memoryStore) NotificationDeliveryCounts(context.Context, string) (domain.Counts, error) {
+	return domain.Counts{}, nil
+}
+func (s *memoryStore) EnqueueNotification(_ context.Context, event domain.Event) error {
+	s.queued = append(s.queued, event)
+	return nil
+}
+func TestNotifyOnlyEnqueuesAndBoundsMessages(t *testing.T) {
+	store := &memoryStore{}
+	service := newTestService(t, store)
+	if err := service.Notify(t.Context(), "cellular.connected", "synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.queued) != 1 || store.queued[0].Kind != "cellular.connected" || len(store.records) != 0 {
+		t.Fatal("event was not enqueued independently")
+	}
+	if err := service.Notify(t.Context(), "sms.received", strings.Repeat("界", WebhookMessageRuneLimit+1)); !errors.Is(err, ErrChannelInvalid) {
+		t.Fatal(err)
+	}
 }

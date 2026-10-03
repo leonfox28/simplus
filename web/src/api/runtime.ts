@@ -1,4 +1,5 @@
 import type { CreateClientConfig } from './generated/client.gen'
+import { sessionGeneration } from './session'
 import { ApiClientError } from './errors'
 
 const mutatingMethods = new Set(['DELETE', 'PATCH', 'POST', 'PUT'])
@@ -34,13 +35,13 @@ export async function runtimeFetch(input: RequestInfo | URL, init?: RequestInit)
   const path = new URL(source.url).pathname
   if (
     mutatingMethods.has(source.method) &&
-    path !== '/api/v1/auth/login' &&
-    !path.startsWith('/api/v1/setup/')
+    path !== '/api/v1/auth/login'
   ) {
     const csrf = cookieValue('simplus_csrf')
     if (csrf) headers.set('X-Simplus-CSRF', csrf)
   }
 
+  const generation = sessionGeneration()
   const controller = new AbortController()
   let timedOut = false
   const abortFromSource = () => controller.abort(source.signal.reason)
@@ -52,12 +53,17 @@ export async function runtimeFetch(input: RequestInfo | URL, init?: RequestInit)
   }, requestTimeout(source))
 
   try {
-    return await globalThis.fetch(new Request(source, {
+    const response = await globalThis.fetch(new Request(source, {
       credentials: 'same-origin',
       headers,
       signal: controller.signal,
     }))
+    if (generation !== sessionGeneration()) {
+      throw new ApiClientError({ kind: 'aborted', code: 'REQUEST_ABORTED', retryable: false })
+    }
+    return response
   } catch (error) {
+    if (error instanceof ApiClientError) throw error
     if (timedOut) {
       throw new ApiClientError({ kind: 'timeout', code: 'API_TIMEOUT', retryable: true })
     }

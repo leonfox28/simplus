@@ -21,12 +21,6 @@ type InboundSyncResult struct {
 	OutboundFailed              int
 	OutboundUnconfirmed         int
 	OutboundReportsAcknowledged int
-	receivedSMS                 []receivedSMSNotification
-}
-
-type receivedSMSNotification struct {
-	Sender string
-	Body   string
 }
 
 func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, error) {
@@ -67,7 +61,6 @@ func (service *Service) SyncInbound(ctx context.Context) (InboundSyncResult, err
 		result.OutboundFailed += lineResult.OutboundFailed
 		result.OutboundUnconfirmed += lineResult.OutboundUnconfirmed
 		result.OutboundReportsAcknowledged += lineResult.OutboundReportsAcknowledged
-		result.receivedSMS = append(result.receivedSMS, lineResult.receivedSMS...)
 		if err != nil {
 			syncErrors = errors.Join(syncErrors, err)
 		}
@@ -115,7 +108,6 @@ func (service *Service) syncInboundLine(ctx context.Context, line inventory.Line
 		result.Persisted += messageResult.Persisted
 		result.AlreadyKnown += messageResult.AlreadyKnown
 		result.Acknowledged += messageResult.Acknowledged
-		result.receivedSMS = append(result.receivedSMS, messageResult.receivedSMS...)
 		if err != nil {
 			return result, err
 		}
@@ -254,7 +246,7 @@ func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target
 	providerMessageID, acknowledgeMessageID, sender, body string, receivedAt time.Time, inbox Inbox) (InboundSyncResult, error) {
 	messageID := inboundSourceID("msg_in_", lineID, providerMessageID)
 	operationID := inboundSourceID("in_", lineID, providerMessageID)
-	persisted, replayed, err := service.repository.CreateInboundSMS(ctx, sms.Message{
+	_, replayed, err := service.repository.CreateInboundSMS(ctx, sms.Message{
 		ID: messageID, OperationID: operationID, Direction: sms.DirectionInbound, LineID: lineID,
 		RemoteAddress: sender, Body: body, Status: sms.StatusReceived,
 		ProviderMessageID: providerMessageID, CreatedAt: receivedAt, UpdatedAt: service.currentTime(),
@@ -267,10 +259,6 @@ func (service *Service) persistAndAcknowledgeInbound(ctx context.Context, target
 		result.AlreadyKnown = 1
 	} else {
 		result.Persisted = 1
-		result.receivedSMS = []receivedSMSNotification{{
-			Sender: persisted.RemoteAddress,
-			Body:   persisted.Body,
-		}}
 	}
 	if err := service.acknowledgeInbound(ctx, target, lineID, acknowledgeMessageID, inbox); err != nil {
 		return result, err

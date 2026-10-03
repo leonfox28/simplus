@@ -21,19 +21,19 @@ import (
 )
 
 const (
-	ErrorOutcomeUnknownAfterRestart = "SEND_OUTCOME_UNKNOWN_AFTER_RESTART"
-	ErrorSendOutcomeUnknown         = "SMS_SEND_OUTCOME_UNKNOWN"
-	ErrorAcceptedAwaitingReport     = "IMS_SMS_ACCEPTED_AWAITING_REPORT"
-	ErrorCancelledBeforeDispatch    = "SEND_CANCELLED_BEFORE_DISPATCH"
-	ErrorTransportFailed            = "SMS_TRANSPORT_FAILED"
-	ErrorSIMNotReady                = "SMS_SIM_NOT_READY"
-	ErrorSIMIdentityChanged         = "SMS_SIM_IDENTITY_CHANGED"
-	ErrorEquipmentIdentityChanged   = "SMS_EQUIPMENT_IDENTITY_CHANGED"
-	ErrorRFOff                      = "SMS_RF_OFF"
-	ErrorRegistrationDenied         = "SMS_REGISTRATION_DENIED"
-	ErrorNotRegistered              = "SMS_NOT_REGISTERED"
-	ErrorStatusUnavailable          = "SMS_STATUS_UNAVAILABLE"
-	ErrorDeviceStale                = "SMS_DEVICE_STALE"
+	ErrorOutcomeUnknownAfterRestart = sms.ErrorOutcomeUnknownAfterRestart
+	ErrorSendOutcomeUnknown         = sms.ErrorSendOutcomeUnknown
+	ErrorAcceptedAwaitingReport     = sms.ErrorAcceptedAwaitingReport
+	ErrorCancelledBeforeDispatch    = sms.ErrorCancelledBeforeDispatch
+	ErrorTransportFailed            = sms.ErrorTransportFailed
+	ErrorSIMNotReady                = sms.ErrorSIMNotReady
+	ErrorSIMIdentityChanged         = sms.ErrorSIMIdentityChanged
+	ErrorEquipmentIdentityChanged   = sms.ErrorEquipmentIdentityChanged
+	ErrorRFOff                      = sms.ErrorRFOff
+	ErrorRegistrationDenied         = sms.ErrorRegistrationDenied
+	ErrorNotRegistered              = sms.ErrorNotRegistered
+	ErrorStatusUnavailable          = sms.ErrorStatusUnavailable
+	ErrorDeviceStale                = sms.ErrorDeviceStale
 	HistoryCapacity                 = 10000
 	InboundFragmentRetention        = 7 * 24 * time.Hour
 	maximumSMSBodyRunes             = 1600
@@ -64,6 +64,7 @@ var (
 )
 
 type Repository interface {
+	SMSByOperationID(context.Context, string) (sms.Message, bool, error)
 	CreateOutboundSMS(context.Context, sms.Message) (sms.Message, bool, error)
 	CreateInboundSMS(context.Context, sms.Message) (sms.Message, bool, error)
 	StoreInboundSMSFragment(context.Context, sms.InboundFragment) ([]sms.InboundFragment, bool, error)
@@ -127,87 +128,13 @@ func (transport SMSTransport) UseHostVoWiFiAvailability(availability TransportAv
 // SendSMSCommand is the narrow typed boundary between the application and a
 // modem-specific transport. It deliberately contains no AT/QMI text or device
 // paths.
-type SendSMSCommand struct {
-	OperationID                     string
-	MessageID                       string
-	LineID                          string
-	PhysicalDeviceID                string
-	ModemFunctionID                 string
-	Destination                     string
-	Body                            string
-	Segments                        []smscodec.Segment
-	DeviceGeneration                uint64
-	ExpectedEquipmentFingerprint    string
-	ExpectedSubscriptionFingerprint string
-}
-
-type SendSMSResult struct {
-	ProviderMessageID string
-	State             string
-	ErrorCode         string
-}
 
 const (
-	SendStateAccepted    = "accepted"
-	SendStateSent        = "sent"
-	SendStateFailed      = "failed"
-	SendStateUnconfirmed = "unconfirmed"
+	SendStateAccepted    = sms.SendStateAccepted
+	SendStateSent        = sms.SendStateSent
+	SendStateFailed      = sms.SendStateFailed
+	SendStateUnconfirmed = sms.SendStateUnconfirmed
 )
-
-type Sender interface {
-	SendSMS(context.Context, SendSMSCommand) (SendSMSResult, error)
-}
-
-type InboxMessageReference struct {
-	SourceMessageID string
-	ReceivedAt      time.Time
-}
-
-type InboxMessage struct {
-	SourceMessageID string
-	Sender          string
-	Body            string
-	ReceivedAt      time.Time
-	Segment         *smscodec.Segment
-}
-
-type InboxTarget struct {
-	LineID                          string
-	PhysicalDeviceID                string
-	DeviceGeneration                uint64
-	ExpectedEquipmentFingerprint    string
-	ExpectedSubscriptionFingerprint string
-}
-
-type Inbox interface {
-	ListSMS(context.Context, InboxTarget) ([]InboxMessageReference, error)
-	ReadSMS(context.Context, InboxTarget, string) (InboxMessage, error)
-	AcknowledgeSMS(context.Context, InboxTarget, string, string) error
-}
-
-type SubmitReport struct {
-	MessageID         string
-	ProviderMessageID string
-	State             string
-	ErrorCode         string
-	CompletedAt       time.Time
-}
-
-type SubmitReportInbox interface {
-	ListSMSSubmitReports(context.Context, InboxTarget) ([]SubmitReport, error)
-	AcknowledgeSMSSubmitReport(context.Context, InboxTarget, string, string) error
-}
-
-type TransportError struct {
-	Code string
-}
-
-func (err *TransportError) Error() string {
-	if err == nil || err.Code == "" {
-		return "SMS transport failed"
-	}
-	return "SMS transport failed: " + err.Code
-}
 
 type SendRequest struct {
 	OperationID string
@@ -261,7 +188,7 @@ type Service struct {
 	gates   map[string]*serialGate
 }
 
-func (service *Service) UseTransports(transports ...SMSTransport) error {
+func (service *Service) configureTransports(transports ...SMSTransport) error {
 	if service == nil {
 		return errors.New("messaging service is unavailable")
 	}
@@ -288,7 +215,7 @@ func NewService(ctx context.Context, repository Repository, lines LineSource, tr
 		gates:      make(map[string]*serialGate),
 	}
 	if len(transports) != 0 {
-		if err := service.UseTransports(transports...); err != nil {
+		if err := service.configureTransports(transports...); err != nil {
 			return nil, err
 		}
 	}
@@ -310,6 +237,16 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 	}
 	if service == nil || service.repository == nil || service.lines == nil {
 		return SendResult{}, ErrTransportUnavailable
+	}
+	stored, found, err := service.repository.SMSByOperationID(ctx, request.OperationID)
+	if err != nil {
+		return SendResult{}, fmt.Errorf("%w: read outbound operation", ErrPersistence)
+	}
+	if found {
+		if stored.Direction != sms.DirectionOutbound || stored.LineID != request.LineID || stored.RemoteAddress != request.Destination || stored.Body != request.Body {
+			return SendResult{}, sms.ErrOperationConflict
+		}
+		return SendResult{Message: stored, Replayed: true}, nil
 	}
 	line, runtimeTarget, transport, err := service.sendLine(ctx, request.LineID)
 	if err != nil {
@@ -373,7 +310,7 @@ func (service *Service) Send(ctx context.Context, request SendRequest) (SendResu
 		return SendResult{Message: failed}, nil
 	}
 	if strings.TrimSpace(result.ProviderMessageID) == "" || len(result.ProviderMessageID) > 128 {
-		failed, persistenceErr := service.markFailed(message.ID, "", ErrorTransportFailed)
+		failed, persistenceErr := service.markUnconfirmed(message.ID, "", ErrorSendOutcomeUnknown)
 		if persistenceErr != nil {
 			return SendResult{}, persistenceErr
 		}

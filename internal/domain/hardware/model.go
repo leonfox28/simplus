@@ -150,6 +150,7 @@ type Line struct {
 }
 
 type Snapshot struct {
+	AgentInstanceID      string
 	Generation           uint64
 	ObservedAt           time.Time
 	Devices              []PhysicalDevice

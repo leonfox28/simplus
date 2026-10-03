@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/ims"
 	"github.com/leonfox28/simplus/internal/smscodec"
-	"github.com/leonfox28/simplus/internal/vowifihil"
 )
 
 const workerSMSSocketName = "sms.sock"
 
 type workerSMSService struct {
-	session *vowifihil.IMSSession
+	session *ims.IMSSession
 	mu      sync.Mutex
 	tpMR    byte
 }
@@ -131,11 +131,11 @@ func mapIMSSMSError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, vowifihil.ErrIMSSMSMessageNotFound):
+	case errors.Is(err, ims.ErrIMSSMSMessageNotFound):
 		return ErrSMSMessageNotFound
-	case errors.Is(err, vowifihil.ErrIMSSMSOutcomeUnknown):
+	case errors.Is(err, ims.ErrIMSSMSOutcomeUnknown):
 		return ErrSMSOutcomeUnknown
-	case errors.Is(err, vowifihil.ErrIMSSMSRejected):
+	case errors.Is(err, ims.ErrIMSSMSRejected):
 		return ErrSMSRejected
 	default:
 		return ErrSMSUnavailable

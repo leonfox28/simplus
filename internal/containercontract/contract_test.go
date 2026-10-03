@@ -70,7 +70,7 @@ func readCompose(t *testing.T) composeFile {
 
 func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 	compose := readCompose(t)
-	for _, name := range []string{"data-init", "agent", "netd", "app", "bootstrap"} {
+	for _, name := range []string{"data-init", "agent", "netd", "app", "provision"} {
 		if _, found := compose.Services[name]; !found {
 			t.Fatalf("compose service %q is missing", name)
 		}
@@ -112,6 +112,13 @@ func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 	assertBindMount(t, agent, "/sys/bus/usb-serial/drivers/option1/new_id", "/host/sys/bus/usb-serial/drivers/option1/new_id", false, true)
 
 	netd := compose.Services["netd"]
+	assertBindMount(t, netd, "./data/control-v2/mihomo", "/var/lib/simplus/mihomo", false, false)
+	for _, mount := range netd.Volumes {
+		if mount["type"] == "bind" && mount["source"] != "./data/control-v2/mihomo" {
+			t.Fatalf("netd exposes unnecessary host state: %#v", mount)
+		}
+	}
+
 	if netd.NetworkMode == "host" || !reflect.DeepEqual(netd.Networks, []string{"runtime"}) {
 		t.Fatalf("netd network boundary = mode %q networks %#v", netd.NetworkMode, netd.Networks)
 	}
@@ -140,7 +147,7 @@ func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 	if dataInit.User != "0:0" || !reflect.DeepEqual(dataInit.CapAdd, []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"}) || dataInit.NetworkMode != "none" {
 		t.Fatalf("data-init privilege boundary = %#v", dataInit)
 	}
-	bootstrap := compose.Services["bootstrap"]
+	bootstrap := compose.Services["provision"]
 	if bootstrap.User != "0:0" || !reflect.DeepEqual(bootstrap.CapAdd, []string{"DAC_OVERRIDE"}) || bootstrap.NetworkMode != "none" {
 		t.Fatalf("bootstrap privilege boundary = %#v", bootstrap)
 	}
@@ -148,12 +155,12 @@ func TestComposePreservesThreeProcessPrivilegeBoundaries(t *testing.T) {
 
 func TestSourceComposeRequiresExplicitDevelopmentTagAndRuntimeVolumes(t *testing.T) {
 	compose := readCompose(t)
-	for _, name := range []string{"data-init", "agent", "netd", "app", "bootstrap"} {
+	for _, name := range []string{"data-init", "agent", "netd", "app", "provision"} {
 		image := compose.Services[name].Image
 		if strings.HasSuffix(image, ":latest") || !strings.Contains(image, "${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}") {
 			t.Fatalf("service %q does not require the explicit source-development image tag: %q", name, image)
 		}
-		if len(compose.Services[name].Healthcheck) == 0 && name != "data-init" && name != "bootstrap" {
+		if len(compose.Services[name].Healthcheck) == 0 && name != "data-init" && name != "provision" {
 			t.Fatalf("service %q has no typed healthcheck", name)
 		}
 	}
@@ -313,7 +320,7 @@ func TestDataInitKeepsPrivateFixedUIDStateAndDoesNotOverwriteCore(t *testing.T) 
 	}
 	text := string(body)
 	for _, required := range []string{
-		`prepare_directory "$root/core" 10001 10001 0700`,
+		`prepare_directory "$root/control-v2" 10001 10001 0700`,
 		`prepare_directory "$root/agent" 10002 10002 0700`,
 		`[ ! -L "$core_manifest" ] && [ -f "$core_manifest" ]`,
 		`refusing to guess active state`,

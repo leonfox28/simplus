@@ -22,10 +22,10 @@ func (set *Set) ConfigureInitialAdministrator(
 	locale string,
 	now time.Time,
 ) error {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("core database is not open")
 	}
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin initial administrator transaction: %w", err)
 	}
@@ -55,7 +55,7 @@ ON CONFLICT(singleton) DO UPDATE SET
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE installation_state
-SET instance_default_locale = ?
+SET instance_default_locale = ?, state = 'ready'
 WHERE singleton = 1
 `, locale); err != nil {
 		return fmt.Errorf("persist initial instance locale: %w", err)
@@ -67,11 +67,11 @@ WHERE singleton = 1
 }
 
 func (set *Set) ReadInitialAdministrator(ctx context.Context) (username string, locale string, configured bool, err error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return "", "", false, fmt.Errorf("core database is not open")
 	}
 	var storedUsername sql.NullString
-	err = set.Core.QueryRowContext(ctx, `
+	err = set.DB.QueryRowContext(ctx, `
 SELECT administrators.username, installation_state.instance_default_locale
 FROM installation_state
 LEFT JOIN administrators ON administrators.singleton = installation_state.singleton
@@ -87,11 +87,11 @@ WHERE installation_state.singleton = 1
 }
 
 func (set *Set) ReadAdministratorCredential(ctx context.Context, username string) (AdministratorCredential, error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return AdministratorCredential{}, fmt.Errorf("core database is not open")
 	}
 	var credential AdministratorCredential
-	err := set.Core.QueryRowContext(ctx, `
+	err := set.DB.QueryRowContext(ctx, `
 SELECT username, password_hash, session_generation
 FROM administrators
 WHERE singleton = 1 AND username = ?
@@ -107,10 +107,10 @@ WHERE singleton = 1 AND username = ?
 }
 
 func (set *Set) ChangeAdministratorPassword(ctx context.Context, username, passwordHash string, expectedGeneration int64, now time.Time) (bool, error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return false, fmt.Errorf("core database is not open")
 	}
-	result, err := set.Core.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE administrators
 SET password_hash = ?,
     password_version = password_version + 1,

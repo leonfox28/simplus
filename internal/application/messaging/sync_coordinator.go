@@ -3,7 +3,6 @@ package messaging
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/leonfox28/simplus/internal/application/realtime"
@@ -11,7 +10,6 @@ import (
 
 const (
 	syncTimeout         = 20 * time.Second
-	notificationTimeout = 15 * time.Second
 	minimumSyncInterval = 2 * time.Second
 	minimumRetryDelay   = 15 * time.Second
 	maximumRetryDelay   = 5 * time.Minute
@@ -23,42 +21,45 @@ type InboundSyncer interface {
 	SyncInbound(context.Context) (InboundSyncResult, error)
 }
 
-type NotificationSender interface {
-	NotifyReceivedSMS(context.Context, string, string) error
-	NotifyReceivedSMSSummary(context.Context, int) error
-}
-
 type RealtimePublisher interface {
 	Publish([]realtime.Topic, realtime.Attention)
 }
 
 type SyncReport struct {
-	Result            InboundSyncResult
-	SyncError         error
-	NotificationError error
-	DurableChange     bool
+	Result        InboundSyncResult
+	SyncError     error
+	DurableChange bool
 }
 
 type SyncCoordinator struct {
-	syncer        InboundSyncer
-	notifications NotificationSender
-	publisher     RealtimePublisher
-	wait          func(context.Context, time.Duration) bool
+	syncer    InboundSyncer
+	publisher RealtimePublisher
+	wait      func(context.Context, time.Duration) bool
 }
 
-func NewSyncCoordinator(syncer InboundSyncer, notifications NotificationSender, publisher RealtimePublisher) (*SyncCoordinator, error) {
-	if syncer == nil || notifications == nil || publisher == nil {
+func NewSyncCoordinator(syncer InboundSyncer, publisher RealtimePublisher) (*SyncCoordinator, error) {
+	if syncer == nil || publisher == nil {
 		return nil, ErrSyncCoordinatorConfiguration
 	}
 	return &SyncCoordinator{
-		syncer:        syncer,
-		notifications: notifications,
-		publisher:     publisher,
-		wait:          waitForSyncContext,
+		syncer:    syncer,
+		publisher: publisher,
+		wait:      waitForSyncContext,
 	}, nil
 }
 
 func (coordinator *SyncCoordinator) Run(ctx context.Context, interval time.Duration, report func(SyncReport)) {
+	if worker, ok := coordinator.syncer.(interface {
+		RunInbound(context.Context, time.Duration, func(InboundSyncResult, error))
+	}); ok {
+		worker.RunInbound(ctx, interval, func(result InboundSyncResult, err error) {
+			value := coordinator.publishResult(result, err)
+			if report != nil {
+				report(value)
+			}
+		})
+		return
+	}
 	interval = normalizedSyncInterval(interval)
 	retryDelay := time.Duration(0)
 	for {
@@ -86,6 +87,10 @@ func (coordinator *SyncCoordinator) runCycle(ctx context.Context) SyncReport {
 	result, syncErr := coordinator.syncer.SyncInbound(syncCtx)
 	cancelSync()
 
+	return coordinator.publishResult(result, syncErr)
+}
+
+func (coordinator *SyncCoordinator) publishResult(result InboundSyncResult, syncErr error) SyncReport {
 	report := SyncReport{Result: result, SyncError: syncErr, DurableChange: hasDurableMessageChange(result)}
 	if report.DurableChange {
 		attention := realtime.Attention("")
@@ -94,26 +99,9 @@ func (coordinator *SyncCoordinator) runCycle(ctx context.Context) SyncReport {
 		}
 		coordinator.publisher.Publish([]realtime.Topic{realtime.TopicMessages}, attention)
 	}
-	if result.Persisted == 0 {
-		return report
+	if result.Persisted > 0 {
+		coordinator.publisher.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	}
-
-	for index, received := range result.receivedSMS {
-		deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
-		if err := coordinator.notifications.NotifyReceivedSMS(deliveryCtx, received.Sender, received.Body); err != nil {
-			report.NotificationError = errors.Join(
-				report.NotificationError,
-				fmt.Errorf("received SMS %d: %w", index+1, err),
-			)
-		}
-		cancelDelivery()
-	}
-	summaryCtx, cancelSummary := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
-	if err := coordinator.notifications.NotifyReceivedSMSSummary(summaryCtx, result.Persisted); err != nil {
-		report.NotificationError = errors.Join(report.NotificationError, fmt.Errorf("received SMS summary: %w", err))
-	}
-	cancelSummary()
-	coordinator.publisher.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
 	return report
 }
 

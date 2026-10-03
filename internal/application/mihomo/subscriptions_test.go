@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/subscriptionhttp"
+
 	domain "github.com/leonfox28/simplus/internal/domain/mihomo"
 )
 
@@ -104,9 +106,13 @@ func newRefreshTestService(transport http.RoundTripper, artifacts SubscriptionAr
 		},
 		selected: refreshTestSubscriptionID,
 	}
-	service := NewSubscriptionService(store, nil)
-	service.Artifacts = artifacts
-	service.HTTPClient = &http.Client{Transport: transport}
+	if artifacts == nil {
+		artifacts = DisabledSubscriptionArtifacts{}
+	}
+	service, err := NewSubscriptionService(store, nil, &subscriptionhttp.Client{HTTP: &http.Client{Transport: transport}}, artifacts)
+	if err != nil {
+		panic(err)
+	}
 	service.Now = func() time.Time { return now }
 	return service, store
 }
@@ -157,11 +163,11 @@ func TestParseSubscriptionNodesSupportsBase64URIListAndRejectsEmpty(t *testing.T
 
 func TestValidateSubscriptionInputRejectsPrivateTargets(t *testing.T) {
 	for _, raw := range []string{"http://example.com/sub", "https://localhost/sub", "https://127.0.0.1/sub", "https://192.168.50.1/sub", "https://[::1]/sub"} {
-		if _, _, err := validateSubscriptionInput("test", raw); err == nil {
+		if _, _, err := domain.ValidateSubscriptionInput("test", raw); err == nil {
 			t.Errorf("accepted %s", raw)
 		}
 	}
-	if _, parsed, err := validateSubscriptionInput("test", "https://subscription.example/path?token=secret"); err != nil || parsed.Hostname() != "subscription.example" {
+	if _, parsed, err := domain.ValidateSubscriptionInput("test", "https://subscription.example/path?token=secret"); err != nil || parsed.Hostname() != "subscription.example" {
 		t.Fatalf("public URL = %v, %v", parsed, err)
 	}
 }
@@ -191,27 +197,14 @@ func TestSubscriptionRefreshNegotiatesGeneratableMihomoYAML(t *testing.T) {
 		}
 		return subscriptionResponse(http.StatusOK, yamlFixture), nil
 	}), nil)
-	artifacts := &ConfigManager{
-		Root:  t.TempDir(),
-		Store: store,
-		Core:  coreStatusStub{CoreStatus{Installed: true, Version: "v1.19.29", BinaryPath: "/installed/mihomo"}},
-		Run: func(context.Context, string, ...string) ([]byte, error) {
-			return []byte("configuration test is successful"), nil
-		},
-		Now:               service.Now,
-		ControllerAddress: "127.0.0.1:19090",
-	}
-	service.Artifacts = artifacts
+	service.Artifacts = &refreshArtifactStub{}
 
 	view, nodes, err := service.Refresh(context.Background(), refreshTestSubscriptionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subscriptionUserAgent != "clash.meta" {
-		t.Fatalf("subscription User-Agent constant = %q", subscriptionUserAgent)
-	}
-	if userAgent != subscriptionUserAgent {
-		t.Fatalf("User-Agent = %q", userAgent)
+	if userAgent != "clash.meta" {
+		t.Fatalf("User-Agent=%q", userAgent)
 	}
 	if accept != "application/yaml,text/yaml,text/plain,application/octet-stream" {
 		t.Fatalf("Accept = %q", accept)
@@ -225,9 +218,7 @@ func TestSubscriptionRefreshNegotiatesGeneratableMihomoYAML(t *testing.T) {
 	if len(nodes) != 1 || nodes[0].ProxyYAML == "" {
 		t.Fatalf("downloaded nodes are not usable for config generation: %#v", nodes)
 	}
-	if metadata, _, artifactErr := artifacts.Artifact(refreshTestSubscriptionID); artifactErr != nil || metadata.ConfigSHA256 == "" {
-		t.Fatalf("artifact metadata=%#v err=%v", metadata, artifactErr)
-	}
+
 }
 
 func TestSubscriptionRefreshReturnsCredentialSafeTypedFetchErrors(t *testing.T) {

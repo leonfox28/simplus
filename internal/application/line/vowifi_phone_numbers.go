@@ -4,13 +4,13 @@ import (
 	"context"
 	"regexp"
 
-	"github.com/leonfox28/simplus/internal/vowifisupervisor"
+	runtime "github.com/leonfox28/simplus/internal/domain/vowifi"
 )
 
 var imsPhoneNumberPattern = regexp.MustCompile(`^\+[1-9][0-9]{2,14}$`)
 
 type voWiFiStatusSource interface {
-	List(context.Context) ([]vowifisupervisor.Status, error)
+	List(context.Context) ([]runtime.Status, error)
 }
 
 type voWiFiPhoneNumberSource struct {
@@ -32,7 +32,7 @@ func (source voWiFiPhoneNumberSource) CurrentPhoneNumbers(ctx context.Context) (
 	result := make(map[string]string)
 	duplicates := make(map[string]struct{})
 	for _, status := range statuses {
-		if status.State != vowifisupervisor.StateOnline || !status.Online || !imsPhoneNumberPattern.MatchString(status.PhoneNumber) {
+		if status.State != runtime.StateOnline || !status.Online || !imsPhoneNumberPattern.MatchString(status.PhoneNumber) {
 			continue
 		}
 		if _, exists := result[status.LineID]; exists {

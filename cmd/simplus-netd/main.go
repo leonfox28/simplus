@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/lifecycle"
+
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/mihomosupervisor"
@@ -90,9 +92,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	mux := http.NewServeMux()
 	mux.Handle("/v1/vowifi/", http.StripPrefix("/v1/vowifi", vowifisupervisor.NewHandler(vowifiLocal, logger)))
 	mux.Handle("/", mihomosupervisor.NewHandler(local, logger))
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: agentapi.SMSRequestTimeout, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var requests lifecycle.Requests
+	server := &http.Server{BaseContext: func(net.Listener) context.Context { return ctx }, Handler: requests.Handler(mux), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: agentapi.SMSRequestTimeout, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- server.Serve(listener) }()
 	logger.Info("Mihomo supervisor listening", "socket", *socketPath)
@@ -105,15 +108,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 			exitCode = 1
 		}
 	}
+	requests.StopAdmission()
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := vowifiLocal.Close(shutdownCtx); err != nil {
-		logger.Error("Host VoWiFi supervisor shutdown failed", "error", err)
-		exitCode = 1
-	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Mihomo supervisor shutdown failed", "error", err)
 		exitCode = 1
 	}
+	_ = server.Close()
+	requests.Wait()
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := vowifiLocal.Close(cleanupCtx); err != nil {
+		logger.Error("Host VoWiFi cleanup failed", "error", err)
+		exitCode = 1
+	}
+	if err := local.Close(cleanupCtx); err != nil && !errors.Is(err, mihomosupervisor.ErrNotRunning) {
+		logger.Error("Mihomo cleanup failed", "error", err)
+		exitCode = 1
+	}
+	cleanupCancel()
 	cancel()
 	if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		logger.Error("Mihomo supervisor socket cleanup failed", "error", err)

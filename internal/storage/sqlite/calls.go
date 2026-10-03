@@ -12,7 +12,7 @@ import (
 )
 
 func (set *Set) CreateCall(ctx context.Context, value call.Record) (call.Record, bool, error) {
-	result, err := set.Calls.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 INSERT INTO call_records (call_id, operation_id, line_id, remote_address, direction, state, end_reason, created_at_unix_ms, updated_at_unix_ms)
 VALUES (?, ?, ?, ?, ?, ?, '', ?, ?) ON CONFLICT(operation_id) DO NOTHING
 `, value.ID, value.OperationID, value.LineID, value.RemoteAddress, value.Direction, value.State, value.CreatedAt.UnixMilli(), value.UpdatedAt.UnixMilli())
@@ -39,7 +39,7 @@ func (set *Set) SetCallState(ctx context.Context, id, state, reason string, at t
 	if state == call.StateEnded || state == call.StateFailed {
 		ended = at.UTC().UnixMilli()
 	}
-	result, err := set.Calls.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE call_records SET state = ?, end_reason = ?, updated_at_unix_ms = MAX(created_at_unix_ms, ?),
  answered_at_unix_ms = COALESCE(answered_at_unix_ms, ?), ended_at_unix_ms = COALESCE(ended_at_unix_ms, ?)
 WHERE call_id = ?
@@ -61,7 +61,7 @@ func (set *Set) ListCalls(ctx context.Context, limit int) ([]call.Record, error)
 }
 
 func (set *Set) ListCallsPage(ctx context.Context, request pagination.Request) (pagination.Page[call.Record], error) {
-	if set == nil || set.Calls == nil || request.Limit < 1 || request.Limit > pagination.MaximumLimit {
+	if set == nil || set.DB == nil || request.Limit < 1 || request.Limit > pagination.MaximumLimit {
 		return pagination.Page[call.Record]{}, fmt.Errorf("invalid call page request")
 	}
 	query := `
@@ -79,7 +79,7 @@ WHERE (created_at_unix_ms, call_id) < (?, ?)
 ORDER BY created_at_unix_ms DESC, call_id DESC LIMIT ?`
 		args = []any{request.After.CreatedAt.UTC().UnixMilli(), request.After.ID, request.Limit + 1}
 	}
-	rows, err := set.Calls.QueryContext(ctx, query, args...)
+	rows, err := set.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return pagination.Page[call.Record]{}, fmt.Errorf("list calls: %w", err)
 	}
@@ -114,7 +114,7 @@ func (set *Set) GetCallByID(ctx context.Context, id string) (call.Record, bool, 
 
 func (set *Set) HasActiveCallForLine(ctx context.Context, lineID string) (bool, error) {
 	var exists bool
-	err := set.Calls.QueryRowContext(ctx, `
+	err := set.DB.QueryRowContext(ctx, `
 SELECT EXISTS(SELECT 1 FROM call_records WHERE line_id = ? AND state IN ('incoming', 'dialing', 'active'))
 `, lineID).Scan(&exists)
 	if err != nil {
@@ -124,7 +124,7 @@ SELECT EXISTS(SELECT 1 FROM call_records WHERE line_id = ? AND state IN ('incomi
 }
 
 func (set *Set) ReconcileCalls(ctx context.Context, reason string, at time.Time) (int64, error) {
-	result, err := set.Calls.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE call_records SET state = 'failed', end_reason = ?, updated_at_unix_ms = MAX(created_at_unix_ms, ?), ended_at_unix_ms = ?
 WHERE state IN ('incoming', 'dialing', 'active')
 `, reason, at.UTC().UnixMilli(), at.UTC().UnixMilli())
@@ -135,10 +135,10 @@ WHERE state IN ('incoming', 'dialing', 'active')
 }
 
 func (set *Set) callByOperation(ctx context.Context, operationID string) (call.Record, bool, error) {
-	return scanOptionalCall(set.Calls.QueryRowContext(ctx, `SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason, created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms FROM call_records WHERE operation_id = ?`, operationID))
+	return scanOptionalCall(set.DB.QueryRowContext(ctx, `SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason, created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms FROM call_records WHERE operation_id = ?`, operationID))
 }
 func (set *Set) callByID(ctx context.Context, id string) (call.Record, bool, error) {
-	return scanOptionalCall(set.Calls.QueryRowContext(ctx, `SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason, created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms FROM call_records WHERE call_id = ?`, id))
+	return scanOptionalCall(set.DB.QueryRowContext(ctx, `SELECT call_id, operation_id, line_id, remote_address, direction, state, end_reason, created_at_unix_ms, updated_at_unix_ms, answered_at_unix_ms, ended_at_unix_ms FROM call_records WHERE call_id = ?`, id))
 }
 
 type callScanner interface{ Scan(...any) error }

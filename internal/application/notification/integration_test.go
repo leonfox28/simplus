@@ -40,7 +40,7 @@ func TestChannelCredentialsAreEncryptedInSQLiteAndOmittedFromViews(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient()})
+	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient(), ProcessContext: ctx, Registrar: integrationRegistrar{}, Messenger: integrationMessenger{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,10 @@ func TestFeishuAppCredentialsAreIndependentlyEncryptedAndOmittedFromViews(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient()})
+	service, err := app.New(app.Dependencies{Store: stores, Secrets: keyring, Webhooks: notificationwebhook.NewClient(), ProcessContext: ctx, Registrar: integrationRegistrar{}, Messenger: integrationMessenger{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.ConfigureFeishuBinding(ctx, integrationRegistrar{}, integrationMessenger{}, nil)
 	if _, err := service.StartFeishuBinding(ctx); err != nil {
 		t.Fatal(err)
 	}

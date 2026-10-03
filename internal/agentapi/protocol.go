@@ -152,22 +152,6 @@ const (
 	ErrorHardwareChanged          = "HARDWARE_CHANGED"
 )
 
-const (
-	CommandRadioEnsureOff = "radio.ensure-off"
-)
-
-const (
-	CommandOutcomeAccepted  = "accepted"
-	CommandOutcomeSucceeded = "succeeded"
-	CommandOutcomeFailed    = "failed"
-	CommandOutcomeUncertain = "uncertain"
-)
-
-const (
-	OutcomeCodeAccepted          = "COMMAND_ACCEPTED"
-	OutcomeCodeRadioOffConfirmed = "RADIO_OFF_CONFIRMED"
-)
-
 type Hello struct {
 	Protocol        string         `json:"protocol"`
 	ProtocolVersion int            `json:"protocolVersion"`
@@ -320,40 +304,4 @@ type ProbeResponse struct {
 	SnapshotRevision   string        `json:"snapshotRevision"`
 	ObservedAt         time.Time     `json:"observedAt"`
 	Devices            []DeviceProbe `json:"devices"`
-}
-
-type RadioEnsureOffRequest struct {
-	OperationID             string `json:"operationId"`
-	AgentInstanceID         string `json:"agentInstanceId"`
-	SnapshotGeneration      uint64 `json:"snapshotGeneration"`
-	SnapshotRevision        string `json:"snapshotRevision"`
-	DeviceID                string `json:"deviceId"`
-	DeviceGeneration        uint64 `json:"deviceGeneration"`
-	ResourceGroupID         string `json:"resourceGroupId"`
-	ResourceGroupGeneration uint64 `json:"resourceGroupGeneration"`
-	FencingToken            uint64 `json:"fencingToken"`
-}
-
-type RadioEnsureOffObservation struct {
-	RF              RFObservation `json:"rf"`
-	ActiveCallCount *int          `json:"activeCallCount,omitempty"`
-}
-
-type CommandOutcome struct {
-	OperationID string                    `json:"operationId"`
-	Command     string                    `json:"command"`
-	State       string                    `json:"state"`
-	Code        string                    `json:"code"`
-	ErrorLayer  string                    `json:"errorLayer,omitempty"`
-	Retryable   bool                      `json:"retryable"`
-	Reconciled  bool                      `json:"reconciled"`
-	Observation RadioEnsureOffObservation `json:"observation"`
-	AcceptedAt  time.Time                 `json:"acceptedAt"`
-	CompletedAt *time.Time                `json:"completedAt,omitempty"`
-}
-
-type RadioEnsureOffResponse struct {
-	ProtocolVersion int            `json:"protocolVersion"`
-	AgentInstanceID string         `json:"agentInstanceId"`
-	Outcome         CommandOutcome `json:"outcome"`
 }

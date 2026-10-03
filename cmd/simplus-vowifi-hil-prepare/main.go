@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/vowifihil"
+
+	"github.com/leonfox28/simplus/internal/ims"
 )
 
 func main() {
@@ -27,7 +29,7 @@ func main() {
 	if err != nil {
 		fatal("the ML307A/VOXI RF-off preflight failed")
 	}
-	config, err := vowifihil.Build(vowifihil.Input{Target: inspection.Target, IMSI: inspection.IMSI})
+	config, err := vowifihil.Build(ims.Input{Target: inspection.Target, IMSI: inspection.IMSI})
 	if err != nil {
 		fatal("the ML307A/VOXI identity does not satisfy the HIL profile")
 	}
@@ -63,7 +65,7 @@ func main() {
 		IMPUCount     int    `json:"imsPublicIdentityCount"`
 		IMSDiscovery  string `json:"imsApplicationDiscovery"`
 		IMSCandidates int    `json:"imsApplicationCandidates"`
-	}{true, "VOXI / Vodafone UK", "off", "ready", vowifihil.IMSAPN, vowifihil.EPDGFQDN,
+	}{true, "VOXI / Vodafone UK", "off", "ready", ims.IMSAPN, ims.EPDGFQDN,
 		inspection.IMSIdentity.IdentitySource, len(inspection.IMSIdentity.PublicIdentities),
 		inspection.IMSIdentity.ApplicationDiscovery, inspection.IMSIdentity.ApplicationCandidates}
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {

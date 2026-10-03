@@ -13,7 +13,7 @@ LAN Browser
 Vite dev server or control container Vite-built React SPA
     │ /api
     ▼
-control container: simplusd ───── ./data/core/SQLite
+control container: simplusd ───── ./data/control-v2/SQLite
     ├── shared Unix socket ──► agent container (network none)
     │                              └── bounded host /sys + /dev ──► modem(s)
     └── shared Unix socket ──► netd container (Docker bridge)
@@ -23,7 +23,7 @@ control container: simplusd ───── ./data/core/SQLite
 
 production 以 Docker Compose 保留三个进程/镜像的权限分离；它不是 privileged 单体，
 也不使用 host network。固定 UID 10001/10002 和共享 runtime volume 让现有 Unix
-`SO_PEERCRED` 鉴权跨容器成立。持久数据只通过 `./data/core` 与 `./data/agent` 映射；
+`SO_PEERCRED` 鉴权跨容器成立。持久数据只通过 `./data/control-v2` 与 `./data/agent` 映射；
 首次容器部署是新实例，不猜测迁移原生 `/var/lib`。宿主只持有 Docker、内核与开机
 加载的 USB serial `option` 模块，边界见 [`0021`](decisions/0021-container-production-deployment.md)。
 当前开发 VM 的真实容器 HIL 已覆盖 Mihomo、Host VoWiFi 和单段自号码短信回环；
@@ -137,9 +137,9 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - 单一前端栈是 React 19、Vite、React Router Declarative Mode、直接使用的
   Ant Design 6 与 TanStack Query；Umi Max、Ant Design Pro Components、ProLayout
   和 Umi runtime 已原子移除，不保留第二套路由、UI 或服务端状态栈；
-- `AppProviders` 显式装配 Ant Design 与 QueryClient，`BootstrapGate` 统一处理 setup、
+- `AppProviders` 显式装配 Ant Design 与 QueryClient，`SessionGate` 统一处理安装就绪、
   管理员 session 和 401 恢复，`AppRouter` 与响应式 `AppShell` 拥有公共/受保护路由、
-  桌面 Sider 和手机 Drawer；Login/Setup 继续使用独立页面壳；
+  桌面 Sider 和手机 Drawer；Login 使用独立页面壳；
 - `api/openapi.yaml` 由 `@hey-api/openapi-ts` 同时生成 Fetch SDK、TypeScript 类型、
   Zod 结构 schema 和 TanStack Query keys/options。生成目录是公共
   operation/payload/query identity 的唯一浏览器 owner；手写 runtime 只负责同源
@@ -148,12 +148,12 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - 服务端和 SQLite 是业务状态唯一权威。浏览器通过 HTTP 读取快照和提交 mutation，
   TanStack Query 只保存可丢弃的页面快照；query 只有在网络或服务端明确标记可重试时
   有界重试，mutation 默认不自动重试，敏感或业务数据不写入浏览器持久存储；
-- 同源 `GET /api/v1/events` 经过 setup、管理员 session 与可信 LAN gate，只发送有界
+- 同源 `GET /api/v1/events` 经过安装就绪、管理员 session 与可信 LAN gate，只发送有界
   资源失效、重连 resync 与新短信/来电 attention hint。事件不携带正文、号码、身份、
   路径、拓扑、命令或诊断材料，也不构成业务真相源；客户端只失效当前活跃 query，
   再经 HTTP 取得权威快照，慢连接和丢失 hint 不得阻塞 mutation、后台同步或造成
   无限队列；
-- Messages 使用首次成功持久化时由 messages SQLite 分配的 `recordSequence` 稳定倒序，
+- Messages 使用首次成功持久化时由 control SQLite 分配的 `recordSequence` 稳定倒序，
   Calls 继续使用 `(createdAt, stable ID)`；两者使用互相隔离的 opaque keyset cursor。
   短信产品会话只以 exact remote address 标识并跨 Line 合并；全局、remote-only 以及兼容
   的 Line + remote 查询都由匹配 sequence 索引支持，Line-only 继续拒绝。每条消息仍保存
@@ -161,7 +161,7 @@ Web/API -> application/Line -> typed service port -> Agent capability -> model a
 - 短信会话摘要由后端分页返回最后消息、持久未读数和最近出站 Line。浏览器只有在会话
   detail 实际可见、页面前台且 remote-only 最新页成功渲染后，才原样提交该 HTTP snapshot
   的 opaque read-through token；联系人只在 Web 以 exact 号码关联名称，不拥有会话身份；
-- 登录、基础初始化以及导航中的模组、线路、短信、语音、Mihomo、通知和系统设置页面
+- 登录以及导航中的模组、线路、短信、语音、Mihomo、通知和系统设置页面
   使用同一套直接 Ant Design 视觉语言；桌面以 Table/Sider 为主，手机以 Card/List 与
   Drawer 为主，宽表只在自身容器滚动，加载、空、错误、部分失败和不可用原因明确可见；
 - 模组页只展示管理员已添加的模组，主表固定为型号、当前模块序列号（不可用时回退 USB Serial）、默认隐藏且按需实时读取的 IMEI、在线状态、SIM 插入状态与射频开关；“添加模组”对话框以单选表格展示未添加候选的相对 USB 地址、VID:PID、型号、脱敏 USB 序列标识、支持状态、类型化不可添加原因和能力；
@@ -255,7 +255,9 @@ request -> validate -> enqueue -> execute -> observe -> persist result -> notify
 写入权威状态，浏览器再通过 HTTP 重新读取。SSE 不能承载 mutation 结果或建立第二套
 事件状态。
 
-旧的 ResourceGroup lease 应用编排器已移除；已发布的 runtime migration 00005 和 SQLite lease repository 只作为数据与迁移兼容的 dormant fixture 保留，不是 production capability，也不是新 application 类型的来源。独立的 `radio.ensure-off` outcome/fencing ledger 仍保留，但 production Agent 不注册该命令。新的 RF 路径只接受目标开关状态，在 Agent 内串行执行固定命令并立即读回；新的 SMS/Call 纵切也不应扩展通用分布式命令平台。
+通用 ResourceGroup lease 仓储、旧 `radio.ensure-off` 命令账本及占位 replay backend
+已删除。保留实际设备／SIM 身份校验、Agent 共享设备互斥及短信专用恢复机制。
+RF 只接受布尔目标并读回确认；生产能力不扩展到任意命令。
 
 ## 5. 关键数据流
 
@@ -274,7 +276,7 @@ Simulator 继续使用进程内 Local Agent client。Host VoWiFi Line 使用独�
 
 ```text
 modem/IMS worker -> bounded typed read -> simplusd
-    -> transactionally persist raw/decoded message + unread marker
+    -> transactionally persist raw/decoded message + unread marker + notification tasks
     -> confirm persistence
     -> delete/ack modem copy when applicable
     -> bounded messages invalidation/attention
@@ -296,29 +298,39 @@ Web -> emergency/number validation -> modem worker
 
 ## 6. 存储
 
-当前代码使用五个 SQLite 数据库和独立录音目录。这不是 MVP 必须维持的领域边界，但立即合库会延迟核心功能，因此：
+control 使用单一 `state/control.sqlite3`，覆盖账户、会话、模组、线路、消息、未读、
+联系人、通话、Mihomo、通知与消费检查点。Agent 的硬件短信恢复数据库保持独立。
+新布局使用 `simplus-control-state-v2` 标记；发现旧布局立即拒绝，绝不自动迁移或覆盖。
+安装时管理员与 `ready` 状态同事务提交，Web 不再承接 Bootstrap、硬件审查、录音目录
+或本地 CA 初始化。决策见 [0028](decisions/0028-control-state-and-durable-notifications.md)。
 
-- 当前 migration 和数据库继续工作；
-- messages v8 以 `record_sequence INTEGER PRIMARY KEY AUTOINCREMENT` 记录每条短信首次成功
-  持久化的全局顺序，并用 remote/Line + remote sequence 索引支持历史与摘要。v7 历史按
-  入站 `updatedAt`、出站 `createdAt` 回填，再以原业务时间与 message ID 确定性打破平局；
-  `sms_message_unread` 继续以独立 `AUTOINCREMENT` 到达序号记录首次入站，计数从 marker
-  派生，message 删除级联 marker，旧 v6 历史升级时 ledger 为空；
-- core 数据库保存 Host VoWiFi `desired_active`，但不保存网络运行事实或鉴权材料；
-- core v23 以独立 `feishu_app_notification_channels` 表保存飞书应用私聊渠道；App ID、
-  App Secret 与授权用户 `open_id` 使用字段独立的实例密钥标签加密。旧 Webhook 渠道
-  继续留在 v12 表，两个变体通过应用层 `deliveryMode` 合并读取；
-- 新表放到语义最接近的现有库；
-- 不新增 dataset identity、备份协议或跨库事务框架；
-- MVP 后再评估是否合并为一个 SQLite 数据库；
-- 目录与数据库保持普通 `0700/0600` 权限即可，不继续扩展 inode/mount 身份策略。
+- 消息首次落库获得单调 `record_sequence`，未读 marker 与入站通知任务同事务；
+- 已配置的 VoWiFi 激活意图持久化，网络运行事实来自 supervisor；
+- 飞书应用凭据按字段标签加密，Webhook secret 和实例密钥不进入公共响应；
+- sqlc schema 统一来自 `migrations/control`，新表和约束只在 control 中演进；
+- 数据目录／文件为 `0700/0600`，netd 只访问 Mihomo 子目录与共享运行目录。
+
+### 持久通知与连接观测
+
+通知任务由独立 worker 投递。暂时失败按 15 秒到 5 分钟退避，明确永久拒绝保存安全
+原因码；进程重启回收未完成租期。相同渠道、对象、连接类型严格按顺序领取，其他
+对象独立推进。停用、取消订阅、删除渠道或可删除的业务记录会取消对应待投递任务。
+消息平台不提供事务边界，响应丢失可能造成重复投递。
+
+VoWiFi 从 supervisor 的实际在线状态迁移生成事件，类型化接口包含实例标识、序号、
+时间和安全原因，缓存 1024 条。control 用带游标的快照启动，用变化接口续读；来源
+重启或游标溢出时重新校准并累计监测缺口，不猜测缺口中的状态。蜂窝按模组独立每
+5 秒探测，拓扑变化提前调度，复用 Agent 身份校验与设备互斥。未知／超时保留上次
+确认状态。首次在线通知，首次离线仅建基线；之后每次确认变化立即通知，不加等待。
+本地／漫游互换、信号和制式变化不触发连接事件。检查点、游标和通知任务同事务。
+新订阅不回放历史，连接通知仅包含显示名称、连接类型、状态、时间和确认原因。
 
 ### 飞书通知绑定
 
 ```text
 Web POST -> 内存中的单实例绑定状态 -> 固定 accounts.feishu.cn 设备授权轮询
          -> 授权结果校验 -> 固定 open.feishu.cn 私聊测试
-         -> 三字段独立加密 -> core v23 应用渠道行 -> notifications 失效提示
+         -> 三字段独立加密 -> control 应用渠道行 -> notifications 失效提示
 ```
 
 验证 URL、device code 和等待状态不进入 SQLite、SSE 或日志；普通渠道列表只返回
@@ -348,16 +360,28 @@ Web POST -> 内存中的单实例绑定状态 -> 固定 accounts.feishu.cn 设�
     `(createdAt, stable ID)` keyset。两者都不能退化为 offset 或互相接受对方的 cursor。
 17. 短信会话只按 exact remote address 跨 Line 合并；Line 仍是每条消息的事实与发送时的
     显式身份，最近 Line 不可用时不得静默切换。
-18. 未读只能由首次入站持久化在 messages 数据集内原子创建 marker；已读只能使用成功
+18. 未读只能由首次入站持久化在 control 事务内原子创建 marker；已读只能使用成功
     显示的 HTTP snapshot opaque 水位清除不晚于它的 marker，SSE 不承载未读真相。
 
 这些规则应优先由类型、测试和小型检查器强制执行，而不是在多份文档中重复描述。
 
 ## 8. 当前技术债处理原则
 
-- 已完成但超出新 MVP 的 setup/auth/topology 代码先保持可用；ResourceGroup lease
-  应用编排器已删除，只有已发布 migration 与 SQLite fixture 为兼容保留；
+- 旧 setup、通用租约、命令占位和多库布局已按 ADR 0028 删除；新数据目录明确隔离旧实例；
 - 不为删代码而中断短信纵切；
 - 当旧抽象实际阻碍一个纵切时，用小型执行计划删除或折叠；
 - 每次只保留一个业务真相源，避免在 daemon、Agent 和 Web 分别维护同一状态；
 - 新设计优先选普通 Go、SQLite、Unix socket 和明确 JSON schema。
+
+## 9. 实现与生命周期边界
+
+领域值与规则位于 `internal/domain`；应用用例通过小接口编排，不导入 Unix 客户端、
+外部 HTTP、文件或进程实现。`agentinventory`、`modemagent`、`smstransport`、`feishu`、
+`subscriptionhttp` 和 `mihomoassets` 是外层适配器；生产 SIP／IMS／strongSwan 由
+`internal/ims` 拥有，`internal/vowifihil` 只保留显式验证入口。
+`internal/architecture` 的导入检查与各边界行为测试共同约束这一方向。
+
+入口在构造时装配依赖，禁用功能使用明确实现。HTTP 按认证、设备、通信、网络和通知
+拆分并共享安全 gate、错误映射与超时。退出先停止接入，取消并等待请求、SSE、绑定、
+通知及各线路后台任务，再回收子进程和网络，最后关闭数据库。同模组操作仍串行，
+各线路独立超时与退避；慢操作不持有全局状态锁。

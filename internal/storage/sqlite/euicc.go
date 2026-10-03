@@ -8,7 +8,7 @@ import (
 )
 
 func (set *Set) ListSimulatorEUICCProfiles(ctx context.Context) ([]euicc.Profile, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT profile_id, display_name, display_identity_hint, active FROM simulator_euicc_profiles ORDER BY profile_id`)
+	rows, err := set.DB.QueryContext(ctx, `SELECT profile_id, display_name, display_identity_hint, active FROM simulator_euicc_profiles ORDER BY profile_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list simulator eUICC profiles: %w", err)
 	}
@@ -26,7 +26,7 @@ func (set *Set) ListSimulatorEUICCProfiles(ctx context.Context) ([]euicc.Profile
 	return values, rows.Err()
 }
 func (set *Set) SwitchSimulatorEUICCProfile(ctx context.Context, id string) error {
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

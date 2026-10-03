@@ -1,24 +1,42 @@
 # Simplus 当前开发交接
 
-> 更新：2026-08-21
+> 更新：2026-09-30
 >
 > 状态：V1 管理面、Vite/React Query 前端、持久模组/线路层、Host VoWiFi/SMS over IMS 与 QDC507 原生蜂窝短信纵切已完成；`v0.1.1` Pre-release 已提供匿名可拉取的三镜像与版本化部署包，clean-VM 生命周期验收尚待完成。
 
 本文只记录可以公开的代码状态、验证等级和下一步；现场与个人环境材料遵循 [`privacy-and-publication.md`](privacy-and-publication.md) 留在仓库外。产品范围以 [`product.md`](product.md) 为准，进程与安全不变量以 [`architecture.md`](architecture.md) 为准，任务状态以 [`plans/active/mvp.md`](plans/active/mvp.md) 为准。
 
+本次重构尚未发布；下述新布局与原子安装行为不属于已发布的 `v0.1.1`。
+
+## 2026-09-30 重构状态
+
+控制面现已使用独立 `data/control-v2/state/control.sqlite3`，安装事务创建管理员并就绪，
+登录直接进入管理界面。旧多库／设置流程、租约和命令占位已删除；旧布局拒绝启动，
+不会迁移或改写。netd 只挂载 Mihomo 子目录与运行目录。
+
+应用层通过小接口依赖适配器；生产 IMS/SIP/strongSwan 与 HIL 入口分离。短信按当前
+Agent 实例解析身份，持久结果优先，提交后未知结果不重发。进程退出等待请求与后台任务。
+
+通知持久化、重试和取消已接通，入站短信／未读／通知同事务。新增四类连接通知，
+首次在线和每次确认变化立即通知；未知状态保留确认值。VoWiFi 使用带游标的 1024 条
+有序变化，蜂窝按模组独立五秒采样。Simulator 也使用这套监测路径。
+
+验证进度与最终证据集中在[唯一活跃计划](plans/active/mvp.md)；此改动不增加任何真实
+硬件兼容性证据，既有 clean-VM／部署验收状态保持待完成。
+
 ## 已落地能力
 
 ### 管理与安装
 
-- 单管理员 setup、登录、CSRF、会话撤销和修改密码；
+- 安装时单管理员初始化、登录、CSRF、会话撤销和修改密码；
 - React、Vite、React Router、直接 Ant Design 与 TanStack Query 后台；
 - OpenAPI 生成 Fetch/TypeScript/Zod/Query 契约，鉴权 HTTP 承载权威读写，同源 SSE 只做有界失效和新短信/来电提示；
 - 概览、模组、线路、短信、语音、Mihomo、通知和系统设置页面；
 - 通知页保留企业微信/飞书手工 Webhook，并已增加飞书中国版最小权限应用的一键绑定：
   短期 URL 等待授权，只向授权用户私聊，测试成功后才加密持久化；解绑只删除本地绑定；
-- production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / bootstrap` 编排全新实例，并且是唯一受支持的 production 部署方式；clean-VM 生命周期验收仍待完成；
+- production Dockerfile 保持 `simplus-control`、`simplus-agent`、`simplus-netd` 三个镜像，Compose 以 `data-init / agent / netd / app / provision` 编排全新实例，并且是唯一受支持的 production 部署方式；clean-VM 生命周期验收仍待完成；
 - Host VoWiFi 所需的两个 strongSwan 插件由锁定 Debian 输入独立构建为 `simplus-strongswan-plugins` 包，并随对应源码、摘要和 manifest 发布；netd 镜像安装该包和 Debian runtime，不要求用户或普通开发者提供 strongSwan 源码树；
-- 全新容器实例由 bootstrap 生成随机管理员密码，升级和重建不覆盖凭据。
+- 全新容器实例由 provision 生成随机管理员密码，升级和重建不覆盖凭据。
 
 ### 容器部署候选
 
@@ -34,8 +52,8 @@
 - app 固定 UID 10001 且无 capability；netd 使用普通 Docker bridge 和现有受限网络
   capability，临时 netns/veth/nft/XFRM probe 失败即不健康，不使用 privileged 或
   host network；
-- bind-mounted 数据固定为 `./data/core` 与 `./data/agent`。data-init 固定所有权并
-  安装 Zashboard 和固定摘要的 Mihomo core，已有 core 不覆盖；bootstrap 首次创建
+- bind-mounted 数据固定为 `./data/control-v2` 与 `./data/agent`。data-init 固定所有权并
+  安装 Zashboard 和固定摘要的 Mihomo core，已有 core 不覆盖；provision 首次创建
   `simplus_admin`，密码只写首次容器日志；tag release 同时附带 Mihomo GPL 源码；
 - app/Agent/netd 的 typed health、Compose YAML 权限 contract、Shell 语法、workflow
   actionlint、目标 Go 测试和 Compose `config --quiet` 已通过；当前 Debian 13/amd64

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	stream "github.com/leonfox28/simplus/internal/domain/connectivity"
 )
 
 var safeStatusToken = regexp.MustCompile(`^[A-Z0-9_-]{0,64}$`)
@@ -32,6 +34,8 @@ type workerEvent struct {
 }
 
 type instance struct {
+	observedAt time.Time
+	cancel     context.CancelFunc
 	request    StartRequest
 	plan       networkPlan
 	status     Status
@@ -45,12 +49,16 @@ type instance struct {
 }
 
 type Local struct {
-	Root       string
-	Executable string
-	Now        func() time.Time
-	Network    *networkManager
+	connectionInstance string
+	connectionSequence uint64
+	connectionEvents   []stream.Change
+	Root               string
+	Executable         string
+	Now                func() time.Time
+	Network            *networkManager
 
 	mu        sync.Mutex
+	closing   bool
 	instances map[string]*instance
 }
 
@@ -88,59 +96,67 @@ func (local *Local) Start(ctx context.Context, request StartRequest) (Status, er
 	if !validStartRequest(request) {
 		return Status{}, ErrRequestInvalid
 	}
+	plan, err := buildNetworkPlan(request)
+	if err != nil {
+		return Status{}, err
+	}
+	startCtx, cancelStart := context.WithCancel(ctx)
+	defer cancelStart()
+	runtimeDir := filepath.Join(local.Root, plan.Token)
+	current := &instance{request: request, plan: plan, runtimeDir: runtimeDir, ready: make(chan struct{}), done: make(chan struct{}), cancel: cancelStart,
+		status: Status{LineID: request.LineID, State: StateStarting, Stage: "network", EgressMode: request.EgressMode, CountryCode: request.CountryCode, StartedAt: local.Now().UTC()}}
 	local.mu.Lock()
-	if current := local.instances[request.LineID]; current != nil &&
-		current.status.State != StateStopped && current.status.State != StateFailed {
-		status := current.status
+	stale := local.instances[request.LineID]
+	if local.closing {
+		local.mu.Unlock()
+		return Status{}, ErrNotRunning
+	}
+	if stale != nil && stale.status.State != StateStopped && stale.status.State != StateFailed {
+		status := stale.status
 		local.mu.Unlock()
 		return status, ErrAlreadyRunning
 	}
-	if stale := local.instances[request.LineID]; stale != nil && stale.cleanup != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	local.instances[request.LineID] = current
+	local.mu.Unlock()
+	if stale != nil && stale.cleanup != nil {
+		cleanupCtx, cancel := context.WithTimeout(startCtx, 15*time.Second)
 		cleanupErr := local.Network.Cleanup(cleanupCtx, stale.plan)
 		cancel()
 		if cleanupErr != nil {
-			status := stale.status
-			local.mu.Unlock()
-			return status, cleanupErr
+			local.failStart(current, "NETWORK_CLEANUP_FAILED", false)
+			return local.status(current), cleanupErr
 		}
-		stale.cleanup = nil
 	}
-	plan, err := buildNetworkPlan(request)
-	if err != nil {
-		local.mu.Unlock()
-		return Status{}, err
+	for _, prepare := range []func() error{
+		func() error { return os.RemoveAll(runtimeDir) },
+		func() error { return os.Mkdir(runtimeDir, 0o700) },
+		func() error { return writeNetworkManifest(filepath.Join(runtimeDir, "network.json"), plan) },
+	} {
+		if err := prepare(); err != nil {
+			local.failStart(current, "WORKER_START_FAILED", true)
+			return local.status(current), err
+		}
 	}
-	runtimeDir := filepath.Join(local.Root, plan.Token)
-	if err := os.RemoveAll(runtimeDir); err != nil {
-		local.mu.Unlock()
-		return Status{}, err
-	}
-	if err := os.Mkdir(runtimeDir, 0o700); err != nil {
-		local.mu.Unlock()
-		return Status{}, err
-	}
-	if err := writeNetworkManifest(filepath.Join(runtimeDir, "network.json"), plan); err != nil {
-		_ = os.RemoveAll(runtimeDir)
-		local.mu.Unlock()
-		return Status{}, err
-	}
-	current := &instance{request: request, plan: plan, runtimeDir: runtimeDir, ready: make(chan struct{}), done: make(chan struct{}),
-		status: Status{LineID: request.LineID, State: StateStarting, Stage: "network", EgressMode: request.EgressMode,
-			CountryCode: request.CountryCode, StartedAt: local.Now().UTC()}}
-	local.instances[request.LineID] = current
-	local.mu.Unlock()
-
-	setupCtx, cancelSetup := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	setupCtx, cancelSetup := context.WithTimeout(startCtx, 15*time.Second)
 	err = local.Network.Setup(setupCtx, plan)
 	cancelSetup()
 	if err != nil {
 		local.failStart(current, "NETWORK_SETUP_FAILED", !errors.Is(err, errNetworkCleanupFailed))
-		return current.status, fmt.Errorf("%w: %v", ErrStartupFailed, err)
+		return local.status(current), fmt.Errorf("%w: %v", ErrStartupFailed, err)
 	}
-	stdout, command, err := local.workerCommand(current, runtimeDir)
+	local.mu.Lock()
+	var stdout io.ReadCloser
+	var command *exec.Cmd
+	err = startCtx.Err()
+	if err == nil {
+		stdout, command, err = local.workerCommand(current, runtimeDir)
+		current.command = command
+	}
+	local.mu.Unlock()
 	if err != nil {
-		cleanupErr := local.Network.Cleanup(context.Background(), plan)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		cleanupErr := local.Network.Cleanup(cleanupCtx, plan)
+		cancel()
 		code := "WORKER_START_FAILED"
 		if cleanupErr != nil {
 			code = "NETWORK_CLEANUP_FAILED"
@@ -149,11 +165,8 @@ func (local *Local) Start(ctx context.Context, request StartRequest) (Status, er
 		if cleanupErr != nil {
 			err = errors.Join(err, cleanupErr)
 		}
-		return current.status, fmt.Errorf("%w: %v", ErrStartupFailed, err)
+		return local.status(current), fmt.Errorf("%w: %v", ErrStartupFailed, err)
 	}
-	local.mu.Lock()
-	current.command = command
-	local.mu.Unlock()
 	go local.monitor(current, runtimeDir, stdout)
 
 	timer := time.NewTimer(5 * time.Second)
@@ -197,28 +210,17 @@ func (local *Local) workerCommand(current *instance, runtimeDir string) (io.Read
 
 func (local *Local) monitor(current *instance, runtimeDir string, stdout io.ReadCloser) {
 	defer stdout.Close()
-	scanner := bufio.NewScanner(io.LimitReader(stdout, 1<<20))
-	scanner.Buffer(make([]byte, 4096), 16<<10)
-	for scanner.Scan() {
-		var event workerEvent
-		if json.Unmarshal(scanner.Bytes(), &event) != nil || !validWorkerEvent(event, current.request.LineID) {
-			continue
-		}
-		local.mu.Lock()
-		current.status.State = event.State
-		current.status.Stage = event.Stage
-		current.status.Online = event.Online
-		current.status.RegisteredAt = event.RegisteredAt
-		current.status.NextRefresh = event.NextRefresh
-		current.status.PhoneNumber = event.PhoneNumber
-		current.status.Attempt = event.Attempt
-		if event.ErrorCode != "" || event.Online {
-			current.status.ErrorCode = event.ErrorCode
-		}
-		local.mu.Unlock()
-		current.once.Do(func() { close(current.ready) })
+	readErr := local.readWorkerEvents(current, stdout)
+	if readErr != nil && current.command.Process != nil {
+		_ = current.command.Process.Kill()
 	}
 	waitErr := current.command.Wait()
+	local.mu.Lock()
+	beforeExit := current.status.Online
+	current.status.Online = false
+	current.status.PhoneNumber = ""
+	local.recordConnectionLocked(current, beforeExit, "worker_exited")
+	local.mu.Unlock()
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	cleanupErr := local.Network.Cleanup(cleanupCtx, current.plan)
 	cancel()
@@ -227,6 +229,7 @@ func (local *Local) monitor(current *instance, runtimeDir string, stdout io.Read
 	}
 
 	local.mu.Lock()
+	before := current.status.Online
 	current.cleanup = cleanupErr
 	if cleanupErr != nil {
 		current.status.State, current.status.Stage, current.status.Online = StateFailed, "cleanup", false
@@ -244,6 +247,7 @@ func (local *Local) monitor(current *instance, runtimeDir string, stdout io.Read
 		}
 		_ = waitErr
 	}
+	local.recordConnectionLocked(current, before, "worker_exited")
 	local.mu.Unlock()
 	current.once.Do(func() { close(current.ready) })
 	close(current.done)
@@ -255,14 +259,22 @@ func (local *Local) Stop(ctx context.Context, lineID string) (Status, error) {
 	}
 	local.mu.Lock()
 	current := local.instances[lineID]
-	if current == nil || current.status.State == StateStopped || current.command == nil {
+	if current == nil || current.status.State == StateStopped {
 		local.mu.Unlock()
 		return Status{}, ErrNotRunning
 	}
+	before := current.status.Online
 	current.stop = true
 	current.status.State, current.status.Stage, current.status.Online = StateStopping, "cleanup", false
 	current.status.PhoneNumber = ""
-	process := current.command.Process
+	local.recordConnectionLocked(current, before, "stopped")
+	if current.cancel != nil {
+		current.cancel()
+	}
+	var process *os.Process
+	if current.command != nil {
+		process = current.command.Process
+	}
 	local.mu.Unlock()
 	if process != nil {
 		_ = process.Signal(syscall.SIGTERM)
@@ -284,38 +296,69 @@ func (local *Local) Stop(ctx context.Context, lineID string) (Status, error) {
 	case <-current.done:
 	}
 	local.mu.Lock()
-	status := current.status
 	cleanupErr := current.cleanup
 	local.mu.Unlock()
 	if cleanupErr != nil {
-		return status, cleanupErr
+		cleanupErr = local.Network.Cleanup(ctx, current.plan)
+		if cleanupErr == nil {
+			cleanupErr = os.RemoveAll(filepath.Join(local.Root, current.plan.Token))
+		}
 	}
-	return status, nil
+	local.mu.Lock()
+	current.cleanup = cleanupErr
+	if cleanupErr == nil {
+		current.status.State, current.status.Stage, current.status.ErrorCode = StateStopped, "", ""
+	}
+	status := current.status
+	local.mu.Unlock()
+	return status, cleanupErr
 }
 
 func (local *Local) Close(ctx context.Context) error {
+	local.mu.Lock()
+	local.closing = true
+	local.mu.Unlock()
 	statuses, _ := local.List(ctx)
+	var work sync.WaitGroup
+	var mu sync.Mutex
 	var closeErr error
 	for _, status := range statuses {
-		if status.State == StateStopped || status.State == StateFailed {
+		if status.State == StateStopped {
 			continue
 		}
-		if _, err := local.Stop(ctx, status.LineID); err != nil && !errors.Is(err, ErrNotRunning) && closeErr == nil {
-			closeErr = err
-		}
+		work.Go(func() {
+			if _, err := local.Stop(ctx, status.LineID); err != nil && !errors.Is(err, ErrNotRunning) {
+				mu.Lock()
+				closeErr = errors.Join(closeErr, err)
+				mu.Unlock()
+			}
+		})
 	}
+	work.Wait()
 	return closeErr
 }
 
-func (local *Local) failStart(current *instance, code string, removeRuntime bool) {
+func (local *Local) status(current *instance) Status {
 	local.mu.Lock()
-	current.status.State, current.status.Stage, current.status.Online, current.status.ErrorCode = StateFailed, "startup", false, code
-	local.mu.Unlock()
-	current.once.Do(func() { close(current.ready) })
-	close(current.done)
+	defer local.mu.Unlock()
+	return current.status
+}
+
+func (local *Local) failStart(current *instance, code string, removeRuntime bool) {
 	if removeRuntime {
 		_ = os.RemoveAll(filepath.Join(local.Root, current.plan.Token))
 	}
+	local.mu.Lock()
+	current.status.State, current.status.Stage, current.status.Online, current.status.ErrorCode = StateFailed, "startup", false, code
+	if !removeRuntime {
+		current.cleanup = errNetworkCleanupFailed
+	}
+	if current.stop && removeRuntime {
+		current.status.State = StateStopped
+	}
+	current.once.Do(func() { close(current.ready) })
+	close(current.done)
+	local.mu.Unlock()
 }
 
 func (local *Local) cleanupStale() error {
@@ -357,4 +400,35 @@ func validWorkerEvent(event workerEvent, lineID string) bool {
 		return false
 	}
 	return event.Online == (event.State == StateOnline) && (event.Online || event.PhoneNumber == "")
+}
+
+func (local *Local) readWorkerEvents(current *instance, reader io.Reader) error {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 4096), 16<<10)
+	for scanner.Scan() {
+		var event workerEvent
+		if json.Unmarshal(scanner.Bytes(), &event) != nil || !validWorkerEvent(event, current.request.LineID) {
+			continue
+		}
+		local.mu.Lock()
+		if current.stop {
+			local.mu.Unlock()
+			continue
+		}
+		before := current.status.Online
+		current.status.State = event.State
+		current.status.Stage = event.Stage
+		current.status.Online = event.Online
+		current.status.RegisteredAt = event.RegisteredAt
+		current.status.NextRefresh = event.NextRefresh
+		current.status.PhoneNumber = event.PhoneNumber
+		current.status.Attempt = event.Attempt
+		if event.ErrorCode != "" || event.Online {
+			current.status.ErrorCode = event.ErrorCode
+		}
+		local.recordConnectionLocked(current, before, "reconnecting")
+		local.mu.Unlock()
+		current.once.Do(func() { close(current.ready) })
+	}
+	return scanner.Err()
 }

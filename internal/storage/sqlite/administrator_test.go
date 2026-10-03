@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestConfigureInitialAdministratorPersistsAndRotatesCredentialGeneration(t *testing.T) {
+func TestConfigureInitialAdministratorPersistsOnceAndCompletesInstallation(t *testing.T) {
 	ctx := context.Background()
 	set, err := OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -19,7 +19,7 @@ func TestConfigureInitialAdministratorPersistsAndRotatesCredentialGeneration(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configured || username != "" || locale != "en-US" {
+	if configured || username != "" || locale != "zh-CN" {
 		t.Fatalf("initial administrator = username %q, locale %q, configured %t", username, locale, configured)
 	}
 
@@ -43,19 +43,12 @@ func TestConfigureInitialAdministratorPersistsAndRotatesCredentialGeneration(t *
 		t.Fatalf("first credential = %#v", credential)
 	}
 
-	const secondHash = "$argon2id$v1$m=8192,t=1,p=1$WVlZWVlZWVlZWVlZWVlZWQ$WVlZWVlZWVlZWVlZWVlZWQ"
-	if err := set.ConfigureInitialAdministrator(ctx, "admin", secondHash, "en-US", now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
+	if err := set.ConfigureInitialAdministrator(ctx, "admin", firstHash, "en-US", now); err == nil {
+		t.Fatal("replaced installed administrator")
 	}
-	if old, err := set.ReadAdministratorCredential(ctx, "leon"); err != nil || old.Found {
-		t.Fatalf("old username lookup = %#v, %v", old, err)
-	}
-	credential, err = set.ReadAdministratorCredential(ctx, "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !credential.Found || credential.PasswordHash != secondHash || credential.SessionGeneration != 2 {
-		t.Fatalf("rotated credential = %#v", credential)
+	state, err := set.InstallationState(ctx)
+	if err != nil || state != "ready" {
+		t.Fatalf("state=%s %v", state, err)
 	}
 }
 
@@ -66,7 +59,7 @@ func TestConfigureInitialAdministratorRejectsReadyInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer set.Close()
-	if _, err := set.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
+	if _, err := set.DB.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
 	if err := set.ConfigureInitialAdministrator(ctx, "admin", "$argon2id$v1$m=8192,t=1,p=1$WlpaWlpaWlpaWlpaWlpaWg$WlpaWlpaWlpaWlpaWlpaWg", "en-US", time.Now()); err == nil {

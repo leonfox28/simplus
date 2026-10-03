@@ -32,7 +32,7 @@ sha256sum -c "simplus-compose-<version>-linux-amd64.tar.gz.sha256" &&
 LICENSE 和 THIRD_PARTY_NOTICES 随同归档提供，以保持同版本的安全检查、来源标识和
 合规材料，不是额外安装包。
 
-持久数据将写入 `/opt/simplus/data/core` 和 `/opt/simplus/data/agent`。首次启动前确认
+持久数据将写入 `/opt/simplus/data/control-v2` 和 `/opt/simplus/data/agent`。首次启动前确认
 该目录位于持久存储，并确定实例外、访问受限的备份位置。
 
 宿主准备会修改模块加载配置并执行 `modprobe option`，请先审阅脚本，再显式运行：
@@ -43,12 +43,12 @@ sudo bash prepare-container-host.sh &&
   docker compose config --quiet &&
   docker compose pull &&
   docker compose up -d &&
-  docker compose wait bootstrap &&
+  docker compose wait provision &&
   docker compose ps &&
-  docker compose logs bootstrap
+  docker compose logs provision
 ```
 
-`bootstrap` 只在全新实例首次启动时输出随机管理员密码。立即保存并在首次登录后修改。
+`provision` 只在全新实例首次启动时输出随机管理员密码。立即保存并在首次登录后修改。
 已有实例重建时不会覆盖密码或再次输出原密码。Web 和 controller 只能暴露给可信局域网。
 
 升级前停止写入并完整备份 `/opt/simplus/data`，再下载和校验新版部署包、保留自己的

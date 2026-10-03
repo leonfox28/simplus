@@ -3,10 +3,10 @@ import zhCN from 'antd/locale/zh_CN'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { BrowserRouter } from 'react-router'
-import { configureApiClient } from '@/api/setupClient'
+import { configureApiClient } from '@/api/configureClient'
 import { createAppQueryClient } from '@/api/queryClient'
 import { AppRouter } from './AppRouter'
-import { BootstrapGate } from './BootstrapGate'
+import { SessionGate } from './SessionGate'
 
 configureApiClient()
 
@@ -16,7 +16,7 @@ export function AppProviders() {
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <BootstrapGate><AppRouter /></BootstrapGate>
+          <SessionGate><AppRouter /></SessionGate>
         </BrowserRouter>
       </QueryClientProvider>
     </AntdApp>

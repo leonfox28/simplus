@@ -18,6 +18,53 @@ type Administrator struct {
 	UpdatedAtUtc      string `json:"updated_at_utc"`
 }
 
+type AdministratorSession struct {
+	TokenHash         []byte `json:"token_hash"`
+	CsrfHash          []byte `json:"csrf_hash"`
+	Username          string `json:"username"`
+	SessionGeneration int64  `json:"session_generation"`
+	CreatedAtUnix     int64  `json:"created_at_unix"`
+	ExpiresAtUnix     int64  `json:"expires_at_unix"`
+	LastSeenAtUnix    int64  `json:"last_seen_at_unix"`
+}
+
+type CallRecord struct {
+	CallID           string        `json:"call_id"`
+	OperationID      string        `json:"operation_id"`
+	LineID           string        `json:"line_id"`
+	RemoteAddress    string        `json:"remote_address"`
+	Direction        string        `json:"direction"`
+	State            string        `json:"state"`
+	EndReason        string        `json:"end_reason"`
+	CreatedAtUnixMs  int64         `json:"created_at_unix_ms"`
+	UpdatedAtUnixMs  int64         `json:"updated_at_unix_ms"`
+	AnsweredAtUnixMs sql.NullInt64 `json:"answered_at_unix_ms"`
+	EndedAtUnixMs    sql.NullInt64 `json:"ended_at_unix_ms"`
+}
+
+type ConnectionCheckpoint struct {
+	ObjectID   string `json:"object_id"`
+	Kind       string `json:"kind"`
+	Connected  int64  `json:"connected"`
+	Revision   int64  `json:"revision"`
+	ObservedAt int64  `json:"observed_at"`
+}
+
+type ConnectionCursor struct {
+	Source   string `json:"source"`
+	Instance string `json:"instance"`
+	Sequence int64  `json:"sequence"`
+	Gaps     int64  `json:"gaps"`
+}
+
+type Contact struct {
+	ContactID       string `json:"contact_id"`
+	DisplayName     string `json:"display_name"`
+	PhoneNumber     string `json:"phone_number"`
+	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
+	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
+}
+
 type DatasetMetadatum struct {
 	Singleton     int64  `json:"singleton"`
 	Dataset       string `json:"dataset"`
@@ -79,22 +126,6 @@ type ManagedModem struct {
 	UpdatedAtUtc                 string `json:"updated_at_utc"`
 }
 
-type ManagementTl struct {
-	Singleton               int64          `json:"singleton"`
-	Mode                    string         `json:"mode"`
-	ListenHost              string         `json:"listen_host"`
-	ListenPort              int64          `json:"listen_port"`
-	SubjectAlternativeNames string         `json:"subject_alternative_names"`
-	CaCertificatePem        []byte         `json:"ca_certificate_pem"`
-	LeafCertificatePem      []byte         `json:"leaf_certificate_pem"`
-	EncryptedCaPrivateKey   []byte         `json:"encrypted_ca_private_key"`
-	EncryptedLeafPrivateKey []byte         `json:"encrypted_leaf_private_key"`
-	RootFingerprintSha256   string         `json:"root_fingerprint_sha256"`
-	LeafNotAfterUtc         sql.NullString `json:"leaf_not_after_utc"`
-	Confirmed               int64          `json:"confirmed"`
-	ConfiguredAtUtc         string         `json:"configured_at_utc"`
-}
-
 type MihomoRuntimeSelection struct {
 	Singleton              int64  `json:"singleton"`
 	SelectedSubscriptionID string `json:"selected_subscription_id"`
@@ -143,23 +174,25 @@ type NotificationChannel struct {
 	UpdatedAtUtc            string         `json:"updated_at_utc"`
 }
 
-type SetupHardwareReview struct {
-	Singleton             int64  `json:"singleton"`
-	InventoryDigestSha256 string `json:"inventory_digest_sha256"`
-	DeviceCount           int64  `json:"device_count"`
-	LineCount             int64  `json:"line_count"`
-	ReviewedAtUtc         string `json:"reviewed_at_utc"`
+type NotificationDelivery struct {
+	ID             int64  `json:"id"`
+	EventKey       string `json:"event_key"`
+	ChannelID      string `json:"channel_id"`
+	EventKind      string `json:"event_kind"`
+	ObjectID       string `json:"object_id"`
+	ConnectionKind string `json:"connection_kind"`
+	Message        string `json:"message"`
+	State          string `json:"state"`
+	Attempts       int64  `json:"attempts"`
+	NextAt         int64  `json:"next_at"`
+	ObservedAt     int64  `json:"observed_at"`
+	LastError      string `json:"last_error"`
 }
 
-type SetupStorage struct {
-	Singleton        int64  `json:"singleton"`
-	DataRoot         string `json:"data_root"`
-	RecordingsRoot   string `json:"recordings_root"`
-	DataDevice       int64  `json:"data_device"`
-	DataInode        int64  `json:"data_inode"`
-	RecordingsDevice int64  `json:"recordings_device"`
-	RecordingsInode  int64  `json:"recordings_inode"`
-	ConfiguredAtUtc  string `json:"configured_at_utc"`
+type NotificationSubscription struct {
+	ChannelID    string `json:"channel_id"`
+	EventKind    string `json:"event_kind"`
+	SubscribedAt int64  `json:"subscribed_at"`
 }
 
 type SimulatorEuiccProfile struct {
@@ -167,6 +200,42 @@ type SimulatorEuiccProfile struct {
 	DisplayName         string `json:"display_name"`
 	DisplayIdentityHint string `json:"display_identity_hint"`
 	Active              int64  `json:"active"`
+}
+
+type SmsInboundFragment struct {
+	GroupID          string `json:"group_id"`
+	Part             int64  `json:"part"`
+	SourceMessageID  string `json:"source_message_id"`
+	LineID           string `json:"line_id"`
+	Sender           string `json:"sender"`
+	Encoding         string `json:"encoding"`
+	ConcatReference  int64  `json:"concat_reference"`
+	Total            int64  `json:"total"`
+	UnitCount        int64  `json:"unit_count"`
+	UserData         []byte `json:"user_data"`
+	ReceivedAtUnixMs int64  `json:"received_at_unix_ms"`
+}
+
+type SmsMessage struct {
+	RecordSequence    int64         `json:"record_sequence"`
+	MessageID         string        `json:"message_id"`
+	OperationID       string        `json:"operation_id"`
+	Direction         string        `json:"direction"`
+	LineID            string        `json:"line_id"`
+	RemoteAddress     string        `json:"remote_address"`
+	Body              string        `json:"body"`
+	Status            string        `json:"status"`
+	ProviderMessageID string        `json:"provider_message_id"`
+	ErrorCode         string        `json:"error_code"`
+	CreatedAtUnixMs   int64         `json:"created_at_unix_ms"`
+	UpdatedAtUnixMs   int64         `json:"updated_at_unix_ms"`
+	SentAtUnixMs      sql.NullInt64 `json:"sent_at_unix_ms"`
+}
+
+type SmsMessageUnread struct {
+	UnreadID      int64  `json:"unread_id"`
+	MessageID     string `json:"message_id"`
+	RemoteAddress string `json:"remote_address"`
 }
 
 type VowifiLineDesire struct {

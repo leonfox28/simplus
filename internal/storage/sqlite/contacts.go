@@ -13,10 +13,10 @@ import (
 )
 
 func (set *Set) CreateContact(ctx context.Context, value contact.Contact) (contact.Contact, error) {
-	if set == nil || set.Contacts == nil {
+	if set == nil || set.DB == nil {
 		return contact.Contact{}, errors.New("contacts database is not open")
 	}
-	_, err := set.Contacts.ExecContext(ctx, `
+	_, err := set.DB.ExecContext(ctx, `
 INSERT INTO contacts (contact_id, display_name, phone_number, created_at_unix_ms, updated_at_unix_ms)
 VALUES (?, ?, ?, ?, ?)
 `, value.ID, value.DisplayName, value.PhoneNumber, value.CreatedAt.UTC().UnixMilli(), value.UpdatedAt.UTC().UnixMilli())
@@ -34,10 +34,10 @@ VALUES (?, ?, ?, ?, ?)
 }
 
 func (set *Set) UpdateContact(ctx context.Context, value contact.Contact) (contact.Contact, error) {
-	if set == nil || set.Contacts == nil {
+	if set == nil || set.DB == nil {
 		return contact.Contact{}, errors.New("contacts database is not open")
 	}
-	result, err := set.Contacts.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE contacts SET display_name = ?, phone_number = ?, updated_at_unix_ms = MAX(created_at_unix_ms, ?)
 WHERE contact_id = ?
 `, value.DisplayName, value.PhoneNumber, value.UpdatedAt.UTC().UnixMilli(), value.ID)
@@ -56,10 +56,10 @@ WHERE contact_id = ?
 }
 
 func (set *Set) DeleteContact(ctx context.Context, id string) error {
-	if set == nil || set.Contacts == nil {
+	if set == nil || set.DB == nil {
 		return errors.New("contacts database is not open")
 	}
-	result, err := set.Contacts.ExecContext(ctx, `DELETE FROM contacts WHERE contact_id = ?`, id)
+	result, err := set.DB.ExecContext(ctx, `DELETE FROM contacts WHERE contact_id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete contact: %w", err)
 	}
@@ -74,10 +74,10 @@ func (set *Set) DeleteContact(ctx context.Context, id string) error {
 }
 
 func (set *Set) ListContacts(ctx context.Context) ([]contact.Contact, error) {
-	if set == nil || set.Contacts == nil {
+	if set == nil || set.DB == nil {
 		return nil, errors.New("contacts database is not open")
 	}
-	rows, err := set.Contacts.QueryContext(ctx, `
+	rows, err := set.DB.QueryContext(ctx, `
 SELECT contact_id, display_name, phone_number, created_at_unix_ms, updated_at_unix_ms
 FROM contacts ORDER BY display_name COLLATE NOCASE, contact_id
 `)
@@ -100,7 +100,7 @@ FROM contacts ORDER BY display_name COLLATE NOCASE, contact_id
 }
 
 func (set *Set) contactByID(ctx context.Context, id string) (contact.Contact, bool, error) {
-	row := set.Contacts.QueryRowContext(ctx, `
+	row := set.DB.QueryRowContext(ctx, `
 SELECT contact_id, display_name, phone_number, created_at_unix_ms, updated_at_unix_ms
 FROM contacts WHERE contact_id = ?
 `, id)

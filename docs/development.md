@@ -47,7 +47,9 @@ corepack pnpm --dir web e2e
 ```
 
 `build` 输出 `web/dist`，由 production `simplusd` 与匹配的 API 一起承载；`e2e`
-使用本地脱敏 fixture，不是硬件或真实通信测试。OpenAPI 或生成 client 发生变化时还要
+使用本地脱敏 fixture，不是硬件或真实通信测试。`corepack pnpm --dir web e2e:simulator`
+另外构建真实 control 后端和静态 Web，在临时数据目录初始化管理员并验证管理、短信、
+电话及连接通知。该测试仅用 Simulator，所有通知请求经过本地拒绝代理，不联系通知平台。OpenAPI 或生成 client 发生变化时还要
 运行 `make verify-generated`。旧 Umi/Pro 输入已经删除；不要重新引入第二套路由、UI
 或服务端状态栈。
 
@@ -62,7 +64,7 @@ make dev-sim
 ```text
 Web: http://127.0.0.1:5173
 API: http://127.0.0.1:8080
-Data: <repo>/.dev/data
+Data: <repo>/.dev/data (新布局：state/control.sqlite3)
 ```
 
 从同一受信任 LAN 的另一台设备访问时显式运行：
@@ -75,7 +77,8 @@ make dev-sim-lan
 继续使用 loopback，并由开发服务器代理同源 `/api`，包括有界 SSE 失效流。该普通
 HTTP 入口只用于可信开发网络。
 
-全新开发数据库需要先由 root control plane 创建唯一管理员。在运行服务的主机终端
+旧的 `db/` 布局会明确拒绝启动，保留旧数据并通过 `SIMPLUS_DATA_ROOT` 选择独立新目录；
+不会自动迁移或删除。全新开发数据库需要先由 root control plane 创建唯一管理员。在运行服务的主机终端
 执行；`<data-root>` 必须与启动 Simulator 时使用的绝对数据目录一致：
 
 ```bash
@@ -87,8 +90,8 @@ sudo "$PWD/.dev/bin/simplusctl-dev" provision-admin \
 ```
 
 命令只在首次创建时显示一次随机密码。浏览器随后打开
-`http://<host-lan-ip>:5173/login`；管理员首次登录会取得受限 setup session 并进入
-`/setup`，完成录音目录后再进入后台，不需要把 root Bootstrap URL 复制到浏览器。
+`http://<host-lan-ip>:5173/login`；管理员登录后直接进入
+管理界面；管理员创建与实例就绪已在安装事务中完成。
 不要把管理员密码、Cookie 或开发数据库写进问题、文档或测试 fixture。
 
 ## 3. 真实硬件 HIL-0

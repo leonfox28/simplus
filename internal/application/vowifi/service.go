@@ -3,7 +3,6 @@ package vowifi
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -13,7 +12,6 @@ import (
 	mihomoapp "github.com/leonfox28/simplus/internal/application/mihomo"
 	lineegressdomain "github.com/leonfox28/simplus/internal/domain/lineegress"
 	domain "github.com/leonfox28/simplus/internal/domain/vowifi"
-	"github.com/leonfox28/simplus/internal/vowifisupervisor"
 )
 
 var (
@@ -44,23 +42,22 @@ type Service struct {
 	Inventory  Inventory
 	Egress     Egress
 	Mihomo     MihomoRuntime
-	Supervisor vowifisupervisor.API
+	Supervisor domain.API
 	Now        func() time.Time
 
-	mu sync.Mutex
+	mu    sync.Mutex
+	gates map[string]chan struct{}
 }
 
-func New(store Store, inventoryService Inventory, egress Egress, mihomo MihomoRuntime, supervisor vowifisupervisor.API) (*Service, error) {
+func New(store Store, inventoryService Inventory, egress Egress, mihomo MihomoRuntime, supervisor domain.API) (*Service, error) {
 	if store == nil || inventoryService == nil || egress == nil || mihomo == nil || supervisor == nil {
 		return nil, errors.New("Host VoWiFi service is not configured")
 	}
-	return &Service{Store: store, Inventory: inventoryService, Egress: egress, Mihomo: mihomo, Supervisor: supervisor, Now: time.Now}, nil
+	return &Service{Store: store, Inventory: inventoryService, Egress: egress, Mihomo: mihomo, Supervisor: supervisor, Now: time.Now, gates: make(map[string]chan struct{})}, nil
 }
 
 func (service *Service) List(ctx context.Context) ([]domain.State, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-	return service.listLocked(ctx)
+	return service.list(ctx)
 }
 
 // Available implements the messaging transport availability contract. SMS is
@@ -73,15 +70,18 @@ func (service *Service) Available(ctx context.Context, lineID string) bool {
 	}
 	for _, state := range states {
 		if state.LineID == lineID {
-			return state.Online && state.State == vowifisupervisor.StateOnline
+			return state.Online && state.State == domain.StateOnline
 		}
 	}
 	return false
 }
 
 func (service *Service) Activate(ctx context.Context, lineID string) (domain.State, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	release, err := service.lockLine(ctx, lineID)
+	if err != nil {
+		return domain.State{}, err
+	}
+	defer release()
 	environment, err := service.environment(ctx)
 	if err != nil {
 		return domain.State{}, err
@@ -108,7 +108,7 @@ func (service *Service) Activate(ctx context.Context, lineID string) (domain.Sta
 	}
 	request := supervisorRequest(*line, *egress)
 	status, err := service.Supervisor.Start(ctx, request)
-	if errors.Is(err, vowifisupervisor.ErrAlreadyRunning) {
+	if errors.Is(err, domain.ErrAlreadyRunning) {
 		statuses, listErr := service.Supervisor.List(ctx)
 		if listErr != nil {
 			return domain.State{}, listErr
@@ -128,8 +128,11 @@ func (service *Service) Activate(ctx context.Context, lineID string) (domain.Sta
 }
 
 func (service *Service) Deactivate(ctx context.Context, lineID string) (domain.State, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	release, err := service.lockLine(ctx, lineID)
+	if err != nil {
+		return domain.State{}, err
+	}
+	defer release()
 	environment, err := service.environment(ctx)
 	if err != nil {
 		return domain.State{}, err
@@ -143,7 +146,7 @@ func (service *Service) Deactivate(ctx context.Context, lineID string) (domain.S
 	}
 	status, err := service.Supervisor.Stop(ctx, lineID)
 	runtime := &status
-	if errors.Is(err, vowifisupervisor.ErrNotRunning) {
+	if errors.Is(err, domain.ErrNotRunning) {
 		runtime = nil
 	} else if err != nil {
 		return domain.State{}, err
@@ -157,103 +160,177 @@ func (service *Service) Deactivate(ctx context.Context, lineID string) (domain.S
 
 // Reconcile makes persistent administrator intent match the privileged runtime
 // fact. It never changes a Line's identity binding or egress selection.
-func (service *Service) Reconcile(ctx context.Context) error {
+func (service *Service) lockLine(ctx context.Context, id string) (func(), error) {
 	service.mu.Lock()
-	defer service.mu.Unlock()
+	if service.gates == nil {
+		service.gates = make(map[string]chan struct{})
+	}
+	gate := service.gates[id]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		service.gates[id] = gate
+	}
+	service.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (service *Service) reconcileLine(ctx context.Context, lineID string) error {
+	release, err := service.lockLine(ctx, lineID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	environment, err := service.environment(ctx)
 	if err != nil {
 		return err
 	}
-	recovered := false
-	for lineID, desired := range environment.desiredByLine {
-		line, egress := environment.lineByID[lineID], environment.egressByLine[lineID]
-		if desired && line != nil && hardwareReady(*line) && egress != nil && requiresMihomoRecovery(*egress) {
-			if err := service.recoverMihomo(ctx, *egress); err != nil {
-				return err
-			}
-			recovered = true
+	desired := environment.desiredByLine[lineID]
+	line, egress, ready := environment.readyLine(lineID)
+	if desired && line != nil && hardwareReady(*line) && egress != nil && requiresMihomoRecovery(*egress) {
+		if err := service.recoverMihomo(ctx, *egress); err != nil {
+			return err
 		}
-	}
-	if recovered {
 		environment, err = service.environment(ctx)
 		if err != nil {
 			return err
 		}
+		line, egress, ready = environment.readyLine(lineID)
 	}
-	for lineID, status := range environment.runtimeByLine {
-		desired := environment.desiredByLine[lineID]
-		_, _, ready := environment.readyLine(lineID)
-		if !desired || !ready {
-			if status.State != vowifisupervisor.StateStopped {
-				if _, stopErr := service.Supervisor.Stop(ctx, lineID); stopErr != nil && !errors.Is(stopErr, vowifisupervisor.ErrNotRunning) {
-					return stopErr
-				}
+	existing := environment.runtimeByLine[lineID]
+	if !desired || !ready {
+		if existing != nil && existing.State != domain.StateStopped {
+			_, err := service.Supervisor.Stop(ctx, lineID)
+			if !errors.Is(err, domain.ErrNotRunning) {
+				return err
 			}
 		}
+		return nil
 	}
-	for lineID, desired := range environment.desiredByLine {
-		if !desired {
-			continue
+	request := supervisorRequest(*line, *egress)
+	if existing != nil && existing.State != domain.StateStopped && existing.State != domain.StateFailed {
+		if existing.EgressMode == request.EgressMode && existing.CountryCode == request.CountryCode {
+			return nil
 		}
-		line, egress, ready := environment.readyLine(lineID)
-		if !ready {
-			continue
-		}
-		existing := environment.runtimeByLine[lineID]
-		request := supervisorRequest(*line, *egress)
-		if existing != nil && existing.State != vowifisupervisor.StateStopped && existing.State != vowifisupervisor.StateFailed {
-			if existing.EgressMode == request.EgressMode && existing.CountryCode == request.CountryCode {
-				continue
-			}
-			if _, stopErr := service.Supervisor.Stop(ctx, lineID); stopErr != nil && !errors.Is(stopErr, vowifisupervisor.ErrNotRunning) {
-				return stopErr
-			}
-		}
-		if _, startErr := service.Supervisor.Start(ctx, request); startErr != nil && !errors.Is(startErr, vowifisupervisor.ErrAlreadyRunning) {
-			return startErr
+		if _, err := service.Supervisor.Stop(ctx, lineID); err != nil && !errors.Is(err, domain.ErrNotRunning) {
+			return err
 		}
 	}
-	return nil
+	_, err = service.Supervisor.Start(ctx, request)
+	if errors.Is(err, domain.ErrAlreadyRunning) {
+		return nil
+	}
+	return err
+}
+
+func (service *Service) Reconcile(ctx context.Context) error {
+	environment, err := service.environment(ctx)
+	if err != nil {
+		return err
+	}
+	ids := map[string]bool{}
+	for id := range environment.desiredByLine {
+		ids[id] = true
+	}
+	for id := range environment.runtimeByLine {
+		ids[id] = true
+	}
+	var result error
+	// The synchronous entry point is useful for bounded administrative checks.
+	// Run schedules each line independently for continuous reconciliation.
+	for id := range ids {
+		result = errors.Join(result, service.reconcileLine(ctx, id))
+	}
+	return result
 }
 
 func (service *Service) Run(ctx context.Context, interval time.Duration, report func(error)) {
 	if interval < time.Second {
 		interval = 10 * time.Second
 	}
-	var previous []domain.State
-	reconcile := func() {
-		if err := service.Reconcile(ctx); err != nil {
-			if report != nil {
-				report(err)
-			}
-			return
-		}
-		current, err := service.List(ctx)
+	type completion struct {
+		id  string
+		err error
+	}
+	done := make(chan completion)
+	var work sync.WaitGroup
+	defer work.Wait()
+	active := map[string]bool{}
+	next := map[string]time.Time{}
+	retries := map[string]time.Duration{}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	schedule := func() {
+		cycle, cancel := context.WithTimeout(ctx, 5*time.Second)
+		environment, err := service.environment(cycle)
+		cancel()
 		if err != nil {
 			if report != nil {
 				report(err)
 			}
 			return
 		}
-		if report != nil && !reflect.DeepEqual(previous, current) {
+		ids := map[string]bool{}
+		for id := range environment.desiredByLine {
+			ids[id] = true
+		}
+		for id := range environment.runtimeByLine {
+			ids[id] = true
+		}
+		if len(ids) == 0 && report != nil {
 			report(nil)
 		}
-		previous = current
+		for id := range ids {
+			if active[id] || time.Now().Before(next[id]) {
+				continue
+			}
+			active[id] = true
+			work.Go(func() {
+				cycle, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				err := service.reconcileLine(cycle, id)
+				select {
+				case done <- completion{id, err}:
+				case <-ctx.Done():
+				}
+			})
+		}
 	}
-	reconcile()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	schedule()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			reconcile()
+			schedule()
+		case result := <-done:
+			delete(active, result.id)
+			delay := interval
+			if result.err != nil {
+				delay = retries[result.id] * 2
+				if delay < 15*time.Second {
+					delay = 15 * time.Second
+				}
+				if delay > 5*time.Minute {
+					delay = 5 * time.Minute
+				}
+				retries[result.id] = delay
+			} else {
+				delete(retries, result.id)
+			}
+			next[result.id] = time.Now().Add(delay)
+			if report != nil {
+				report(result.err)
+			}
 		}
 	}
 }
 
-func (service *Service) listLocked(ctx context.Context) ([]domain.State, error) {
+func (service *Service) list(ctx context.Context) ([]domain.State, error) {
 	environment, err := service.environment(ctx)
 	if err != nil {
 		return nil, err
@@ -274,7 +351,7 @@ type runtimeEnvironment struct {
 	lineByID      map[string]*inventory.Line
 	egressByLine  map[string]*lineegressapp.View
 	desiredByLine map[string]bool
-	runtimeByLine map[string]*vowifisupervisor.Status
+	runtimeByLine map[string]*domain.Status
 }
 
 func (service *Service) environment(ctx context.Context) (runtimeEnvironment, error) {
@@ -296,7 +373,7 @@ func (service *Service) environment(ctx context.Context) (runtimeEnvironment, er
 	}
 	environment := runtimeEnvironment{
 		lineByID: make(map[string]*inventory.Line), egressByLine: make(map[string]*lineegressapp.View),
-		desiredByLine: make(map[string]bool), runtimeByLine: make(map[string]*vowifisupervisor.Status),
+		desiredByLine: make(map[string]bool), runtimeByLine: make(map[string]*domain.Status),
 	}
 	for index := range topology.Lines {
 		line := &topology.Lines[index]
@@ -326,13 +403,13 @@ func (environment runtimeEnvironment) readyLine(lineID string) (*inventory.Line,
 	return line, egress, ready
 }
 
-func supervisorRequest(line inventory.Line, egress lineegressapp.View) vowifisupervisor.StartRequest {
-	mode := vowifisupervisor.EgressDirect
+func supervisorRequest(line inventory.Line, egress lineegressapp.View) domain.StartRequest {
+	mode := domain.EgressDirect
 	country := ""
 	if egress.Mode == lineegressdomain.ModeMihomoCountry {
-		mode, country = vowifisupervisor.EgressMihomoCountry, egress.CountryCode
+		mode, country = domain.EgressMihomoCountry, egress.CountryCode
 	}
-	return vowifisupervisor.StartRequest{
+	return domain.StartRequest{
 		LineID: line.ID, HardwareLineID: line.RuntimeLineID, EgressMode: mode, CountryCode: country,
 	}
 }
@@ -355,12 +432,12 @@ func (service *Service) recoverMihomo(ctx context.Context, egress lineegressapp.
 	return err
 }
 
-func stateFor(line inventory.Line, desired bool, egress lineegressapp.View, runtime *vowifisupervisor.Status) domain.State {
+func stateFor(line inventory.Line, desired bool, egress lineegressapp.View, runtime *domain.Status) domain.State {
 	state := domain.State{
 		LineID: line.ID, DesiredActive: desired, EgressMode: egress.Mode,
 		CountryCode: egress.CountryCode, CountryName: egress.CountryName,
 		Eligible:      hardwareReady(line) && egress.Ready,
-		ReadinessCode: egress.ReadinessReason, State: vowifisupervisor.StateStopped,
+		ReadinessCode: egress.ReadinessReason, State: domain.StateStopped,
 	}
 	if !line.Capabilities.HostVoWiFiAuth {
 		state.ReadinessCode = "LINE_VOWIFI_UNSUPPORTED"
