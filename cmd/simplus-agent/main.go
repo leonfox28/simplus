@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/lifecycle"
+
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/hardwareprobe"
@@ -203,8 +205,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logger.Error("QDC507 SMS backend initialization failed")
 		return 1
 	}
+	var requests lifecycle.Requests
 	server := &http.Server{
-		Handler: agentapi.NewManagedHardwareHandler(monitor, rfService, equipmentIdentityService, logger, smsBackend), ReadHeaderTimeout: 3 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+		Handler:     requests.Handler(agentapi.NewManagedHardwareHandler(monitor, rfService, equipmentIdentityService, logger, smsBackend)), ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: agentapi.SMSRequestTimeout + 10*time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10,
 	}
 	var simAKAServer *http.Server
@@ -221,13 +225,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		simAKAServer = &http.Server{
-			Handler:           agentapi.NewSIMAKAHILHandler(agentapi.NewSIMAKAService(monitor, scanner), logger),
+			BaseContext:       func(net.Listener) context.Context { return ctx },
+			Handler:           requests.Handler(agentapi.NewSIMAKAHILHandler(agentapi.NewSIMAKAService(monitor, scanner), logger)),
 			ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second,
 			IdleTimeout: 15 * time.Second, MaxHeaderBytes: 8 << 10,
 		}
 	}
 	monitorErrors := make(chan error, 1)
-	go func() { monitorErrors <- monitor.Run(ctx, *scanInterval) }()
+	monitorDone := make(chan struct{})
+	go func() { defer close(monitorDone); monitorErrors <- monitor.Run(ctx, *scanInterval) }()
 	type serverFailure struct {
 		name string
 		err  error
@@ -256,6 +262,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			exitCode = 1
 		}
 	}
+	requests.StopAdmission()
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("agent shutdown failed", "error", err)
@@ -281,6 +289,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if exitCode == 0 {
 		logger.Info("hardware agent stopped")
 	}
+	_ = server.Close()
+	if simAKAServer != nil {
+		_ = simAKAServer.Close()
+	}
+	requests.Wait()
+	<-monitorDone
 	if !closeState() {
 		exitCode = 1
 	}

@@ -27,7 +27,7 @@ func TestHelloOmitsMutatingFeaturesWhenCommandServiceIsDisabled(t *testing.T) {
 	monitor := newMonitor(&monitorScanner{}, "01234567-89ab-cdef-0123-456789abcdef", 1)
 	request := httptest.NewRequest(http.MethodGet, "/v1/hello", nil)
 	response := httptest.NewRecorder()
-	NewHandler(monitor, nil, nil).ServeHTTP(response, request)
+	NewHandler(monitor, nil).ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d", response.Code)
 	}
@@ -35,12 +35,12 @@ func TestHelloOmitsMutatingFeaturesWhenCommandServiceIsDisabled(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &hello); err != nil {
 		t.Fatal(err)
 	}
-	if containsString(hello.Features, CommandRadioEnsureOff) || containsString(hello.Features, "durable-command-outcomes") || containsString(hello.Features, FeatureSMS) {
+	if containsString(hello.Features, "radio.ensure-off") || containsString(hello.Features, "durable-command-outcomes") || containsString(hello.Features, FeatureSMS) {
 		t.Fatalf("disabled command features = %#v", hello.Features)
 	}
 	smsRequest := httptest.NewRequest(http.MethodPost, "/v1/sms/list", strings.NewReader(`{"agentInstanceId":"01234567-89ab-cdef-0123-456789abcdef","deviceId":"usb-1-1"}`))
 	smsResponse := httptest.NewRecorder()
-	NewHandler(monitor, nil, nil).ServeHTTP(smsResponse, smsRequest)
+	NewHandler(monitor, nil).ServeHTTP(smsResponse, smsRequest)
 	if smsResponse.Code != http.StatusNotFound {
 		t.Fatalf("disabled SMS route status = %d", smsResponse.Code)
 	}
@@ -150,13 +150,6 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	if _, err := monitor.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	outcomes := openTestOutcomeStore(t, filepath.Join(t.TempDir(), "agent-state"), 8, 2)
-	executor := &fakeRadioExecutor{execution: RadioEnsureOffExecution{
-		Observation: RadioEnsureOffObservation{
-			RF: RFObservation{State: RFStateOff, Mode: intPointerForAgentTest(4)}, ActiveCallCount: intPointerForAgentTest(0),
-		},
-	}}
-	commands := NewCommandService(monitor, executor, outcomes)
 	smsBackend := NewSimulatorSMSBackend(SMSStoredMessage{
 		MessageID: "agent-inbound-1", DeviceID: "usb-1-1", Sender: "10086", Body: "Agent simulator inbound",
 		ReceivedAt: time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
@@ -174,7 +167,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: NewHandler(monitor, commands, nil, smsBackend)}
+	server := &http.Server{Handler: NewHandler(monitor, nil, smsBackend)}
 	go server.Serve(listener)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -195,7 +188,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	if hello.Protocol != ProtocolName || hello.ProtocolVersion != ProtocolVersion || hello.AgentInstanceID != monitor.InstanceID() {
 		t.Fatalf("hello = %#v", hello)
 	}
-	if !containsString(hello.Features, CommandRadioEnsureOff) || !containsString(hello.Features, "durable-command-outcomes") || !containsString(hello.Features, FeatureSMS) {
+	if containsString(hello.Features, "radio.ensure-off") || containsString(hello.Features, "durable-command-outcomes") || !containsString(hello.Features, FeatureSMS) {
 		t.Fatalf("hello features = %#v", hello.Features)
 	}
 	snapshot, err := client.Snapshot(ctx, true)
@@ -212,22 +205,6 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	if probe.AgentInstanceID != hello.AgentInstanceID || len(probe.Devices) != 1 || probe.Devices[0].State != ProbeStateComplete {
 		t.Fatalf("probe = %#v", probe)
 	}
-	commandRequest := commandRequestForSnapshot(snapshot)
-	command, err := client.EnsureRadioOff(ctx, commandRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if command.Outcome.State != CommandOutcomeSucceeded || command.Outcome.Observation.RF.State != RFStateOff || executor.calls != 1 {
-		t.Fatalf("command = %#v calls=%d", command, executor.calls)
-	}
-	conflict := commandRequest
-	conflict.FencingToken++
-	_, err = client.EnsureRadioOff(ctx, conflict)
-	var apiError *ErrorResponse
-	if !errors.As(err, &apiError) || apiError.Code != "OPERATION_REPLAY_CONFLICT" || apiError.Retryable {
-		t.Fatalf("replay conflict error = %#v", err)
-	}
-
 	fenceEquipment, fenceSIM := strings.Repeat("a", 64), strings.Repeat("b", 64)
 	listRequest := SMSListRequest{AgentInstanceID: hello.AgentInstanceID, DeviceID: "usb-1-1", DeviceGeneration: 1,
 		ExpectedEquipmentFingerprint: fenceEquipment, ExpectedSubscriptionFingerprint: fenceSIM}
@@ -267,6 +244,7 @@ func TestUnixClientServerProtocolRoundTrip(t *testing.T) {
 	conflictingSend := sendRequest
 	conflictingSend.Body = "different body"
 	_, err = client.SendSMS(ctx, conflictingSend)
+	var apiError *ErrorResponse
 	if !errors.As(err, &apiError) || apiError.Code != "OPERATION_REPLAY_CONFLICT" {
 		t.Fatalf("SMS send conflict error = %#v", err)
 	}

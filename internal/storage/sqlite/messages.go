@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"time"
 
+	notification "github.com/leonfox28/simplus/internal/domain/notification"
 	"github.com/leonfox28/simplus/internal/domain/pagination"
 	"github.com/leonfox28/simplus/internal/domain/sms"
+	coredb "github.com/leonfox28/simplus/internal/storage/sqlite/generated/core"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 const inboundSMSFragmentAssemblyWindow = 10 * time.Minute
 
 func (set *Set) CreateOutboundSMS(ctx context.Context, message sms.Message) (sms.Message, bool, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return sms.Message{}, false, fmt.Errorf("messages database is not open")
 	}
 	if message.ID == "" || message.OperationID == "" || message.Direction != sms.DirectionOutbound ||
@@ -30,7 +32,7 @@ func (set *Set) CreateOutboundSMS(ctx context.Context, message sms.Message) (sms
 	}
 	createdAt := message.CreatedAt.UTC().UnixMilli()
 	updatedAt := message.UpdatedAt.UTC().UnixMilli()
-	result, err := set.Messages.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 INSERT INTO sms_messages (
     message_id, operation_id, direction, line_id, remote_address, body, status,
     provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
@@ -44,7 +46,7 @@ ON CONFLICT(operation_id) DO NOTHING
 	if err != nil {
 		return sms.Message{}, false, fmt.Errorf("read outbound SMS creation result: %w", err)
 	}
-	stored, found, err := set.smsByOperationID(ctx, message.OperationID)
+	stored, found, err := set.SMSByOperationID(ctx, message.OperationID)
 	if err != nil {
 		return sms.Message{}, false, err
 	}
@@ -61,7 +63,7 @@ ON CONFLICT(operation_id) DO NOTHING
 }
 
 func (set *Set) CreateInboundSMS(ctx context.Context, message sms.Message) (sms.Message, bool, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return sms.Message{}, false, fmt.Errorf("messages database is not open")
 	}
 	if message.ID == "" || message.OperationID == "" || message.Direction != sms.DirectionInbound ||
@@ -74,7 +76,7 @@ func (set *Set) CreateInboundSMS(ctx context.Context, message sms.Message) (sms.
 	if updatedAt < createdAt {
 		updatedAt = createdAt
 	}
-	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := set.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return sms.Message{}, false, fmt.Errorf("begin inbound SMS transaction: %w", err)
 	}
@@ -119,6 +121,12 @@ INSERT INTO sms_message_unread (message_id, remote_address) VALUES (?, ?)
 `, stored.ID, stored.RemoteAddress); err != nil {
 		return sms.Message{}, false, fmt.Errorf("create inbound SMS unread marker: %w", err)
 	}
+	if err := enqueueNotification(ctx, coredb.New(tx), notification.Event{
+		Key: "sms:" + stored.ID, Kind: "sms.received", ObjectID: stored.ID,
+		Message: "[Simplus] 收到 1 条新短信", FeishuMessage: fmt.Sprintf("[Simplus] 新短信\n发件人：%s\n内容：\n%s", stored.RemoteAddress, stored.Body), ObservedAt: stored.CreatedAt,
+	}); err != nil {
+		return sms.Message{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return sms.Message{}, false, fmt.Errorf("commit inbound SMS: %w", err)
 	}
@@ -126,14 +134,14 @@ INSERT INTO sms_message_unread (message_id, remote_address) VALUES (?, ?)
 }
 
 func (set *Set) MarkOutboundSMSSent(ctx context.Context, messageID, providerMessageID string, completedAt time.Time) (sms.Message, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return sms.Message{}, fmt.Errorf("messages database is not open")
 	}
 	if messageID == "" || providerMessageID == "" || completedAt.IsZero() {
 		return sms.Message{}, fmt.Errorf("invalid outbound SMS success")
 	}
 	completedAtUnixMilli := completedAt.UTC().UnixMilli()
-	result, err := set.Messages.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE sms_messages
 SET status = 'sent', provider_message_id = ?,
     error_code = '',
@@ -163,13 +171,13 @@ WHERE message_id = ? AND direction = 'outbound' AND (
 
 func (set *Set) MarkOutboundSMSFailed(ctx context.Context, messageID, providerMessageID, errorCode string,
 	completedAt time.Time) (sms.Message, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return sms.Message{}, fmt.Errorf("messages database is not open")
 	}
 	if messageID == "" || errorCode == "" || completedAt.IsZero() {
 		return sms.Message{}, fmt.Errorf("invalid outbound SMS failure")
 	}
-	result, err := set.Messages.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE sms_messages
 SET status = 'failed',
     provider_message_id = CASE WHEN ? = '' THEN provider_message_id ELSE ? END,
@@ -199,13 +207,13 @@ WHERE message_id = ? AND direction = 'outbound' AND (
 
 func (set *Set) MarkOutboundSMSUnconfirmed(ctx context.Context, messageID, providerMessageID, errorCode string,
 	completedAt time.Time) (sms.Message, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return sms.Message{}, fmt.Errorf("messages database is not open")
 	}
 	if messageID == "" || errorCode == "" || completedAt.IsZero() {
 		return sms.Message{}, fmt.Errorf("invalid unconfirmed outbound SMS")
 	}
-	result, err := set.Messages.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE sms_messages
 SET status = 'unconfirmed',
     provider_message_id = CASE WHEN ? = '' THEN provider_message_id ELSE ? END,
@@ -233,13 +241,13 @@ WHERE message_id = ? AND direction = 'outbound' AND (
 }
 
 func (set *Set) MarkQueuedOutboundSMSUnconfirmed(ctx context.Context, errorCode string, completedAt time.Time) (int64, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return 0, fmt.Errorf("messages database is not open")
 	}
 	if errorCode == "" || completedAt.IsZero() {
 		return 0, fmt.Errorf("invalid outbound SMS reconciliation")
 	}
-	result, err := set.Messages.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE sms_messages
 SET status = 'unconfirmed', error_code = ?, updated_at_unix_ms = MAX(updated_at_unix_ms, ?)
 WHERE direction = 'outbound' AND status = 'queued'
@@ -268,14 +276,14 @@ func (set *Set) ListSMSPage(ctx context.Context, request pagination.Request, lin
 // remote-address-only page. The page and boundary are read from one SQLite
 // transaction so the token never claims messages outside that snapshot.
 func (set *Set) ListSMSPageWithUnread(ctx context.Context, request pagination.Request, lineID, remoteAddress string) (pagination.Page[sms.Message], *sms.UnreadBoundary, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return pagination.Page[sms.Message]{}, nil, fmt.Errorf("messages database is not open")
 	}
 	if request.Limit < 1 || request.Limit > pagination.MaximumLimit || (lineID != "" && remoteAddress == "") {
 		return pagination.Page[sms.Message]{}, nil, fmt.Errorf("invalid SMS page request")
 	}
 	if lineID == "" && remoteAddress != "" && request.After == nil {
-		tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		tx, err := set.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if err != nil {
 			return pagination.Page[sms.Message]{}, nil, fmt.Errorf("begin SMS page snapshot: %w", err)
 		}
@@ -305,7 +313,7 @@ LIMIT 1
 		}
 		return page, &boundary, nil
 	}
-	page, err := listSMSPage(ctx, set.Messages, request, lineID, remoteAddress)
+	page, err := listSMSPage(ctx, set.DB, request, lineID, remoteAddress)
 	return page, nil, err
 }
 
@@ -454,13 +462,13 @@ SELECT message_id, line_id, remote_address FROM sms_messages WHERE record_sequen
 }
 
 func (set *Set) ListSMSConversationPage(ctx context.Context, request pagination.Request) (pagination.Page[sms.ConversationSummary], error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("messages database is not open")
 	}
 	if request.Limit < 1 || request.Limit > pagination.MaximumLimit {
 		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("invalid SMS conversation page request")
 	}
-	afterSequence, err := resolveSMSRecordSequence(ctx, set.Messages, request.After, "", "")
+	afterSequence, err := resolveSMSRecordSequence(ctx, set.DB, request.After, "", "")
 	if err != nil {
 		return pagination.Page[sms.ConversationSummary]{}, err
 	}
@@ -495,7 +503,7 @@ WHERE latest.position = 1`
 	}
 	query += ` ORDER BY latest.record_sequence DESC LIMIT ?`
 	args = append(args, request.Limit+1)
-	rows, err := set.Messages.QueryContext(ctx, query, args...)
+	rows, err := set.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return pagination.Page[sms.ConversationSummary]{}, fmt.Errorf("list SMS conversations: %w", err)
 	}
@@ -527,21 +535,21 @@ WHERE latest.position = 1`
 }
 
 func (set *Set) CountSMSConversations(ctx context.Context) (int64, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return 0, fmt.Errorf("messages database is not open")
 	}
 	var count int64
-	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(DISTINCT remote_address) FROM sms_messages`).Scan(&count); err != nil {
+	if err := set.DB.QueryRowContext(ctx, `SELECT COUNT(DISTINCT remote_address) FROM sms_messages`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count SMS conversations: %w", err)
 	}
 	return count, nil
 }
 
 func (set *Set) MarkSMSConversationRead(ctx context.Context, remoteAddress string, boundary sms.UnreadBoundary) (bool, error) {
-	if set == nil || set.Messages == nil || remoteAddress == "" || boundary.UnreadID <= 0 || boundary.MessageID == "" {
+	if set == nil || set.DB == nil || remoteAddress == "" || boundary.UnreadID <= 0 || boundary.MessageID == "" {
 		return false, sms.ErrReadBoundaryInvalid
 	}
-	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := set.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return false, fmt.Errorf("begin SMS read-state transaction: %w", err)
 	}
@@ -587,11 +595,11 @@ DELETE FROM sms_message_unread WHERE remote_address = ? AND unread_id <= ?
 }
 
 func (set *Set) CountSMS(ctx context.Context) (int64, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return 0, fmt.Errorf("messages database is not open")
 	}
 	var count int64
-	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&count); err != nil {
+	if err := set.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count SMS: %w", err)
 	}
 	return count, nil
@@ -602,10 +610,10 @@ func (set *Set) CountSMS(ctx context.Context) (int64, error) {
 // small explicit bound. Recovery code uses this instead of a count/list pair
 // so a concurrent write cannot change which rows are correlated.
 func (set *Set) ListAllSMSBounded(ctx context.Context, maximum int) ([]sms.Message, error) {
-	if set == nil || set.Messages == nil || maximum < 1 || maximum > pagination.MaximumLimit {
+	if set == nil || set.DB == nil || maximum < 1 || maximum > pagination.MaximumLimit {
 		return nil, fmt.Errorf("invalid bounded complete SMS request")
 	}
-	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := set.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin complete SMS snapshot: %w", err)
 	}
@@ -631,24 +639,35 @@ func (set *Set) ListAllSMSBounded(ctx context.Context, maximum int) ([]sms.Messa
 }
 
 func (set *Set) DeleteSMS(ctx context.Context, messageID string) error {
-	if set == nil || set.Messages == nil || messageID == "" {
+	if set == nil || set.DB == nil || messageID == "" {
 		return fmt.Errorf("invalid SMS deletion")
 	}
-	result, err := set.Messages.ExecContext(ctx, `DELETE FROM sms_messages WHERE message_id = ?`, messageID)
+	tx, err := set.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM sms_messages WHERE message_id = ?`, messageID)
 	if err != nil {
 		return fmt.Errorf("delete SMS: %w", err)
 	}
-	return requireOneSMSMutation(result)
+	if err := requireOneSMSMutation(result); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE notification_deliveries SET state='cancelled',last_error='OBJECT_DELETED' WHERE object_id=? AND state IN ('pending','delivering')`, messageID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (set *Set) StoreInboundSMSFragment(ctx context.Context, fragment sms.InboundFragment) ([]sms.InboundFragment, bool, error) {
-	if set == nil || set.Messages == nil {
+	if set == nil || set.DB == nil {
 		return nil, false, fmt.Errorf("messages database is not open")
 	}
 	if !validInboundSMSFragment(fragment) {
 		return nil, false, fmt.Errorf("invalid inbound SMS fragment")
 	}
-	tx, err := set.Messages.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := set.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, false, fmt.Errorf("begin inbound SMS fragment transaction: %w", err)
 	}
@@ -797,10 +816,10 @@ func inboundSMSFragmentPart(fragments []sms.InboundFragment, part int) (sms.Inbo
 }
 
 func (set *Set) PruneInboundSMSFragments(ctx context.Context, before time.Time) (int64, error) {
-	if set == nil || set.Messages == nil || before.IsZero() {
+	if set == nil || set.DB == nil || before.IsZero() {
 		return 0, fmt.Errorf("invalid inbound SMS fragment pruning")
 	}
-	result, err := set.Messages.ExecContext(ctx, `DELETE FROM sms_inbound_fragments WHERE received_at_unix_ms < ?`, before.UTC().UnixMilli())
+	result, err := set.DB.ExecContext(ctx, `DELETE FROM sms_inbound_fragments WHERE received_at_unix_ms < ?`, before.UTC().UnixMilli())
 	if err != nil {
 		return 0, fmt.Errorf("prune inbound SMS fragments: %w", err)
 	}
@@ -876,8 +895,8 @@ func consistentInboundSMSFragmentGroup(fragments []sms.InboundFragment, expected
 	return true
 }
 
-func (set *Set) smsByOperationID(ctx context.Context, operationID string) (sms.Message, bool, error) {
-	row := set.Messages.QueryRowContext(ctx, `
+func (set *Set) SMSByOperationID(ctx context.Context, operationID string) (sms.Message, bool, error) {
+	row := set.DB.QueryRowContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
@@ -887,7 +906,7 @@ WHERE operation_id = ?
 }
 
 func (set *Set) smsByID(ctx context.Context, messageID string) (sms.Message, bool, error) {
-	row := set.Messages.QueryRowContext(ctx, `
+	row := set.DB.QueryRowContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages
@@ -897,7 +916,7 @@ WHERE message_id = ?
 }
 
 func (set *Set) smsInboundBySource(ctx context.Context, lineID, providerMessageID string) (sms.Message, bool, error) {
-	row := set.Messages.QueryRowContext(ctx, `
+	row := set.DB.QueryRowContext(ctx, `
 SELECT message_id, operation_id, direction, line_id, remote_address, body, status,
        provider_message_id, error_code, created_at_unix_ms, updated_at_unix_ms, sent_at_unix_ms
 FROM sms_messages

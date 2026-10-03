@@ -37,9 +37,9 @@ data-flow map is `docs/architecture.md`; concrete assembly is in
 | Guide | Project-specific contract |
 | --- | --- |
 | [Directory Structure](./directory-structure.md) | Root Go package ownership, executable assembly, generated boundaries, and test placement |
-| [Application Boundaries](./application-boundaries.md) | Typed ports/values, retired storage-typed ResourceGroup lease orchestration, HTTP-owned adjacent application ports, explicit Setup/Mihomo/Webhook adapter composition, background coordination/realtime policy, stable business identity, hardware adapters, fail-closed behavior, and side-effect ordering |
+| [Application Boundaries](./application-boundaries.md) | Typed ports/values, HTTP-owned adjacent application ports, installation/Mihomo/notification adapter composition, background coordination/realtime policy, stable business identity, hardware adapters, fail-closed behavior, and side-effect ordering |
 | [API Contracts](./api-contracts.md) | OpenAPI-first public HTTP, cursor pagination, authenticated realtime invalidation, bounded Unix protocols, timeouts, and stable errors |
-| [Storage and Migrations](./storage-and-migrations.md) | Five-dataset SQLite reality, dormant ResourceGroup lease compatibility, keyset indexes, Goose migrations, sqlc ownership, transactions, and sensitive persistence |
+| [Storage and Migrations](./storage-and-migrations.md) | Single control SQLite, legacy-layout refusal, durable notification transactions, keyset indexes, Goose migrations, sqlc ownership, transactions, and sensitive persistence |
 | [Quality and Testing](./quality-and-testing.md) | Trusted test patterns and targeted-to-broad Go validation |
 
 ## Architecture Rules at a Glance
@@ -65,7 +65,7 @@ internal/api/httpapi -> application domain service -> narrow ports
   to compiled-in adapters.
 - Unsupported, unverified, unavailable, and ambiguous hardware states remain
   explicit and fail closed. `internal/modemadapter/registry.go` rejects
-  overlapping matches, while `internal/application/inventory/agent_source.go`
+  overlapping matches, while `internal/agentinventory/agent_source.go`
   advertises only observed capabilities.
 - `api/openapi.yaml` and embedded SQLite migrations are sources; generated Go,
   TypeScript, and sqlc outputs are not hand-edited.

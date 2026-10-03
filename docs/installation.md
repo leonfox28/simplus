@@ -2,6 +2,11 @@
 
 ## 当前状态
 
+本文的新布局、provision 与安装就绪事务对应尚未发布的源码重构。历史 `v0.1.1`
+的部署包不包含这些行为，不能混用；以下命令中的 `vX.Y.Z` 必须替换为包含
+[ADR 0028](decisions/0028-control-state-and-durable-notifications.md) 的明确新版本。
+下面保留的既有发布和 HIL 记录不代表新布局已部署验收。
+
 Docker Compose 是 Simplus 唯一受支持的生产部署方式，并保持 `simplusd`、`simplus-agent`、
 `simplus-netd` 三个权限边界。生产安装接口是 GitHub Pre-release 中的版本化部署包和
 GHCR 镜像，不要求源码 checkout、Git、Go、Node、pnpm、Make 或本地 `docker build`。
@@ -47,14 +52,13 @@ Docker Engine 的安装按 [Docker 官方 Debian 指南](https://docs.docker.com
 
 ## 下载部署包
 
-每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。下面以替代部署候选 `v0.1.1`
-为例；普通安装只需下载一个 `.tar.gz` 部署归档和它的一个 `.sha256` 校验文件。Release
+每个严格 `vX.Y.Z` tag 对应一个 `linux/amd64` 部署包。版本示例使用待替换的 `vX.Y.Z`；普通安装只需下载一个 `.tar.gz` 部署归档和它的一个 `.sha256` 校验文件。Release
 页面中的 strongSwan/Mihomo 对应源码、包与镜像 digest manifest 用于发布审计、许可和
 可追溯性，不是需要逐个下载或解压的安装包；三个运行镜像由后续 `docker compose pull`
 直接从 GHCR 拉取。版本变量必须同时决定下载目录和文件名，不要改为滚动的 `latest`：
 
 ```bash
-version=v0.1.1
+version=vX.Y.Z
 base="https://github.com/leonfox28/simplus/releases/download/$version"
 curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz" &&
   curl -fLO "$base/simplus-compose-$version-linux-amd64.tar.gz.sha256" &&
@@ -120,9 +124,9 @@ Agent，避免它们在当前或下次启动时与 Compose 争用模组、端口
 docker compose config --quiet &&
   docker compose pull &&
   docker compose up -d &&
-  docker compose wait bootstrap &&
+  docker compose wait provision &&
   docker compose ps &&
-  docker compose logs bootstrap
+  docker compose logs provision
 ```
 
 `SIMPLUS_DEVICE_GID` 必须等于宿主 ttyUSB 节点所属组的数字 GID。用
@@ -134,13 +138,19 @@ docker compose config --quiet &&
 `data-init` 创建并固定：
 
 ```text
-/opt/simplus/data/core   -> /var/lib/simplus
+/opt/simplus/data/control-v2   -> /var/lib/simplus
 /opt/simplus/data/agent  -> /var/lib/simplus-agent
 ```
 
-Compose 实际使用相对于其文件的 `./data/core` 和 `./data/agent`；上面的绝对路径来自本文
+Compose 实际使用相对于其文件的 `./data/control-v2` 和 `./data/agent`；上面的绝对路径来自本文
 推荐的部署根。首次 `compose up` 前应确认该位置位于持久存储，并确定实例外、访问受限的
 备份位置。
+
+control 的业务数据库为 `./data/control-v2/state/control.sqlite3`，实例密钥位于同一私有
+state 目录。netd 仅挂载 `./data/control-v2/mihomo` 和共享运行目录，不再访问 control
+数据库或密钥。发现旧 `./data/core` 或新根中的旧 `db/` 布局会在初始化前拒绝启动，
+不自动改写、搬迁或删除；先离线备份并将旧目录保留在此次新布局之外。
+本版本不兼容旧数据库，不是原地升级路径。已有实例必须明确选择新目录重新初始化。
 
 Agent 在这个私有目录下固定使用 `qdc507-sms/` 保存 QDC507 v2 SMS recovery ledger；container
 entrypoint 通过 `--state-root /var/lib/simplus-agent/qdc507-sms` 传入。缺失/不安全目录、
@@ -152,7 +162,7 @@ schema 不兼容或 store/adapter 构造失败会阻止 Agent 启动，不能退
 许可证位于 `/usr/share/doc/simplus/mihomo-LICENSE`，相同 Simplus tag 的 GitHub
 Release 附带校验过的对应 Mihomo 源码归档。
 
-`bootstrap` 在 app 健康后创建唯一管理员。首次日志显示用户名 `simplus_admin` 和随机
+`provision` 在 app 健康后原子创建唯一管理员并将实例置为就绪，登录直接进入管理界面。首次日志显示用户名 `simplus_admin` 和随机
 密码；后续重建只显示凭据未变化，不会覆盖或重新输出密码。保存密码并在首次登录后
 修改。管理后台通过 `http://<host-lan-ip>:8080` 访问；Mihomo 运行后 Zashboard 使用
 同一主机的 `19090` controller 和实例独立 secret。
@@ -188,7 +198,7 @@ new_bundle="/path/to/verified/simplus-compose-vX.Y.Z-linux-amd64"
   docker compose config --quiet
   docker compose pull
   docker compose up -d
-  docker compose wait bootstrap
+  docker compose wait provision
 )
 ```
 
@@ -219,7 +229,7 @@ docker compose down
 - app、Agent 与 netd 继续通过共享 Unix socket、固定 UID 和 `SO_PEERCRED` 鉴权。
 
 netd 启动时创建临时 namespace/veth/nft/XFRM 探针并立即清理。探针失败会阻止 netd
-健康，app 和 bootstrap 也不会继续启动。该 preflight 不执行 RF、SIM AKA、VoWiFi、
+健康，app 和 provision 也不会继续启动。该 preflight 不执行 RF、SIM AKA、VoWiFi、
 短信或电话操作。
 
 ## 常见启动失败
@@ -230,7 +240,7 @@ netd 启动时创建临时 namespace/veth/nft/XFRM 探针并立即清理。探�
 - Agent 不健康：检查 ttyUSB 的 GID、device cgroup、ModemManager 占用和 USB 枚举；
 - netd preflight 失败：检查 rootful Docker、AppArmor 设置和宿主内核的 veth、nft
   TPROXY、XFRM 支持；不要改为 privileged/host network 掩盖问题；
-- bootstrap 没有密码：先看 `docker compose ps`，只有 app 健康且数据库中尚无管理员时
+- provision 没有密码：先看 `docker compose ps`，只有 app 健康且数据库中尚无管理员时
   才会生成；
 - Mihomo/VoWiFi 不可用：先确认预装或后台升级的 core 有效，并选择有效订阅/出口，再按
   [`troubleshooting.md`](troubleshooting.md) 的稳定状态检查。

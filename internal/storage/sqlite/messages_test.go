@@ -215,7 +215,7 @@ func TestSMSRecordSequenceOwnsHistorySummaryReplayStatusAndConcurrentWrites(t *t
 		}
 	}
 	var count, distinct int
-	if err := set.Messages.QueryRowContext(ctx, `
+	if err := set.DB.QueryRowContext(ctx, `
 SELECT COUNT(*), COUNT(DISTINCT record_sequence)
 FROM sms_messages WHERE message_id LIKE 'msg_concurrent_%'
 `).Scan(&count, &distinct); err != nil {
@@ -226,7 +226,7 @@ FROM sms_messages WHERE message_id LIKE 'msg_concurrent_%'
 	}
 	var maximum int64
 	var maximumID string
-	if err := set.Messages.QueryRowContext(ctx, `
+	if err := set.DB.QueryRowContext(ctx, `
 SELECT record_sequence, message_id
 FROM sms_messages
 WHERE message_id LIKE 'msg_concurrent_%'
@@ -245,7 +245,7 @@ LIMIT 1
 		t.Fatal(err)
 	}
 	var afterDelete int64
-	if err := set.Messages.QueryRowContext(ctx, `SELECT record_sequence FROM sms_messages WHERE message_id = 'msg_sequence_after_delete001'`).Scan(&afterDelete); err != nil {
+	if err := set.DB.QueryRowContext(ctx, `SELECT record_sequence FROM sms_messages WHERE message_id = 'msg_sequence_after_delete001'`).Scan(&afterDelete); err != nil {
 		t.Fatal(err)
 	}
 	if afterDelete <= maximum {
@@ -388,7 +388,7 @@ func TestCreateInboundSMSRollsBackWhenUnreadMarkerCannotBeCreated(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer set.Close()
-	if _, err := set.Messages.ExecContext(ctx, `DROP TABLE sms_message_unread`); err != nil {
+	if _, err := set.DB.ExecContext(ctx, `DROP TABLE sms_message_unread`); err != nil {
 		t.Fatal(err)
 	}
 	messageID := "msg_atomic_unread_000001"
@@ -402,7 +402,7 @@ func TestCreateInboundSMSRollsBackWhenUnreadMarkerCannotBeCreated(t *testing.T) 
 		t.Fatal("CreateInboundSMS succeeded without the unread ledger")
 	}
 	var count int
-	if err := set.Messages.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages WHERE message_id = ?`, messageID).Scan(&count); err != nil || count != 0 {
+	if err := set.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sms_messages WHERE message_id = ?`, messageID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("rolled-back inbound count=%d error=%v", count, err)
 	}
 }

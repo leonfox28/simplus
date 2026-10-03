@@ -9,6 +9,7 @@ state; `api/openapi.yaml` owns the public contract.
 
 ```text
 web/
+├── e2e-simulator/               # real Go backend + disposable Simulator
 ├── e2e/                         # synthetic Playwright desktop/mobile flows
 ├── openapi-ts.config.ts         # Hey API generator definition
 ├── playwright.config.ts
@@ -17,19 +18,20 @@ web/
 │   ├── api/
 │   │   ├── generated/           # generated SDK/types/Zod/Query helpers
 │   │   ├── runtime.ts           # same-origin fetch, CSRF, time budgets
-│   │   ├── setupClient.ts       # error normalization/session expiry
+│   │   ├── configureClient.ts       # error normalization/session expiry
 │   │   ├── queryClient.ts       # shared Query defaults
 │   │   ├── events.ts            # realtime validation/topic mapping
 │   │   └── hardwareSchema.ts    # topology cross-reference checks
 │   ├── app/
 │   │   ├── AppProviders.tsx     # Ant Design, Query, BrowserRouter
-│   │   ├── BootstrapGate.tsx    # setup/session bootstrap and guards
+│   │   ├── SessionGate.tsx    # installation/session guards
 │   │   ├── AppRouter.tsx        # explicit lazy route table
 │   │   ├── AppShell.tsx         # responsive navigation and Outlet
 │   │   └── RealtimeBridge.tsx   # authenticated SSE lifecycle
 │   ├── components/Page.tsx      # shared page/state/responsive primitives
 │   ├── pages/                   # routed screens
-│   ├── calls|messages|mihomo/   # reusable non-visual feature logic
+│   ├── features/                # messages, lines, notifications with hooks/presentation/tests
+│   ├── calls|mihomo/            # reusable feature logic
 │   ├── test/                    # shared deterministic fixtures/helpers
 │   ├── global.css
 │   └── main.tsx
@@ -41,9 +43,10 @@ web/
 
 - Add routes explicitly to `src/app/AppRouter.tsx`; add authenticated menu
   entries to `src/app/navigation.tsx` when the route belongs in navigation.
-- Keep app-wide providers, auth/setup guards, shell layout, and realtime
+- Keep app-wide providers, session guards, shell layout, and realtime
   connection ownership under `src/app/`.
-- Put routed screens in `src/pages/`. Keep a one-page helper beside its page;
+- Keep feature screens, queries, forms, presentation and tests together in
+  `src/features/`; simpler existing screens remain in `src/pages/`. Keep a one-page helper beside its page;
   extract shared presentation primitives only after there is a real second
   consumer.
 - Put reusable non-visual domain transforms under their feature directory with
@@ -58,13 +61,13 @@ web/
 
 ## Route Contract
 
-`AppRouter` uses `Routes`/`Route` from `react-router`. `/login` and `/setup`
-render outside `AppShell`; authenticated pages are children of the shell and
+`AppRouter` uses `Routes`/`Route` from `react-router`. `/login`
+renders outside `AppShell`; authenticated pages are children of the shell and
 render through `Outlet`. Route modules are lazy-loaded, and unknown routes
 replace-navigate to `/dashboard`.
 
 Do not add a framework router, filesystem routing, or route-loader state layer.
-Setup/session decisions stay in `BootstrapGate`, which can clear the query
+Installation/session decisions stay in `SessionGate`, which can clear the query
 cache and redirect after a 401.
 
 ## Generated Ownership

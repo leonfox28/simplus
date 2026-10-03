@@ -10,7 +10,7 @@ import (
 )
 
 func (set *Set) ListMihomoSubscriptions(ctx context.Context) ([]domain.Subscription, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc FROM mihomo_subscriptions ORDER BY display_name, id`)
+	rows, err := set.DB.QueryContext(ctx, `SELECT id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc FROM mihomo_subscriptions ORDER BY display_name, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list Mihomo subscriptions: %w", err)
 	}
@@ -27,7 +27,7 @@ func (set *Set) ListMihomoSubscriptions(ctx context.Context) ([]domain.Subscript
 }
 
 func (set *Set) ReadMihomoSubscription(ctx context.Context, id string) (domain.Subscription, bool, error) {
-	item, err := scanMihomoSubscription(set.Core.QueryRowContext(ctx, `SELECT id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc FROM mihomo_subscriptions WHERE id = ?`, id))
+	item, err := scanMihomoSubscription(set.DB.QueryRowContext(ctx, `SELECT id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc FROM mihomo_subscriptions WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return domain.Subscription{}, false, nil
 	}
@@ -69,7 +69,7 @@ func scanMihomoSubscription(row rowScanner) (domain.Subscription, error) {
 func (set *Set) UpsertMihomoSubscription(ctx context.Context, item domain.Subscription) error {
 	nowCreated := item.CreatedAt.UTC().Format(time.RFC3339Nano)
 	nowUpdated := item.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	_, err := set.Core.ExecContext(ctx, `INSERT INTO mihomo_subscriptions (id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, NULL, 'never', 0, '', ?, ?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, url_ciphertext=excluded.url_ciphertext, url_plaintext=excluded.url_plaintext, url_hint=excluded.url_hint, enabled=excluded.enabled, updated_at_utc=excluded.updated_at_utc`, item.ID, item.DisplayName, item.URLCiphertext, item.URLPlaintext, item.URLHint, boolInt(item.Enabled), nowCreated, nowUpdated)
+	_, err := set.DB.ExecContext(ctx, `INSERT INTO mihomo_subscriptions (id, display_name, url_ciphertext, url_plaintext, url_hint, enabled, last_refresh_at_utc, last_refresh_status, node_count, last_error_code, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, NULL, 'never', 0, '', ?, ?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, url_ciphertext=excluded.url_ciphertext, url_plaintext=excluded.url_plaintext, url_hint=excluded.url_hint, enabled=excluded.enabled, updated_at_utc=excluded.updated_at_utc`, item.ID, item.DisplayName, item.URLCiphertext, item.URLPlaintext, item.URLHint, boolInt(item.Enabled), nowCreated, nowUpdated)
 	if err != nil {
 		return fmt.Errorf("upsert Mihomo subscription: %w", err)
 	}
@@ -77,7 +77,7 @@ func (set *Set) UpsertMihomoSubscription(ctx context.Context, item domain.Subscr
 }
 
 func (set *Set) DeleteMihomoSubscription(ctx context.Context, id string) (bool, error) {
-	result, err := set.Core.ExecContext(ctx, `DELETE FROM mihomo_subscriptions WHERE id = ?`, id)
+	result, err := set.DB.ExecContext(ctx, `DELETE FROM mihomo_subscriptions WHERE id = ?`, id)
 	if err != nil {
 		return false, fmt.Errorf("delete Mihomo subscription: %w", err)
 	}
@@ -86,7 +86,7 @@ func (set *Set) DeleteMihomoSubscription(ctx context.Context, id string) (bool, 
 }
 
 func (set *Set) ReplaceMihomoSubscriptionNodes(ctx context.Context, subscriptionID string, nodes []domain.Node, refreshedAt time.Time, status, errorCode string) error {
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (set *Set) ReplaceMihomoSubscriptionNodes(ctx context.Context, subscription
 }
 
 func (set *Set) ListMihomoSubscriptionNodes(ctx context.Context, subscriptionID string) ([]domain.Node, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT subscription_id, node_id, display_name, kind, proxy_yaml, country_code, country_name FROM mihomo_subscription_nodes WHERE subscription_id=? ORDER BY display_name, node_id`, subscriptionID)
+	rows, err := set.DB.QueryContext(ctx, `SELECT subscription_id, node_id, display_name, kind, proxy_yaml, country_code, country_name FROM mihomo_subscription_nodes WHERE subscription_id=? ORDER BY display_name, node_id`, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (set *Set) ListMihomoSubscriptionNodes(ctx context.Context, subscriptionID 
 }
 
 func (set *Set) MarkMihomoSubscriptionRefreshFailure(ctx context.Context, subscriptionID, errorCode string, refreshedAt time.Time) error {
-	result, err := set.Core.ExecContext(ctx, `UPDATE mihomo_subscriptions SET last_refresh_at_utc=?, last_refresh_status='failed', last_error_code=?, updated_at_utc=? WHERE id=?`, refreshedAt.UTC().Format(time.RFC3339Nano), errorCode, refreshedAt.UTC().Format(time.RFC3339Nano), subscriptionID)
+	result, err := set.DB.ExecContext(ctx, `UPDATE mihomo_subscriptions SET last_refresh_at_utc=?, last_refresh_status='failed', last_error_code=?, updated_at_utc=? WHERE id=?`, refreshedAt.UTC().Format(time.RFC3339Nano), errorCode, refreshedAt.UTC().Format(time.RFC3339Nano), subscriptionID)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (set *Set) MarkMihomoSubscriptionRefreshFailure(ctx context.Context, subscr
 }
 
 func (set *Set) ReadMihomoRuntimeSelection(ctx context.Context) (selected, running string, err error) {
-	err = set.Core.QueryRowContext(ctx, `SELECT selected_subscription_id, running_subscription_id FROM mihomo_runtime_selection WHERE singleton=1`).Scan(&selected, &running)
+	err = set.DB.QueryRowContext(ctx, `SELECT selected_subscription_id, running_subscription_id FROM mihomo_runtime_selection WHERE singleton=1`).Scan(&selected, &running)
 	if err != nil {
 		return "", "", fmt.Errorf("read Mihomo runtime selection: %w", err)
 	}
@@ -151,7 +151,7 @@ func (set *Set) ReadMihomoRuntimeSelection(ctx context.Context) (selected, runni
 }
 
 func (set *Set) WriteMihomoSelectedSubscription(ctx context.Context, id string, at time.Time) error {
-	result, err := set.Core.ExecContext(ctx, `UPDATE mihomo_runtime_selection SET selected_subscription_id=?, updated_at_utc=? WHERE singleton=1`, id, at.UTC().Format(time.RFC3339Nano))
+	result, err := set.DB.ExecContext(ctx, `UPDATE mihomo_runtime_selection SET selected_subscription_id=?, updated_at_utc=? WHERE singleton=1`, id, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("write selected Mihomo subscription: %w", err)
 	}
@@ -163,7 +163,7 @@ func (set *Set) WriteMihomoSelectedSubscription(ctx context.Context, id string, 
 }
 
 func (set *Set) WriteMihomoRunningSubscription(ctx context.Context, id string, at time.Time) error {
-	result, err := set.Core.ExecContext(ctx, `UPDATE mihomo_runtime_selection SET running_subscription_id=?, updated_at_utc=? WHERE singleton=1`, id, at.UTC().Format(time.RFC3339Nano))
+	result, err := set.DB.ExecContext(ctx, `UPDATE mihomo_runtime_selection SET running_subscription_id=?, updated_at_utc=? WHERE singleton=1`, id, at.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("write running Mihomo subscription: %w", err)
 	}

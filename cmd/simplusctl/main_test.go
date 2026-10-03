@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/control"
@@ -21,70 +20,6 @@ func TestDoctorSupportStatusIsKnown(t *testing.T) {
 	case "supported-runtime", "development-only", "unsupported":
 	default:
 		t.Fatalf("unexpected support status %q", status)
-	}
-}
-
-func TestBootstrapURLRequiresRootBeforeContactingDaemon(t *testing.T) {
-	called := false
-	var stdout, stderr bytes.Buffer
-	exitCode := runWithDependencies(
-		[]string{"bootstrap-url", "--socket", "/tmp/simplus.sock"},
-		&stdout,
-		&stderr,
-		dependencies{
-			effectiveUID: func() int { return 501 },
-			generateBootstrap: func(context.Context, string) (control.BootstrapResponse, error) {
-				called = true
-				return control.BootstrapResponse{}, nil
-			},
-		},
-	)
-	if exitCode != 1 || called {
-		t.Fatalf("exit = %d, daemon called = %v", exitCode, called)
-	}
-	if !strings.Contains(stderr.String(), "must be run as root") || stdout.Len() != 0 {
-		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
-
-func TestBootstrapURLUsesFragmentAndSupportsJSON(t *testing.T) {
-	const code = "ERERERERERERERERERERERERERERERERERERERERERE"
-	expires := time.Date(2026, 8, 2, 12, 10, 0, 0, time.UTC)
-	var stdout, stderr bytes.Buffer
-	exitCode := runWithDependencies(
-		[]string{
-			"bootstrap-url",
-			"--socket", "/run/simplus/control.sock",
-			"--base-url", "https://simplus.example",
-			"--json",
-		},
-		&stdout,
-		&stderr,
-		dependencies{
-			effectiveUID: func() int { return 0 },
-			generateBootstrap: func(_ context.Context, socket string) (control.BootstrapResponse, error) {
-				if socket != "/run/simplus/control.sock" {
-					t.Fatalf("socket = %q", socket)
-				}
-				return control.BootstrapResponse{Code: code, ExpiresAt: expires}, nil
-			},
-		},
-	)
-	if exitCode != 0 || stderr.Len() != 0 {
-		t.Fatalf("exit=%d stderr=%q", exitCode, stderr.String())
-	}
-	var result struct {
-		URL       string    `json:"url"`
-		ExpiresAt time.Time `json:"expiresAt"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.URL != "https://simplus.example/setup#bootstrap="+code {
-		t.Fatalf("URL = %q", result.URL)
-	}
-	if !result.ExpiresAt.Equal(expires) {
-		t.Fatalf("expiry = %s", result.ExpiresAt)
 	}
 }
 
@@ -181,30 +116,6 @@ func TestHardwareProbeJSONUsesTypedAgentReport(t *testing.T) {
 	}
 	if report.Snapshot.Generation != 4 || len(report.Snapshot.Devices) != 1 {
 		t.Fatalf("report = %#v", report)
-	}
-}
-
-func TestBootstrapURLRejectsNonOriginBeforeGenerating(t *testing.T) {
-	called := false
-	var stdout, stderr bytes.Buffer
-	exitCode := runWithDependencies(
-		[]string{
-			"bootstrap-url",
-			"--socket", "/run/simplus/control.sock",
-			"--base-url", "https://simplus.example/prefix?secret=value",
-		},
-		&stdout,
-		&stderr,
-		dependencies{
-			effectiveUID: func() int { return 0 },
-			generateBootstrap: func(context.Context, string) (control.BootstrapResponse, error) {
-				called = true
-				return control.BootstrapResponse{}, nil
-			},
-		},
-	)
-	if exitCode != 2 || called {
-		t.Fatalf("exit=%d daemon called=%v", exitCode, called)
 	}
 }
 

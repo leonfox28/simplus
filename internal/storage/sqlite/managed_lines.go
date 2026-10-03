@@ -9,10 +9,10 @@ import (
 )
 
 func (set *Set) ListManagedLines(ctx context.Context) ([]domain.Record, error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return nil, fmt.Errorf("core database is not open")
 	}
-	rows, err := set.Core.QueryContext(ctx, `
+	rows, err := set.DB.QueryContext(ctx, `
 SELECT id, managed_modem_id, sim_slot_index, subscription_identity_fingerprint,
        subscription_display_hint, display_name, created_at_utc, updated_at_utc
 FROM managed_lines
@@ -47,10 +47,10 @@ ORDER BY created_at_utc, id`)
 }
 
 func (set *Set) CreateManagedLine(ctx context.Context, record domain.Record) error {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("core database is not open")
 	}
-	_, err := set.Core.ExecContext(ctx, `
+	_, err := set.DB.ExecContext(ctx, `
 INSERT INTO managed_lines (
   id, managed_modem_id, sim_slot_index, subscription_identity_fingerprint,
   subscription_display_hint, display_name, created_at_utc, updated_at_utc
@@ -64,10 +64,10 @@ INSERT INTO managed_lines (
 }
 
 func (set *Set) UpdateManagedLine(ctx context.Context, lineID, displayName string, updatedAt time.Time) error {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("core database is not open")
 	}
-	result, err := set.Core.ExecContext(ctx, `
+	result, err := set.DB.ExecContext(ctx, `
 UPDATE managed_lines
 SET display_name = ?, updated_at_utc = ?
 WHERE id = ?`, displayName, updatedAt.UTC().Format(time.RFC3339Nano), lineID)

@@ -43,7 +43,7 @@ generated TypeScript response contract is `number`.
 
 - same-origin credentials and base URL;
 - `Accept: application/json`;
-- CSRF header on mutating business APIs, excluding login/setup;
+- CSRF header on mutating business APIs, excluding login;
 - endpoint-aware bounded deadlines;
 - caller abort propagation;
 - stable `ApiClientError` kinds/codes for timeout, abort, network, HTTP,

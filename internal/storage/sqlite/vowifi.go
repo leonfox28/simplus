@@ -9,7 +9,7 @@ import (
 )
 
 func (set *Set) ListVoWiFiDesires(ctx context.Context) ([]domain.Desire, error) {
-	rows, err := set.Core.QueryContext(ctx, `SELECT line_id, desired_active, updated_at_utc FROM vowifi_line_desires ORDER BY line_id`)
+	rows, err := set.DB.QueryContext(ctx, `SELECT line_id, desired_active, updated_at_utc FROM vowifi_line_desires ORDER BY line_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list Host VoWiFi desires: %w", err)
 	}
@@ -40,7 +40,7 @@ func (set *Set) PutVoWiFiDesire(ctx context.Context, value domain.Desire) error 
 	if value.DesiredActive {
 		desired = 1
 	}
-	_, err := set.Core.ExecContext(ctx, `
+	_, err := set.DB.ExecContext(ctx, `
 INSERT INTO vowifi_line_desires (line_id, desired_active, updated_at_utc)
 VALUES (?, ?, ?)
 ON CONFLICT(line_id) DO UPDATE SET

@@ -19,13 +19,22 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8080',
-        // Preserve the trusted LAN-facing authority. Setup completion derives
-        // its management URL from this validated Host rather than the proxy target.
+        // Preserve the authority checked by the management HTTP boundary.
         changeOrigin: false,
       },
     },
   },
   build: {
     outDir: 'dist',
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'react-runtime', test: /node_modules\/(?:react|react-dom|scheduler)\// },
+            { name: 'api-validation', test: /node_modules\/zod\/|api\/generated\/zod\.gen/ },
+          ],
+        },
+      },
+    },
   },
 })

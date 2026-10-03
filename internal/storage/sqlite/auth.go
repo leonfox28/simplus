@@ -7,10 +7,10 @@ import (
 )
 
 func (set *Set) ReadAdministrator(ctx context.Context) (username, passwordHash, locale string, sessionGeneration int64, found bool, err error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return "", "", "", 0, false, fmt.Errorf("core database is not open")
 	}
-	err = set.Core.QueryRowContext(ctx, `
+	err = set.DB.QueryRowContext(ctx, `
 SELECT administrators.username, administrators.password_hash, installation_state.instance_default_locale, administrators.session_generation
 FROM administrators
 JOIN installation_state ON installation_state.singleton = administrators.singleton
@@ -32,10 +32,10 @@ func (set *Set) CreateAdministratorSession(
 	sessionGeneration int64,
 	createdAtUnix, expiresAtUnix int64,
 ) error {
-	if set == nil || set.Runtime == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("runtime database is not open")
 	}
-	tx, err := set.Runtime.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin administrator session creation: %w", err)
 	}
@@ -57,11 +57,11 @@ INSERT INTO administrator_sessions (
 }
 
 func (set *Set) ReadAdministratorSession(ctx context.Context, tokenHash [32]byte, nowUnix int64) (username string, csrfHash [32]byte, sessionGeneration, expiresAtUnix int64, found bool, err error) {
-	if set == nil || set.Runtime == nil {
+	if set == nil || set.DB == nil {
 		return "", csrfHash, 0, 0, false, fmt.Errorf("runtime database is not open")
 	}
 	var rawCSRF []byte
-	err = set.Runtime.QueryRowContext(ctx, `
+	err = set.DB.QueryRowContext(ctx, `
 SELECT username, csrf_hash, session_generation, expires_at_unix
 FROM administrator_sessions
 WHERE token_hash = ? AND expires_at_unix > ?
@@ -76,27 +76,27 @@ WHERE token_hash = ? AND expires_at_unix > ?
 		return "", csrfHash, 0, 0, false, fmt.Errorf("stored administrator CSRF hash has invalid length")
 	}
 	copy(csrfHash[:], rawCSRF)
-	if _, err := set.Runtime.ExecContext(ctx, `UPDATE administrator_sessions SET last_seen_at_unix = ? WHERE token_hash = ?`, nowUnix, tokenHash[:]); err != nil {
+	if _, err := set.DB.ExecContext(ctx, `UPDATE administrator_sessions SET last_seen_at_unix = ? WHERE token_hash = ?`, nowUnix, tokenHash[:]); err != nil {
 		return "", csrfHash, 0, 0, false, fmt.Errorf("touch administrator session: %w", err)
 	}
 	return username, csrfHash, sessionGeneration, expiresAtUnix, true, nil
 }
 
 func (set *Set) DeleteAdministratorSession(ctx context.Context, tokenHash [32]byte) error {
-	if set == nil || set.Runtime == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("runtime database is not open")
 	}
-	if _, err := set.Runtime.ExecContext(ctx, `DELETE FROM administrator_sessions WHERE token_hash = ?`, tokenHash[:]); err != nil {
+	if _, err := set.DB.ExecContext(ctx, `DELETE FROM administrator_sessions WHERE token_hash = ?`, tokenHash[:]); err != nil {
 		return fmt.Errorf("delete administrator session: %w", err)
 	}
 	return nil
 }
 
 func (set *Set) DeleteAllAdministratorSessions(ctx context.Context) error {
-	if set == nil || set.Runtime == nil {
+	if set == nil || set.DB == nil {
 		return fmt.Errorf("runtime database is not open")
 	}
-	if _, err := set.Runtime.ExecContext(ctx, `DELETE FROM administrator_sessions`); err != nil {
+	if _, err := set.DB.ExecContext(ctx, `DELETE FROM administrator_sessions`); err != nil {
 		return fmt.Errorf("delete all administrator sessions: %w", err)
 	}
 	return nil

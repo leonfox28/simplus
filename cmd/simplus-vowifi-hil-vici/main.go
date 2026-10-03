@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/leonfox28/simplus/internal/vowifihil"
+
+	"github.com/leonfox28/simplus/internal/ims"
 	"github.com/strongswan/govici/vici"
 )
 
@@ -43,7 +45,7 @@ func main() {
 		fail("plugins", state)
 	}
 	state.RequiredPlugins = true
-	connection, err := vowifihil.ConnectionMessage(input)
+	connection, err := ims.ConnectionMessage(input)
 	if err != nil {
 		fail("connection-encode", state)
 	}
@@ -51,13 +53,13 @@ func main() {
 		fail("connection-load", state)
 	}
 	known, err := session.Call(ctx, "get-conns", nil)
-	if err != nil || !hasString(known.Get("conns"), vowifihil.ConnectionName) {
+	if err != nil || !hasString(known.Get("conns"), ims.ConnectionName) {
 		fail("connection-verify", state)
 	}
 	state.ConnectionLoaded = true
 
 	initiate := vici.NewMessage()
-	if initiate.Set("ike", vowifihil.ConnectionName) != nil || initiate.Set("child", "ims") != nil ||
+	if initiate.Set("ike", ims.ConnectionName) != nil || initiate.Set("child", "ims") != nil ||
 		initiate.Set("timeout", 35000) != nil || initiate.Set("loglevel", 0) != nil {
 		fail("initiate-encode", state)
 	}
@@ -72,26 +74,26 @@ func main() {
 	writeResult(state)
 }
 
-func readInput() (vowifihil.ConnectionInput, error) {
+func readInput() (ims.ConnectionInput, error) {
 	info, err := os.Lstat(vowifihil.VICIConfig)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return vowifihil.ConnectionInput{}, errors.New("invalid VICI input file")
+		return ims.ConnectionInput{}, errors.New("invalid VICI input file")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Uid != 0 {
-		return vowifihil.ConnectionInput{}, errors.New("invalid VICI input owner")
+		return ims.ConnectionInput{}, errors.New("invalid VICI input owner")
 	}
 	file, err := os.Open(vowifihil.VICIConfig)
 	if err != nil {
-		return vowifihil.ConnectionInput{}, err
+		return ims.ConnectionInput{}, err
 	}
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, 4097))
 	if err != nil || len(data) == 0 || len(data) > 4096 {
-		return vowifihil.ConnectionInput{}, errors.New("invalid VICI input size")
+		return ims.ConnectionInput{}, errors.New("invalid VICI input size")
 	}
 	defer zero(data)
-	return vowifihil.ParseConnectionInput(data)
+	return ims.ParseConnectionInput(data)
 }
 
 func hasRequiredPlugins(message *vici.Message) bool {
@@ -102,7 +104,7 @@ func hasRequiredPlugins(message *vici.Message) bool {
 	if !ok {
 		return false
 	}
-	for _, required := range vowifihil.RequiredPlugins() {
+	for _, required := range ims.RequiredPlugins() {
 		found := false
 		for _, plugin := range plugins {
 			if plugin == required {

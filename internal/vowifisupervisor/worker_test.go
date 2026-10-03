@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leonfox28/simplus/internal/vowifihil"
+	"github.com/leonfox28/simplus/internal/ims"
 )
 
 func TestStrongSwanLogReaderContinuesPastTwoMiB(t *testing.T) {
@@ -55,22 +55,22 @@ func TestStrongSwanDiagnosticsExposeOnlyFixedSafeCodes(t *testing.T) {
 }
 
 func TestInitiateErrorsMapToSafeStages(t *testing.T) {
-	if code := initiateErrorCode(vowifihil.ErrRequiredPluginsUnavailable); code != "STRONGSWAN_PLUGINS_MISSING" {
+	if code := initiateErrorCode(ims.ErrRequiredPluginsUnavailable); code != "STRONGSWAN_PLUGINS_MISSING" {
 		t.Fatalf("code=%q", code)
 	}
-	if code := initiateErrorCode(vowifihil.ErrConnectionInitiateFailed); code != "EPDG_CONNECT_FAILED" {
+	if code := initiateErrorCode(ims.ErrConnectionInitiateFailed); code != "EPDG_CONNECT_FAILED" {
 		t.Fatalf("code=%q", code)
 	}
 }
 
 func TestIMSRefreshErrorsMapToSafeStages(t *testing.T) {
 	cases := map[error]string{
-		vowifihil.ErrIMSReauthenticationRequired: "IMS_REAUTH_REQUIRED",
-		vowifihil.ErrIMSRefreshIntervalRejected:  "IMS_REFRESH_INTERVAL_REJECTED",
-		vowifihil.ErrIMSRefreshRejected:          "IMS_REFRESH_REJECTED",
-		vowifihil.ErrIMSRefreshNoResponse:        "IMS_REFRESH_NO_RESPONSE",
-		vowifihil.ErrIMSRefreshResponseUnmatched: "IMS_REFRESH_RESPONSE_UNMATCHED",
-		errors.New("transport failed"):           "IMS_REFRESH_FAILED",
+		ims.ErrIMSReauthenticationRequired: "IMS_REAUTH_REQUIRED",
+		ims.ErrIMSRefreshIntervalRejected:  "IMS_REFRESH_INTERVAL_REJECTED",
+		ims.ErrIMSRefreshRejected:          "IMS_REFRESH_REJECTED",
+		ims.ErrIMSRefreshNoResponse:        "IMS_REFRESH_NO_RESPONSE",
+		ims.ErrIMSRefreshResponseUnmatched: "IMS_REFRESH_RESPONSE_UNMATCHED",
+		errors.New("transport failed"):     "IMS_REFRESH_FAILED",
 	}
 	for input, expected := range cases {
 		if actual := imsRefreshErrorCode(input); actual != expected {

@@ -4,7 +4,7 @@ import { loadConfigFromFile } from 'vite'
 import { describe, expect, it } from 'vitest'
 
 describe('Vite development proxy', () => {
-  it('preserves the trusted LAN Host used by setup completion URLs', async () => {
+  it('preserves the trusted LAN Host checked by the management API', async () => {
     const loaded = await loadConfigFromFile(
       { command: 'serve', mode: 'test' },
       path.resolve(process.cwd(), 'vite.config.ts'),

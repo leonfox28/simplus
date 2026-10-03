@@ -3,9 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { json, renderPage } from '@/test/render'
 import Dashboard from './Dashboard'
 import Mihomo from './Mihomo'
-import Notifications from './Notifications'
+import Notifications from '@/features/notifications/Notifications'
 import Settings from './Settings'
-import Setup from './Setup'
 
 describe('remaining page boundaries', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -65,7 +64,7 @@ describe('remaining page boundaries', () => {
         id: 'channel_AAAAAAAAAAAAAAAAAAAAAA', provider: 'wecom', displayName: 'Synthetic Channel',
         deliveryMode: 'webhook', targetType: 'webhook',
         webhookHint: 'qyapi.weixin.qq.com', signingSecretConfigured: true, enabled: true,
-        eventKinds: ['sms.received'], lastDeliveryAt: '', lastDeliveryStatus: 'never', lastErrorCode: '',
+        eventKinds: ['sms.received'], lastDeliveryAt: '', pendingCount: 0, failedCount: 0, lastDeliveryStatus: 'never', lastErrorCode: '',
       }] })
       throw new Error(`unexpected ${path}`)
     }))
@@ -87,21 +86,4 @@ describe('remaining page boundaries', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('resumes a bounded setup session without exposing bootstrap material', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (request: Request) => {
-      const path = new URL(request.url).pathname
-      if (path === '/api/v1/setup/session') return json({
-        authorized: true, expiresAt: '2099-01-01T00:00:00Z', selectedFlow: 'create-new', supportedFlows: ['create-new'],
-        administratorConfigured: true, administratorUsername: 'synthetic_admin', instanceDefaultLocale: 'zh-CN',
-        storageConfigured: false, dataRoot: '/synthetic/data', recordingsRoot: '/synthetic/recordings',
-        httpsConfigured: false, httpsConfirmed: false, httpsMode: '', httpsListenUrl: '', httpsRootFingerprint: '', httpsLeafNotAfter: '',
-        hardwareReviewed: false, hardwareDeviceCount: 0, hardwareLineCount: 0, hardwareInventoryDigest: '',
-      })
-      throw new Error(`unexpected ${path}`)
-    }))
-    renderPage(<Setup />)
-    expect(await screen.findByText('当前管理员：synthetic_admin')).toBeInTheDocument()
-    expect(screen.getByLabelText('录音目录')).toHaveValue('/synthetic/recordings')
-    expect(window.location.hash).not.toContain('bootstrap=')
-  })
 })

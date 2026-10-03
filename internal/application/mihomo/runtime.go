@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"time"
 
-	"github.com/leonfox28/simplus/internal/mihomosupervisor"
+	runtime "github.com/leonfox28/simplus/internal/domain/mihomo"
 )
 
 var (
@@ -43,7 +41,7 @@ type RuntimeManager struct {
 	Store      RuntimeStore
 	Artifacts  ArtifactResolver
 	Core       CoreStatusReader
-	Supervisor mihomosupervisor.API
+	Supervisor runtime.API
 	Now        func() time.Time
 	mu         sync.Mutex
 }
@@ -53,21 +51,21 @@ func NewRuntimeManager(
 	store RuntimeStore,
 	artifacts ArtifactResolver,
 	core CoreStatusReader,
-	supervisor mihomosupervisor.API,
+	supervisor runtime.API,
 ) (*RuntimeManager, error) {
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("%w: root must be absolute", ErrRuntimeManagerConfiguration)
 	}
-	if runtimeDependencyMissing(store) {
+	if store == nil {
 		return nil, fmt.Errorf("%w: runtime store is required", ErrRuntimeManagerConfiguration)
 	}
-	if runtimeDependencyMissing(artifacts) {
+	if artifacts == nil {
 		return nil, fmt.Errorf("%w: artifact resolver is required", ErrRuntimeManagerConfiguration)
 	}
-	if runtimeDependencyMissing(core) {
+	if core == nil {
 		return nil, fmt.Errorf("%w: core status reader is required", ErrRuntimeManagerConfiguration)
 	}
-	if runtimeDependencyMissing(supervisor) {
+	if supervisor == nil {
 		return nil, fmt.Errorf("%w: supervisor is required", ErrRuntimeManagerConfiguration)
 	}
 	return &RuntimeManager{
@@ -78,19 +76,6 @@ func NewRuntimeManager(
 		Supervisor: supervisor,
 		Now:        time.Now,
 	}, nil
-}
-
-func runtimeDependencyMissing(dependency any) bool {
-	if dependency == nil {
-		return true
-	}
-	value := reflect.ValueOf(dependency)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 func (manager *RuntimeManager) Status(ctx context.Context) (RuntimeStatus, error) {
@@ -207,16 +192,12 @@ func (manager *RuntimeManager) startLocked(ctx context.Context, subscriptionID s
 	return manager.startConfigLocked(ctx, subscriptionID, configPath)
 }
 func (manager *RuntimeManager) startConfigLocked(ctx context.Context, subscriptionID, configPath string) error {
-	info, err := os.Stat(configPath)
-	if err != nil || !info.Mode().IsRegular() {
-		return ErrConfigNotReady
-	}
 	core, err := manager.Core.Status()
 	if err != nil || !core.Installed {
 		return ErrConfigNotReady
 	}
-	if _, err := manager.Supervisor.Start(ctx, mihomosupervisor.StartRequest{SubscriptionID: subscriptionID, BinaryPath: core.BinaryPath, ConfigPath: configPath}); err != nil {
-		if errors.Is(err, mihomosupervisor.ErrStartupFailed) {
+	if _, err := manager.Supervisor.Start(ctx, runtime.StartRequest{SubscriptionID: subscriptionID, BinaryPath: core.BinaryPath, ConfigPath: configPath}); err != nil {
+		if errors.Is(err, runtime.ErrStartupFailed) {
 			return ErrRuntimeStartupFailed
 		}
 		return err
@@ -228,7 +209,7 @@ func (manager *RuntimeManager) startConfigLocked(ctx context.Context, subscripti
 	return nil
 }
 func (manager *RuntimeManager) stopLocked(ctx context.Context) error {
-	if err := manager.Supervisor.Stop(ctx); err != nil && !errors.Is(err, mihomosupervisor.ErrNotRunning) {
+	if err := manager.Supervisor.Stop(ctx); err != nil && !errors.Is(err, runtime.ErrNotRunning) {
 		return err
 	}
 	return manager.clearRunning(ctx)

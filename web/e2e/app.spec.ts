@@ -147,7 +147,7 @@ async function installApi(page: Page, authenticated = false) {
       id: 'channel_AAAAAAAAAAAAAAAAAAAAAA', provider: 'feishu', deliveryMode: 'feishu_app', targetType: 'authorized_user',
       displayName: 'Synthetic Feishu DM', webhookHint: 'open.feishu.cn', signingSecretConfigured: false, enabled: true,
       eventKinds: ['sms.received', 'sms.failed', 'call.incoming', 'call.missed', 'system.degraded'],
-      lastDeliveryAt: '2026-08-11T00:00:00Z', lastDeliveryStatus: 'success', lastErrorCode: '',
+      lastDeliveryAt: '2026-08-11T00:00:00Z', pendingCount: 0, failedCount: 0, lastDeliveryStatus: 'success', lastErrorCode: '',
     }] })
     if (path === '/api/v1/message-conversations') return json(route, {
       conversations: [{

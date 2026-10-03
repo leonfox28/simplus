@@ -26,7 +26,6 @@ import (
 	"github.com/leonfox28/simplus/internal/mihomosupervisor"
 )
 
-type bootstrapGenerator func(context.Context, string) (control.BootstrapResponse, error)
 type administratorProvisioner func(context.Context, string, control.ProvisionAdministratorRequest) (control.ProvisionAdministratorResponse, error)
 type hardwareProber func(context.Context, string) (hardwareProbeOutput, error)
 type serviceHealthChecker func(context.Context, string) error
@@ -38,13 +37,12 @@ type hardwareProbeOutput struct {
 }
 
 type dependencies struct {
-	effectiveUID      func() int
-	generateBootstrap bootstrapGenerator
-	provisionAdmin    administratorProvisioner
-	probeHardware     hardwareProber
-	checkAgentHealth  serviceHealthChecker
-	checkNetdHealth   serviceHealthChecker
-	checkAppHealth    serviceHealthChecker
+	effectiveUID     func() int
+	provisionAdmin   administratorProvisioner
+	probeHardware    hardwareProber
+	checkAgentHealth serviceHealthChecker
+	checkNetdHealth  serviceHealthChecker
+	checkAppHealth   serviceHealthChecker
 }
 
 func main() {
@@ -53,13 +51,12 @@ func main() {
 
 func run(args []string) int {
 	return runWithDependencies(args, os.Stdout, os.Stderr, dependencies{
-		effectiveUID:      os.Geteuid,
-		generateBootstrap: control.GenerateBootstrap,
-		provisionAdmin:    control.ProvisionAdministrator,
-		probeHardware:     probeHardwareAgent,
-		checkAgentHealth:  checkAgentHealth,
-		checkNetdHealth:   checkNetdHealth,
-		checkAppHealth:    checkAppHealth,
+		effectiveUID:     os.Geteuid,
+		provisionAdmin:   control.ProvisionAdministrator,
+		probeHardware:    probeHardwareAgent,
+		checkAgentHealth: checkAgentHealth,
+		checkNetdHealth:  checkNetdHealth,
+		checkAppHealth:   checkAppHealth,
 	})
 }
 
@@ -85,9 +82,6 @@ func runWithDependencies(args []string, stdout, stderr io.Writer, deps dependenc
 			return 1
 		}
 		return 0
-	}
-	if len(args) >= 1 && args[0] == "bootstrap-url" {
-		return runBootstrapURL(args[1:], stdout, stderr, deps)
 	}
 	if len(args) >= 1 && args[0] == "provision-admin" {
 		return runProvisionAdministrator(args[1:], stdout, stderr, deps)
@@ -272,73 +266,6 @@ func runProvisionAdministrator(args []string, stdout, stderr io.Writer, deps dep
 	return 0
 }
 
-func runBootstrapURL(args []string, stdout, stderr io.Writer, deps dependencies) int {
-	flags := flag.NewFlagSet("bootstrap-url", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	configPath := flags.String("config", os.Getenv("SIMPLUS_CONFIG"), "optional Simplus YAML configuration path")
-	socketPath := flags.String("socket", os.Getenv("SIMPLUS_CONTROL_SOCKET"), "simplusd root control socket")
-	baseURL := flags.String("base-url", envOrDefault("SIMPLUS_BOOTSTRAP_BASE_URL", "http://127.0.0.1:5173"), "browser origin used in the one-time URL")
-	jsonOutput := flags.Bool("json", false, "emit a locale-neutral JSON result")
-	if err := flags.Parse(args); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "bootstrap-url accepts no positional arguments")
-		return 2
-	}
-	if deps.effectiveUID == nil || deps.effectiveUID() != 0 {
-		fmt.Fprintln(stderr, "bootstrap-url must be run as root")
-		return 1
-	}
-
-	resolvedSocket := strings.TrimSpace(*socketPath)
-	if resolvedSocket == "" {
-		cfg, err := config.Load(*configPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "resolve control socket: %v\n", err)
-			return 1
-		}
-		resolvedSocket = control.SocketPath(cfg.Storage.DataRoot)
-	}
-	if !filepath.IsAbs(resolvedSocket) {
-		fmt.Fprintln(stderr, "control socket path must be absolute")
-		return 2
-	}
-	browserURL, err := bootstrapBrowserURL(*baseURL, "placeholder")
-	if err != nil {
-		fmt.Fprintf(stderr, "invalid --base-url: %v\n", err)
-		return 2
-	}
-	_ = browserURL
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	response, err := deps.generateBootstrap(ctx, filepath.Clean(resolvedSocket))
-	if err != nil {
-		fmt.Fprintf(stderr, "generate bootstrap URL: %v\n", err)
-		return 1
-	}
-	browserURL, err = bootstrapBrowserURL(*baseURL, response.Code)
-	if err != nil {
-		fmt.Fprintf(stderr, "build bootstrap URL: %v\n", err)
-		return 1
-	}
-	if *jsonOutput {
-		result := struct {
-			URL       string    `json:"url"`
-			ExpiresAt time.Time `json:"expiresAt"`
-		}{URL: browserURL, ExpiresAt: response.ExpiresAt}
-		if err := json.NewEncoder(stdout).Encode(result); err != nil {
-			fmt.Fprintf(stderr, "write bootstrap result: %v\n", err)
-			return 1
-		}
-		return 0
-	}
-	fmt.Fprintln(stdout, browserURL)
-	fmt.Fprintf(stderr, "expires at %s\n", response.ExpiresAt.UTC().Format(time.RFC3339))
-	return 0
-}
-
 func runHardwareProbe(args []string, stdout, stderr io.Writer, deps dependencies) int {
 	flags := flag.NewFlagSet("hardware probe", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -418,23 +345,6 @@ func probeHardwareAgent(ctx context.Context, socketPath string) (hardwareProbeOu
 		return hardwareProbeOutput{}, errors.New("hardware changed during read-only probe; retry against the new generation")
 	}
 	return hardwareProbeOutput{Hello: hello, Snapshot: snapshot, Probe: probe}, nil
-}
-
-func bootstrapBrowserURL(baseURL, code string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil {
-		return "", err
-	}
-	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return "", fmt.Errorf("must be an absolute HTTP(S) origin")
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return "", fmt.Errorf("must not contain credentials, a path, query, or fragment")
-	}
-	parsed.Path = "/setup"
-	parsed.RawPath = ""
-	parsed.Fragment = url.Values{"bootstrap": []string{code}}.Encode()
-	return parsed.String(), nil
 }
 
 func envOrDefault(name, fallback string) string {

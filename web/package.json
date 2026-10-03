@@ -10,8 +10,9 @@
     "generate:api": "openapi-ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "pnpm run generate:api && tsc --noEmit && vite build",
-    "e2e": "playwright test"
+    "build": "tsc --noEmit && vite build",
+    "e2e": "playwright test",
+    "e2e:simulator": "playwright test --config=playwright.simulator.config.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

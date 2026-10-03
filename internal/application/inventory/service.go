@@ -56,6 +56,7 @@ type Snapshot struct {
 }
 
 type Topology struct {
+	AgentInstanceID      string
 	Generation           uint64
 	Revision             string
 	ObservedAt           time.Time
@@ -140,7 +141,8 @@ func (service *Service) Topology(ctx context.Context) (Topology, error) {
 	}
 
 	topology := Topology{
-		Generation: normalized.Generation, ObservedAt: normalized.ObservedAt,
+		AgentInstanceID: normalized.AgentInstanceID,
+		Generation:      normalized.Generation, ObservedAt: normalized.ObservedAt,
 		Devices:        append([]hardware.PhysicalDevice(nil), normalized.Devices...),
 		ModemFunctions: append([]hardware.ModemFunction(nil), normalized.ModemFunctions...),
 		SIMSlots:       append([]hardware.SIMSlot(nil), normalized.SIMSlots...),
@@ -194,7 +196,7 @@ func (simulator simulatorSource) Snapshot(ctx context.Context) (hardware.Snapsho
 		RFControl: true, NetworkScan: true, ManualNetworkSelection: true, PrimarySIMLockState: true,
 		PIN1Verify: true, PUK1Unblock: true,
 	}
-	snapshot := hardware.Snapshot{Generation: 1, ObservedAt: time.Now().UTC()}
+	snapshot := hardware.Snapshot{AgentInstanceID: "01234567-89ab-cdef-0123-456789abcdef", Generation: 1, ObservedAt: time.Now().UTC()}
 	for index := 1; index <= lineCount; index++ {
 		suffix := fmt.Sprintf("%d", index)
 		deviceID := "simulator-device-" + suffix

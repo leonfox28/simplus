@@ -98,3 +98,23 @@ func TestLocalRejectsListenerStartupFailureAndLeavesNoProcess(t *testing.T) {
 		t.Fatalf("status=%#v err=%v", status, err)
 	}
 }
+
+func TestCloseReapsOwnedChildEvenWithoutManifest(t *testing.T) {
+	local, request := supervisorFixture(t, "#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n")
+	status, err := local.Start(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(local.manifestPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := local.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(status.PID, 0); err != syscall.ESRCH {
+		t.Fatalf("child survived close: %v", err)
+	}
+	if _, err := local.Start(t.Context(), request); !errors.Is(err, ErrRequestInvalid) {
+		t.Fatalf("start after close=%v", err)
+	}
+}

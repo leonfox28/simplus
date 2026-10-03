@@ -32,6 +32,10 @@ type Local struct {
 	processGID uint32
 	dropUser   bool
 	mu         sync.Mutex
+	workers    sync.WaitGroup
+	closing    bool
+	owned      *os.Process
+	ownedDone  chan struct{}
 }
 
 func NewLocal(root string) (*Local, error) {
@@ -78,6 +82,9 @@ func (local *Local) statusLocked() (Status, error) {
 func (local *Local) Start(ctx context.Context, request StartRequest) (Status, error) {
 	local.mu.Lock()
 	defer local.mu.Unlock()
+	if local.closing {
+		return Status{}, ErrRequestInvalid
+	}
 	if err := local.validateRequest(request); err != nil {
 		return Status{}, err
 	}
@@ -105,25 +112,29 @@ func (local *Local) Start(ctx context.Context, request StartRequest) (Status, er
 	status := Status{Running: true, PID: command.Process.Pid, SubscriptionID: request.SubscriptionID, BinaryPath: request.BinaryPath, ConfigPath: request.ConfigPath, StartedAt: local.Now().UTC()}
 	if err := writeAtomicPrivateFile(local.manifestPath(), status); err != nil {
 		_ = command.Process.Kill()
+		_ = command.Wait()
 		_ = logFile.Close()
 		return Status{}, err
 	}
-	go func() {
+	done := make(chan struct{})
+	local.owned, local.ownedDone = command.Process, done
+	local.workers.Go(func() {
+		defer close(done)
 		_ = command.Wait()
 		_ = logFile.Close()
-	}()
+	})
 	timer := time.NewTimer(500 * time.Millisecond)
 	select {
 	case <-ctx.Done():
 		timer.Stop()
-		_ = terminate(status)
+		local.stopOwnedLocked()
 		_ = os.Remove(local.manifestPath())
 		return Status{}, ctx.Err()
 	case <-timer.C:
 	}
 	alive, listenerFailed := manifestAlive(status), startupListenerFailed(logPath, startOffset)
 	if !alive || listenerFailed {
-		_ = terminate(status)
+		local.stopOwnedLocked()
 		_ = os.Remove(local.manifestPath())
 		return Status{}, fmt.Errorf("%w: process_alive=%t listener_failed=%t", ErrStartupFailed, alive, listenerFailed)
 	}
@@ -142,6 +153,15 @@ func (local *Local) processAttributes() *syscall.SysProcAttr {
 func (local *Local) Stop(context.Context) error {
 	local.mu.Lock()
 	defer local.mu.Unlock()
+	if local.owned != nil {
+		local.stopOwnedLocked()
+		local.workers.Wait()
+		err := os.Remove(local.manifestPath())
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
 	status, err := local.statusLocked()
 	if err != nil || !status.Running {
 		return ErrNotRunning
@@ -150,6 +170,35 @@ func (local *Local) Stop(context.Context) error {
 		return err
 	}
 	return os.Remove(local.manifestPath())
+}
+
+// The caller holds mu, preventing a concurrent start from replacing ownership.
+func (local *Local) stopOwnedLocked() {
+	if local.owned == nil {
+		return
+	}
+	_ = local.owned.Signal(syscall.SIGTERM)
+	timer := time.NewTimer(5 * time.Second)
+	select {
+	case <-local.ownedDone:
+		timer.Stop()
+	case <-timer.C:
+		_ = local.owned.Kill()
+		<-local.ownedDone
+	}
+	local.owned, local.ownedDone = nil, nil
+}
+
+// Close prevents new starts and waits for all owned child processes to be reaped.
+func (local *Local) Close(ctx context.Context) error {
+	local.mu.Lock()
+	local.closing = true
+	local.mu.Unlock()
+	err := local.Stop(ctx)
+	if errors.Is(err, ErrNotRunning) {
+		return nil
+	}
+	return err
 }
 
 func (local *Local) validateRequest(request StartRequest) error {

@@ -14,10 +14,10 @@ const (
 )
 
 func (set *Set) InstallationState(ctx context.Context) (string, error) {
-	if set == nil || set.Core == nil {
+	if set == nil || set.DB == nil {
 		return "", fmt.Errorf("core database is not open")
 	}
-	state, err := coredb.New(set.Core).GetInstallationState(ctx)
+	state, err := coredb.New(set.DB).GetInstallationState(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read installation state: %w", err)
 	}

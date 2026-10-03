@@ -11,6 +11,7 @@ import (
 var runtimeFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type runtimeLine struct {
+	agentInstanceID         string
 	line                    inventory.Line
 	transportDeviceID       string
 	equipmentFingerprint    string
@@ -46,12 +47,13 @@ func resolveRuntimeLine(topology inventory.Topology, line inventory.Line) (runti
 		return runtimeLine{}, errors.New("SMS runtime device identity is unavailable")
 	}
 	return runtimeLine{
-		line: line, transportDeviceID: transportDeviceID,
+		agentInstanceID: topology.AgentInstanceID, line: line, transportDeviceID: transportDeviceID,
 		equipmentFingerprint: equipment, subscriptionFingerprint: subscription,
 	}, nil
 }
 
 func (target runtimeLine) sendCommand(command SendSMSCommand) SendSMSCommand {
+	command.AgentInstanceID = target.agentInstanceID
 	command.PhysicalDeviceID = target.transportDeviceID
 	command.DeviceGeneration = target.line.Generation
 	command.ExpectedEquipmentFingerprint = target.equipmentFingerprint
@@ -64,6 +66,6 @@ func (target runtimeLine) inboxTarget() InboxTarget {
 	if deviceID == "" {
 		deviceID = target.line.PhysicalDeviceID
 	}
-	return InboxTarget{LineID: target.line.ID, PhysicalDeviceID: deviceID, DeviceGeneration: target.line.Generation,
+	return InboxTarget{AgentInstanceID: target.agentInstanceID, LineID: target.line.ID, PhysicalDeviceID: deviceID, DeviceGeneration: target.line.Generation,
 		ExpectedEquipmentFingerprint: target.equipmentFingerprint, ExpectedSubscriptionFingerprint: target.subscriptionFingerprint}
 }

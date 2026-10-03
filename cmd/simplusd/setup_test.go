@@ -18,7 +18,7 @@ func TestNewSetupServiceAcceptsCompleteProductionDependencies(t *testing.T) {
 	t.Cleanup(func() { _ = stores.Close() })
 
 	instanceSecretKeyPath := filepath.Join(databaseRoot, ".simplus-secrets-key-v1")
-	service, err := newSetupService(stores, instanceSecretKeyPath)
+	service, err := newSetupService(stores)
 	if err != nil {
 		t.Fatal(err)
 	}

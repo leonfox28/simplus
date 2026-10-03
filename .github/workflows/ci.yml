@@ -35,7 +35,7 @@ jobs:
       - name: Install Chromium for browser regression tests
         run: pnpm --dir web exec playwright install --with-deps chromium
       - name: Run desktop and mobile browser regressions
-        run: make web-e2e
+        run: make web-e2e && make web-e2e-simulator
       - name: Audit reachable vulnerabilities
         run: make security
       - name: Build Web and host binaries

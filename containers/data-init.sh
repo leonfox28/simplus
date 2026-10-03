@@ -10,6 +10,10 @@ fail() {
 root=/data
 [ ! -L "$root" ] && [ -d "$root" ] || fail '/data must be a real bind-mounted directory'
 
+# Refuse the previous layout before chmod/chown, seeding or directory creation.
+[ ! -e "$root/core" ] && [ ! -L "$root/core" ] || fail 'legacy data layout detected; preserve it and select a new installation directory'
+[ ! -e "$root/control-v2/db" ] && [ ! -L "$root/control-v2/db" ] || fail 'legacy control database detected; refusing to modify existing data'
+
 prepare_directory() {
     path=$1
     owner=$2
@@ -24,15 +28,15 @@ prepare_directory() {
     chmod "$mode" "$path"
 }
 
-prepare_directory "$root/core" 10001 10001 0700
+prepare_directory "$root/control-v2" 10001 10001 0700
 prepare_directory "$root/agent" 10002 10002 0700
-prepare_directory "$root/core/mihomo" 10001 10001 0700
-prepare_directory "$root/core/mihomo/runtime" 10001 10001 0700
-prepare_directory "$root/core/mihomo/runtime/ui" 10001 10001 0755
-prepare_directory "$root/core/mihomo/versions" 10001 10001 0700
+prepare_directory "$root/control-v2/mihomo" 10001 10001 0700
+prepare_directory "$root/control-v2/mihomo/runtime" 10001 10001 0700
+prepare_directory "$root/control-v2/mihomo/runtime/ui" 10001 10001 0755
+prepare_directory "$root/control-v2/mihomo/versions" 10001 10001 0700
 
-ui=$root/core/mihomo/runtime/ui
-[ "$ui" = '/data/core/mihomo/runtime/ui' ] || fail 'refusing an unexpected Zashboard target'
+ui=$root/control-v2/mihomo/runtime/ui
+[ "$ui" = '/data/control-v2/mihomo/runtime/ui' ] || fail 'refusing an unexpected Zashboard target'
 source_ui=/usr/share/simplus/zashboard
 source_version=$(cat "$source_ui/VERSION")
 installed_version=
@@ -44,7 +48,7 @@ if [ "$installed_version" != "$source_version" ] || [ ! -f "$ui/index.html" ]; t
     cp -a "$source_ui/." "$ui/"
 fi
 
-mihomo_root=$root/core/mihomo
+mihomo_root=$root/control-v2/mihomo
 mihomo_seed=/usr/share/simplus/mihomo
 mihomo_version=$(cat "$mihomo_seed/VERSION")
 mihomo_archive_sha256=$(cat "$mihomo_seed/ARCHIVE_SHA256")
@@ -91,9 +95,9 @@ else
     mv "$manifest_tmp" "$core_manifest"
 fi
 
-chown -R 10001:10001 "$root/core"
+chown -R 10001:10001 "$root/control-v2"
 chown -R 10002:10002 "$root/agent"
-chmod 0700 "$root/core" "$root/agent" "$root/core/mihomo" "$root/core/mihomo/runtime" "$root/core/mihomo/versions"
+chmod 0700 "$root/control-v2" "$root/agent" "$root/control-v2/mihomo" "$root/control-v2/mihomo/runtime" "$root/control-v2/mihomo/versions"
 find "$ui" -type d -exec chmod 0755 {} +
 find "$ui" -type f -exec chmod 0644 {} +
 

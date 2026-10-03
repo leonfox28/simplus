@@ -29,7 +29,7 @@ co-located with source and use Testing Library for visible behavior.
   generated validation, error normalization, and session expiry.
 - Realtime: exact event validation, topic mapping, active-only invalidation,
   lifecycle/reconnect/visibility, attention de-dup, and 401 behavior.
-- App shell/bootstrap: setup/auth redirects, cache clearing, selected
+- App shell/session gate: readiness/auth redirects, cache clearing, selected
   navigation, desktop Sider, mobile Drawer, and logout failure/success.
 - Pages: loading/error/unavailable/success states, form/action behavior,
   candidate freshness, mutation invalidation, and responsive rendering.

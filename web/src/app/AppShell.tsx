@@ -1,3 +1,4 @@
+import { advanceSession } from '@/api/session'
 import { LogoutOutlined, MenuOutlined, UserOutlined } from '@ant-design/icons'
 import { App, Avatar, Button, Drawer, Dropdown, Flex, Grid, Layout, Menu, Typography } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -24,6 +25,7 @@ export function AppShell() {
   const logout = useMutation({
     ...logoutMutation(),
     onSuccess: async () => {
+      advanceSession()
       await queryClient.cancelQueries()
       queryClient.clear()
       navigate('/login', { replace: true })

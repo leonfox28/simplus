@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -214,43 +215,98 @@ static bool write_all(int descriptor, const char *data, size_t length)
 	return true;
 }
 
-static bool json_string(const char *body, const char *key, char *output, size_t output_size)
-{
-	char pattern[96];
-	const char *start, *end;
-	size_t length, index;
+typedef struct {
+ const char *key;
+ char *value;
+ size_t capacity;
+ bool seen;
+} json_field_t;
 
-	if (snprintf(pattern, sizeof(pattern), "\"%s\":\"", key) < 0)
-	{
-		return false;
-	}
-	start = strstr(body, pattern);
-	if (!start)
-	{
-		return false;
-	}
-	start += strlen(pattern);
-	end = strchr(start, '"');
-	if (!end)
-	{
-		return false;
-	}
-	length = (size_t)(end - start);
-	if (length == 0 || length >= output_size)
-	{
-		return false;
-	}
-	for (index = 0; index < length; index++)
-	{
-		unsigned char byte = (unsigned char)start[index];
-		if (byte < 0x20 || byte == '\\')
-		{
-			return false;
-		}
-	}
-	memcpy(output, start, length);
-	output[length] = '\0';
-	return true;
+static void json_space(const char **cursor)
+{
+ while (**cursor == ' ' || **cursor == '\t' || **cursor == '\r' || **cursor == '\n') { (*cursor)++; }
+}
+
+/* The typed protocol contains only canonical ASCII tokens, not arbitrary JSON
+ * strings. Escapes, nested values, unknown fields and duplicate keys fail closed. */
+static bool json_token(const char **cursor, char *output, size_t capacity)
+{
+ size_t length = 0;
+ json_space(cursor);
+ if (*(*cursor)++ != '"') { return false; }
+ while (**cursor && **cursor != '"') {
+  unsigned char byte = (unsigned char)**cursor;
+  if (byte < 0x20 || byte > 0x7e || byte == '\\' || length + 1 >= capacity) { return false; }
+  output[length++] = *(*cursor)++;
+ }
+ if (**cursor != '"' || length == 0) { return false; }
+ (*cursor)++; output[length] = '\0'; return true;
+}
+
+static bool json_object(const char **cursor, json_field_t *fields, size_t count,
+                        json_field_t *result_fields, size_t result_count)
+{
+ char key[40];
+ bool first = true, version_seen = false, result_seen = false;
+ size_t index;
+ json_space(cursor);
+ if (**cursor != '{') { return false; }
+ (*cursor)++;
+ for (;;) {
+  json_space(cursor);
+  if (**cursor == '}') { (*cursor)++; break; }
+  if (!first) { if (**cursor != ',') { return false; } (*cursor)++; }
+  first = false;
+  if (!json_token(cursor,key,sizeof(key))) { return false; }
+  json_space(cursor); if (**cursor != ':') { return false; } (*cursor)++; json_space(cursor);
+  if (result_fields && strcmp(key,"protocolVersion") == 0) {
+   if (version_seen || **cursor != '1') { return false; }
+   version_seen = true; (*cursor)++;
+   if (**cursor != ',' && **cursor != '}' && **cursor != ' ' && **cursor != '\t' && **cursor != '\r' && **cursor != '\n') { return false; }
+   continue;
+  }
+  if (result_fields && strcmp(key,"result") == 0) {
+   if (result_seen || !json_object(cursor,result_fields,result_count,NULL,0)) { return false; }
+   result_seen = true; continue;
+  }
+  for (index = 0; index < count; index++) { if (strcmp(key,fields[index].key) == 0) { break; } }
+  if (index == count || fields[index].seen || !json_token(cursor,fields[index].value,fields[index].capacity)) { return false; }
+  fields[index].seen = true;
+ }
+ return !result_fields || (version_seen && result_seen);
+}
+
+static bool http_body(char *response, char **body)
+{
+ char *line, *end, *separator;
+ bool length_seen = false;
+ size_t expected = 0;
+ separator = strstr(response,"\r\n\r\n");
+ if (!separator) { return false; }
+ line = strstr(response,"\r\n"); if (!line) { return false; } line += 2;
+ while (line < separator) {
+  char *colon;
+  end = strstr(line,"\r\n");
+  if (!end || end > separator) { return false; }
+  colon = memchr(line,':',(size_t)(end-line));
+  if (!colon) { return false; }
+  if ((size_t)(colon-line) == 17 && strncasecmp(line,"Transfer-Encoding",17) == 0) { return false; }
+  if ((size_t)(colon-line) == 14 && strncasecmp(line,"Content-Length",14) == 0) {
+   char *number = colon+1;
+   if (length_seen) { return false; } length_seen = true;
+   while (number < end && (*number == ' ' || *number == '\t')) { number++; }
+   if (number == end || *number < '0' || *number > '9') { return false; }
+   while (number < end && *number >= '0' && *number <= '9') {
+    expected = expected*10 + (size_t)(*number++ - '0');
+    if (expected >= HTTP_BUFFER_SIZE) { return false; }
+   }
+   while (number < end && (*number == ' ' || *number == '\t')) { number++; }
+   if (number != end) { return false; }
+  }
+  line = end+2;
+ }
+ *body = separator+4;
+ return !length_seen || expected == strlen(*body);
 }
 
 static bool parse_response(
@@ -280,30 +336,29 @@ static bool parse_response(
 	{
 		goto done;
 	}
-	body = strstr(response, "\r\n\r\n");
-	if (!body)
-	{
-		goto done;
-	}
-	body += 4;
-	if (!strstr(body, "\"protocolVersion\":1") ||
-		!json_string(body, "agentInstanceId", agent, sizeof(agent)) ||
-		!json_string(body, "deviceId", device, sizeof(device)) ||
-		!json_string(body, "exchangeId", exchange, sizeof(exchange)) ||
-		!json_string(body, "state", state, sizeof(state)) ||
-		strcmp(agent, target->agent_instance_id) != 0 ||
-		strcmp(device, target->device_id) != 0 ||
-		strcmp(exchange, exchange_id) != 0)
-	{
-		goto done;
-	}
+	if (!http_body(response,&body)) { goto done; }
+	json_field_t envelope[] = {
+		{"agentInstanceId", agent, sizeof(agent), false},
+		{"deviceId", device, sizeof(device), false},
+		{"exchangeId", exchange, sizeof(exchange), false},
+	};
+	json_field_t values[] = {
+		{"state", state, sizeof(state), false}, {"res", res, sizeof(res), false},
+		{"ck", ck, sizeof(ck), false}, {"ik", ik, sizeof(ik), false},
+		{"auts", auts, sizeof(auts), false},
+	};
+	const char *cursor = body;
+	if (!json_object(&cursor,envelope,3,values,5)) { goto done; }
+	json_space(&cursor);
+	if (*cursor != '\0' || !envelope[0].seen || !envelope[1].seen || !envelope[2].seen || !values[0].seen ||
+		strcmp(agent,target->agent_instance_id) != 0 || strcmp(device,target->device_id) != 0 || strcmp(exchange,exchange_id) != 0) { goto done; }
 	if (strcmp(state, "success") == 0)
 	{
 		size_t res_bytes;
-		if (!json_string(body, "res", res, sizeof(res)) || strlen(res) < 8 ||
+		if (!values[1].seen || values[4].seen || strlen(res) < 8 ||
 			strlen(res) > SIMPLUS_AKA_RES_MAX * 2 || strlen(res) % 2 != 0 ||
-			!json_string(body, "ck", ck, sizeof(ck)) ||
-			!json_string(body, "ik", ik, sizeof(ik)))
+			!values[2].seen ||
+			!values[3].seen)
 		{
 			goto done;
 		}
@@ -320,7 +375,7 @@ static bool parse_response(
 	}
 	else if (strcmp(state, "synchronization-failure") == 0)
 	{
-		if (!json_string(body, "auts", auts, sizeof(auts)) ||
+		if (!values[4].seen || values[1].seen || values[2].seen || values[3].seen ||
 			!decode_hex(auts, SIMPLUS_AKA_AUTS_LEN, result->auts))
 		{
 			goto done;
@@ -482,7 +537,7 @@ bool simplus_simaka_agent_authenticate(
 		}
 		response_length += (size_t)count;
 	}
-	if (response_length == 0 || response_length >= sizeof(response) - 1)
+	if (response_length == 0 || response_length >= sizeof(response) - 1 || memchr(response, '\0', response_length) != NULL)
 	{
 		if (stage)
 		{

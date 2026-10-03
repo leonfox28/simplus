@@ -316,11 +316,15 @@ func TestDeliverRejectsBoundedProviderFailures(t *testing.T) {
 		body       []byte
 		bodyReader io.Reader
 		wantOK     bool
+		permanent  bool
 	}{
 		{name: "exact response limit", status: http.StatusOK, body: exactLimit, wantOK: true},
 		{name: "response over limit", status: http.StatusOK, body: append(exactLimit, ' ')},
 		{name: "read failure", status: http.StatusOK, bodyReader: failingReader{}},
 		{name: "non 2xx", status: http.StatusBadGateway, body: []byte(`{"errcode":0}`)},
+		{name: "invalid webhook", status: http.StatusOK, body: []byte(`{"errcode":93000}`), permanent: true},
+		{name: "permission denied", status: http.StatusForbidden, permanent: true},
+		{name: "rate limit", status: http.StatusTooManyRequests},
 		{name: "malformed", status: http.StatusOK, body: []byte(`{`)},
 		{name: "missing code", status: http.StatusOK, body: []byte(`{}`)},
 		{name: "nonzero code", status: http.StatusOK, body: []byte(`{"errcode":1}`)},
@@ -357,7 +361,11 @@ func TestDeliverRejectsBoundedProviderFailures(t *testing.T) {
 				}
 				return
 			}
-			if result.Outcome != notification.WebhookRejected || err != ErrProviderRejected {
+			wantOutcome, wantErr := notification.WebhookNetworkFailed, ErrNetworkFailed
+			if test.permanent {
+				wantOutcome, wantErr = notification.WebhookRejected, ErrProviderRejected
+			}
+			if result.Outcome != wantOutcome || err != wantErr {
 				t.Fatalf("result = %#v, error = %v", result, err)
 			}
 		})
@@ -368,7 +376,7 @@ func TestProviderRejectionErrorDoesNotExposeResponseBody(t *testing.T) {
 	const bodyMarker = "provider-private-body-marker"
 	client := NewClient()
 	client.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusBadGateway, bodyMarker), nil
+		return response(http.StatusForbidden, bodyMarker), nil
 	})
 	result, err := client.Deliver(context.Background(), notification.WebhookDeliveryRequest{
 		Provider: notification.WebhookProviderWeCom,

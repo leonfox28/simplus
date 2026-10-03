@@ -190,14 +190,14 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   transient attempt.
 - `POST /api/v1/notification-channel-bindings/feishu` starts one attempt;
   `DELETE` cancels a waiting attempt.
-- `Service.ConfigureFeishuBinding(processCtx, registrar, messenger, onChange)`
-  injects process lifetime and the two fixed-purpose provider ports.
+- `notification.New(Dependencies)` receives process lifetime, registrar, messenger
+  and the invalidation callback before any binding can start.
 - `Service.StartFeishuBinding(context.Context)`,
   `Service.FeishuBindingStatus()`, and `Service.CancelFeishuBinding()` own the
   state machine. HTTP handlers do not poll providers or persist credentials.
 - `feishu_app_notification_channels` owns encrypted `app_id`, `app_secret`,
   and recipient `open_id` ciphertexts separately from the legacy Webhook
-  table. Its schema version is core v23.
+  table within the unified control database.
 
 ### 3. Contracts
 
@@ -237,7 +237,7 @@ channel is durable, credentialless at the public boundary, and outbound-only.
   encryption and persistence.
 - App ID, App Secret, and recipient `open_id` use independent, versioned AEAD
   labels containing the channel ID. A successful row defaults to display name
-  `飞书私聊`, enabled, all five notification event kinds, and successful last
+  `飞书私聊`, enabled, all nine notification event kinds, and successful last
   delivery status.
 - Public `NotificationChannel` discriminates `deliveryMode` as `webhook` or
   `feishu_app` and `targetType` as `webhook` or `authorized_user`. App-channel
@@ -381,3 +381,15 @@ commands, or device paths (`cmd/simplus-netd/main.go` and
   timeout that conflicts with the underlying operation budget.
 - Treating the Unix socket's filesystem mode as sufficient without preserving
   peer-credential and fixed-UID checks.
+
+## Durable notification and connection contracts
+
+`NotificationEventKind` has nine values; channel create/update accepts at most nine
+unique selections. New Web channels and Feishu binding default to all nine.
+Channel snapshots expose `pendingCount` (pending or delivering) and `failedCount`
+(permanently failed). Provider credentials and raw failures remain private.
+
+Netd's typed connection snapshot/changes interface is separate from browser SSE.
+It carries instance, sequence, observation time and bounded safe reason codes,
+retains 1024 transitions, and requires reset on instance changes or expired
+cursors. The HTTP browser API remains the source of displayed state.

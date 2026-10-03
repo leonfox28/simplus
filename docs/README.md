@@ -18,6 +18,8 @@
 | [`privacy-and-publication.md`](privacy-and-publication.md) | 公开/私有记录边界和发布前检查 | 规范性 |
 | [`decisions/`](decisions/) | 影响产品范围或架构的重要决策 | 决策记录 |
 
+当前重构的存储、安装和通知决策见 [0028](decisions/0028-control-state-and-durable-notifications.md)。
+
 ## 按任务阅读
 
 - 改产品范围：先读 `product.md`，并新增或更新 decision；

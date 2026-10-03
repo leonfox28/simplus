@@ -64,12 +64,48 @@ static void test_rejects_mismatch_and_noncanonical_hex(void)
 	assert(result.state == SIMPLUS_SIMAKA_RESULT_FAILED);
 }
 
+static void test_strict_protocol_and_truncation(void)
+{
+ const char *invalid[] = {
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":10,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1.0,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"},\"unknown\":1}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}{}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"other\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"auts\":\"000102030405060708090a0b0c0d\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1F\"}}",
+  "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\nContent-Length: 273\r\nContent-Length: 273\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+  "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}",
+ };
+ char buffer[2048];
+ simplus_simaka_result_t result;
+ size_t index, byte;
+ for (index = 0; index < sizeof(invalid)/sizeof(invalid[0]); index++) {
+  strcpy(buffer,invalid[index]); memset(&result,0xa5,sizeof(result));
+  assert(!simplus_simaka_parse_response_for_test(&target,"00112233445566778899aabbccddeeff",buffer,&result));
+  for (byte = 0; byte < sizeof(result); byte++) { assert(((unsigned char*)&result)[byte] == 0); }
+ }
+ const char *valid = "HTTP/1.1 200 OK\r\n\r\n{\"protocolVersion\":1,\"agentInstanceId\":\"01234567-89ab-cdef-0123-456789abcdef\",\"deviceId\":\"usb-1-3\",\"exchangeId\":\"00112233445566778899aabbccddeeff\",\"result\":{\"state\":\"success\",\"res\":\"01020304\",\"ck\":\"000102030405060708090a0b0c0d0e0f\",\"ik\":\"101112131415161718191a1b1c1d1e1f\"}}";
+ for (index = 0; index < strlen(valid); index++) {
+  memcpy(buffer,valid,index); buffer[index] = '\0';
+  assert(!simplus_simaka_parse_response_for_test(&target,"00112233445566778899aabbccddeeff",buffer,&result));
+ }
+ strcpy(buffer,"HTTP/1.1 200 OK\r\n\r\n{\n  \"protocolVersion\": 1,\n  \"agentInstanceId\": \"01234567-89ab-cdef-0123-456789abcdef\",\n  \"deviceId\": \"usb-1-3\",\n  \"exchangeId\": \"00112233445566778899aabbccddeeff\",\n  \"result\": {\n    \"state\": \"success\",\n    \"res\": \"01020304\",\n    \"ck\": \"000102030405060708090a0b0c0d0e0f\",\n    \"ik\": \"101112131415161718191a1b1c1d1e1f\"\n  }\n}");
+ assert(simplus_simaka_parse_response_for_test(&target,"00112233445566778899aabbccddeeff",buffer,&result));
+ simplus_simaka_result_clear(&result);
+}
+
 int main(void)
 {
 	assert(strcmp(simplus_simaka_exchange_stage_name(
 		SIMPLUS_SIMAKA_EXCHANGE_CONNECT), "connect") == 0);
 	assert(strcmp(simplus_simaka_exchange_stage_name(
 		(simplus_simaka_exchange_stage_t)99), "not-started") == 0);
+	test_strict_protocol_and_truncation();
 	test_success();
 	test_sync_failure();
 	test_rejects_mismatch_and_noncanonical_hex();

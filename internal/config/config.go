@@ -16,7 +16,6 @@ import (
 const (
 	BackendSimulator = "simulator"
 	BackendHardware  = "hardware"
-	BackendReplay    = "replay"
 )
 
 type Config struct {
@@ -146,9 +145,9 @@ func (cfg Config) Validate() error {
 	}
 
 	switch cfg.Runtime.Backend {
-	case BackendSimulator, BackendHardware, BackendReplay:
+	case BackendSimulator, BackendHardware:
 	default:
-		return fmt.Errorf("runtime.backend must be simulator, hardware, or replay: %q", cfg.Runtime.Backend)
+		return fmt.Errorf("runtime.backend must be simulator or hardware: %q", cfg.Runtime.Backend)
 	}
 	if cfg.Runtime.Backend == BackendHardware {
 		if strings.TrimSpace(cfg.Runtime.AgentSocket) == "" || !filepath.IsAbs(cfg.Runtime.AgentSocket) {

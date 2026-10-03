@@ -99,9 +99,21 @@ func (client *Client) Deliver(ctx context.Context, delivery notification.Webhook
 	}
 	defer response.Body.Close()
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, providerResponseLimit+1))
-	if readErr != nil || len(responseBody) > providerResponseLimit || response.StatusCode < 200 || response.StatusCode >= 300 ||
-		!deliverySucceeded(delivery.Provider, responseBody) {
+	if readErr != nil || len(responseBody) > providerResponseLimit || response.StatusCode == 408 || response.StatusCode == 429 || response.StatusCode >= 500 {
+		return notification.WebhookDeliveryResult{Outcome: notification.WebhookNetworkFailed}, ErrNetworkFailed
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return notification.WebhookDeliveryResult{Outcome: notification.WebhookRejected}, ErrProviderRejected
+	}
+	code, known := deliveryCode(delivery.Provider, responseBody)
+	if !known || code != 0 {
+		// Only a confirmed invalid/removed WeCom webhook is permanent. Unknown
+		// provider codes and malformed replies may follow a successful delivery.
+		// https://docs.cloudbase.net/recipes/connect-wecom-webhook-cloud-function
+		if known && delivery.Provider == notification.WebhookProviderWeCom && code == 93000 {
+			return notification.WebhookDeliveryResult{Outcome: notification.WebhookRejected}, ErrProviderRejected
+		}
+		return notification.WebhookDeliveryResult{Outcome: notification.WebhookNetworkFailed}, ErrNetworkFailed
 	}
 	return notification.WebhookDeliveryResult{Outcome: notification.WebhookDelivered}, nil
 }
@@ -124,18 +136,24 @@ func deliveryBody(delivery notification.WebhookDeliveryRequest) ([]byte, error) 
 	}
 }
 
-func deliverySucceeded(provider notification.WebhookProvider, body []byte) bool {
+func deliveryCode(provider notification.WebhookProvider, body []byte) (int, bool) {
 	var response struct {
 		ErrCode *int `json:"errcode"`
 		Code    *int `json:"code"`
 	}
 	if json.Unmarshal(body, &response) != nil {
-		return false
+		return 0, false
 	}
 	if provider == notification.WebhookProviderWeCom {
-		return response.ErrCode != nil && *response.ErrCode == 0
+		if response.ErrCode != nil {
+			return *response.ErrCode, true
+		}
+		return 0, false
 	}
-	return provider == notification.WebhookProviderFeishu && response.Code != nil && *response.Code == 0
+	if provider == notification.WebhookProviderFeishu && response.Code != nil {
+		return *response.Code, true
+	}
+	return 0, false
 }
 
 var _ notification.WebhookPort = (*Client)(nil)

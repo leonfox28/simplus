@@ -101,8 +101,8 @@ services:
       - /run/netns:rw,noexec,nosuid,nodev,mode=0755,size=4m
     volumes:
       - type: bind
-        source: ./data/core
-        target: /var/lib/simplus
+        source: ./data/control-v2/mihomo
+        target: /var/lib/simplus/mihomo
       - type: volume
         source: agent-runtime
         target: /run/simplus-agent
@@ -124,7 +124,7 @@ services:
       retries: 6
       start_period: 15s
     restart: unless-stopped
-    stop_grace_period: 20s
+    stop_grace_period: 45s
     pids_limit: 512
     networks: [runtime]
 
@@ -147,7 +147,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=16m
     volumes:
       - type: bind
-        source: ./data/core
+        source: ./data/control-v2
         target: /var/lib/simplus
       - type: volume
         source: agent-runtime
@@ -173,11 +173,11 @@ services:
       retries: 6
       start_period: 15s
     restart: unless-stopped
-    stop_grace_period: 20s
+    stop_grace_period: 45s
     pids_limit: 256
     networks: [runtime]
 
-  bootstrap:
+  provision:
     image: ghcr.io/leonfox28/simplus-control:${SIMPLUS_IMAGE_TAG:?set SIMPLUS_IMAGE_TAG for source-tree development validation}
     user: "0:0"
     entrypoint: ["/usr/local/bin/simplusctl"]
@@ -197,7 +197,7 @@ services:
     read_only: true
     volumes:
       - type: bind
-        source: ./data/core
+        source: ./data/control-v2
         target: /var/lib/simplus
     depends_on:
       app:

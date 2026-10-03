@@ -130,21 +130,14 @@ wait_for_url "http://127.0.0.1:$api_port/api/v1/system/health" || {
   cat "$TMP_ROOT/normal.log" >&2
   fail 'API did not become reachable during normal startup'
 }
-wait_for_url "http://127.0.0.1:$api_port/api/v1/setup/status" || {
-  cat "$TMP_ROOT/normal.log" >&2
-  fail 'setup status API did not become reachable during normal startup'
-}
-curl --fail --silent "http://127.0.0.1:$api_port/api/v1/setup/status" | node -e '
+curl --fail --silent "http://127.0.0.1:$api_port/api/v1/system/health" | node -e '
   const chunks = []
-  process.stdin.on("data", (chunk) => chunks.push(chunk))
+  process.stdin.on("data", chunk => chunks.push(chunk))
   process.stdin.on("end", () => {
-    const setup = JSON.parse(Buffer.concat(chunks).toString("utf8"))
-    if (setup.installationState !== "uninitialized" || setup.phase !== "bootstrap-required") process.exit(1)
-    if (setup.setupRequired !== true || setup.businessApiAvailable !== false) process.exit(1)
-    if (setup.bootstrapGenerationAvailable !== false) process.exit(1)
-    if (setup.supportedFlows?.join(",") !== "create-new") process.exit(1)
+    const health = JSON.parse(Buffer.concat(chunks).toString("utf8"))
+    if (health.installationState !== "uninitialized") process.exit(1)
   })
-' || fail 'setup API did not return the fail-closed first-run boundary'
+' || fail 'new instance must wait for administrator provisioning'
 for locked_path in inventory hardware/topology; do
   locked_body="$TMP_ROOT/locked-${locked_path//\//-}.json"
   locked_status=$(curl --silent --output "$locked_body" --write-out '%{http_code}' \
@@ -156,15 +149,10 @@ for locked_path in inventory hardware/topology; do
     if (error.code !== "INSTANCE_NOT_INITIALIZED" || error.retryable !== false) process.exit(1)
   ' "$locked_body" || fail "$locked_path API did not return the stable setup lock error"
 done
-session_body="$TMP_ROOT/setup-session.json"
-session_status=$(curl --silent --output "$session_body" --write-out '%{http_code}' \
-  "http://127.0.0.1:$api_port/api/v1/setup/session")
-[[ $session_status == 401 ]] || fail "setup session status was $session_status without a cookie, expected 401"
-node -e '
-  const fs = require("node:fs")
-  const error = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-  if (error.code !== "SETUP_SESSION_UNAUTHORIZED" || error.retryable !== false) process.exit(1)
-' "$session_body" || fail 'setup session API did not reject an absent restricted session'
+for removed_path in setup/status setup/session; do
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:$api_port/api/v1/$removed_path")
+  [[ $status == 404 ]] || fail "removed setup route returned $status, expected 404"
+done
 wait_for_url "http://127.0.0.1:$web_port/" 300 || {
   cat "$TMP_ROOT/normal.log" >&2
   fail 'Vite did not become reachable during normal startup'

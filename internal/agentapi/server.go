@@ -43,24 +43,24 @@ func (response *ErrorResponse) Is(target error) bool {
 	return mapping[response.Code] == target
 }
 
-func NewHandler(monitor *Monitor, commands *CommandService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
-	return newHandler(monitor, commands, nil, nil, logger, false, smsBackends...)
+func NewHandler(monitor *Monitor, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
+	return newHandler(monitor, nil, nil, logger, false, smsBackends...)
 }
 
 // NewReadOnlyHardwareHandler is the production V1 hardware boundary. Its
 // signature deliberately provides no way to inject command or SMS backends.
 func NewReadOnlyHardwareHandler(monitor *Monitor, logger *slog.Logger) http.Handler {
-	return newHandler(monitor, nil, nil, nil, logger, true)
+	return newHandler(monitor, nil, nil, logger, true)
 }
 
 // NewManagedHardwareHandler exposes read-only discovery plus the narrowly
 // typed RF, equipment-identity, and optional SMS services. It still has no
 // route for arbitrary commands, paths, calls, or eUICC mutations.
 func NewManagedHardwareHandler(monitor *Monitor, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, smsBackends ...SMSBackend) http.Handler {
-	return newHandler(monitor, nil, rf, identity, logger, false, smsBackends...)
+	return newHandler(monitor, rf, identity, logger, false, smsBackends...)
 }
 
-func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
+func newHandler(monitor *Monitor, rf *RFService, identity *EquipmentIdentityService, logger *slog.Logger, hardwareReadOnly bool, smsBackends ...SMSBackend) http.Handler {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
@@ -73,9 +73,6 @@ func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, ident
 		features := []string{"hotplug-generation", "restart-fencing", "read-only-probe", "typed-capability-report"}
 		if hardwareReadOnly {
 			features = append(features, FeatureHardwareReadOnly)
-		}
-		if commands != nil {
-			features = append(features, "durable-command-outcomes", CommandRadioEnsureOff)
 		}
 		if rf != nil {
 			features = append(features, FeatureRFControl)
@@ -175,30 +172,6 @@ func newHandler(monitor *Monitor, commands *CommandService, rf *RFService, ident
 		}
 		writeJSON(w, http.StatusOK, response)
 	})
-	if commands != nil {
-		mux.HandleFunc("POST /v1/commands/radio/ensure-off", func(w http.ResponseWriter, r *http.Request) {
-			defer r.Body.Close()
-			decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
-			decoder.DisallowUnknownFields()
-			var request RadioEnsureOffRequest
-			if err := decoder.Decode(&request); err != nil {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid radio.ensure-off request"})
-				return
-			}
-			if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-				writeJSON(w, http.StatusBadRequest, ErrorResponse{Code: "REQUEST_INVALID", Detail: "request must contain one JSON object"})
-				return
-			}
-			response, err := commands.EnsureRadioOff(r.Context(), request)
-			if err != nil {
-				status, apiError := classifyCommandError(err)
-				logger.Warn("radio.ensure-off rejected", "code", apiError.Code, "error", err)
-				writeJSON(w, status, apiError)
-				return
-			}
-			writeJSON(w, http.StatusOK, response)
-		})
-	}
 	if rf != nil {
 		mux.HandleFunc("POST /v1/radio/state", func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
@@ -303,41 +276,6 @@ func classifyRFError(err error) (int, ErrorResponse) {
 	case errors.Is(err, ErrRFNotConfirmed):
 		status = http.StatusConflict
 		response = ErrorResponse{Code: "RF_STATE_NOT_CONFIRMED", Detail: "RF state change was not confirmed", Retryable: true}
-	}
-	return status, response
-}
-
-func classifyCommandError(err error) (int, ErrorResponse) {
-	status := http.StatusServiceUnavailable
-	response := ErrorResponse{Code: "COMMAND_UNAVAILABLE", Detail: "hardware command is unavailable", Retryable: true}
-	switch {
-	case errors.Is(err, ErrCommandRequestInvalid):
-		status = http.StatusBadRequest
-		response = ErrorResponse{Code: "REQUEST_INVALID", Detail: "invalid radio.ensure-off request"}
-	case errors.Is(err, ErrCommandAgentStale):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "AGENT_INSTANCE_STALE", Detail: "Agent instance changed; refresh before retrying", Retryable: true}
-	case errors.Is(err, ErrCommandSnapshotStale):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "SNAPSHOT_STALE", Detail: "hardware snapshot changed; refresh before retrying", Retryable: true}
-	case errors.Is(err, ErrCommandDeviceStale):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "DEVICE_GENERATION_STALE", Detail: "device generation changed; refresh before retrying", Retryable: true}
-	case errors.Is(err, ErrOutcomeFenceStale):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "RESOURCE_FENCE_STALE", Detail: "resource fence is stale"}
-	case errors.Is(err, ErrOutcomeReplayConflict):
-		status = http.StatusConflict
-		response = ErrorResponse{Code: "OPERATION_REPLAY_CONFLICT", Detail: "operation id was already used for different parameters"}
-	case errors.Is(err, ErrCommandUnsupported):
-		status = http.StatusUnprocessableEntity
-		response = ErrorResponse{Code: "COMMAND_UNSUPPORTED", Detail: "radio.ensure-off is unsupported for this device"}
-	case errors.Is(err, ErrOutcomePending):
-		response = ErrorResponse{Code: "OUTCOME_RECONCILIATION_PENDING", Detail: "a prior outcome must be reconciled", Retryable: true}
-	case errors.Is(err, ErrOutcomeLedgerFull):
-		response = ErrorResponse{Code: "OUTCOME_LEDGER_FULL", Detail: "Agent outcome ledger cannot accept another command"}
-	case errors.Is(err, ErrCommandPersistence):
-		response = ErrorResponse{Code: "OUTCOME_PERSIST_FAILED", Detail: "Agent could not persist the command outcome", Retryable: true}
 	}
 	return status, response
 }

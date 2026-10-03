@@ -45,6 +45,6 @@ func (service *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 		APIVersion:        APIVersion,
 		InstallationState: state,
 		Backend:           service.backend,
-		DatabaseCount:     5,
+		DatabaseCount:     1,
 	}, nil
 }

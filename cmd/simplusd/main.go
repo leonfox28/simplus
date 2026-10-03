@@ -11,13 +11,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
+	"github.com/leonfox28/simplus/internal/agentinventory"
 	"github.com/leonfox28/simplus/internal/api/httpapi"
 	"github.com/leonfox28/simplus/internal/application/auth"
 	"github.com/leonfox28/simplus/internal/application/calls"
+	"github.com/leonfox28/simplus/internal/application/connectivity"
 	"github.com/leonfox28/simplus/internal/application/contacts"
 	"github.com/leonfox28/simplus/internal/application/euicc"
 	"github.com/leonfox28/simplus/internal/application/health"
@@ -32,11 +35,20 @@ import (
 	vowifiapp "github.com/leonfox28/simplus/internal/application/vowifi"
 	"github.com/leonfox28/simplus/internal/buildinfo"
 	"github.com/leonfox28/simplus/internal/config"
+	"github.com/leonfox28/simplus/internal/connectivityagent"
 	"github.com/leonfox28/simplus/internal/control"
+	vowifidomain "github.com/leonfox28/simplus/internal/domain/vowifi"
+	"github.com/leonfox28/simplus/internal/feishu"
+	"github.com/leonfox28/simplus/internal/lifecycle"
+	mihomoassets "github.com/leonfox28/simplus/internal/mihomoassets"
+	"github.com/leonfox28/simplus/internal/modemagent"
 	"github.com/leonfox28/simplus/internal/notificationwebhook"
 	"github.com/leonfox28/simplus/internal/security/password"
 	"github.com/leonfox28/simplus/internal/security/secretbox"
+	"github.com/leonfox28/simplus/internal/simulator"
+	"github.com/leonfox28/simplus/internal/smstransport"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
+	"github.com/leonfox28/simplus/internal/subscriptionhttp"
 	"github.com/leonfox28/simplus/internal/vowifisupervisor"
 )
 
@@ -65,46 +77,59 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	databaseRoot := filepath.Join(cfg.Storage.DataRoot, "db")
+	if _, err := os.Lstat(filepath.Join(cfg.Storage.DataRoot, "db")); err == nil || !errors.Is(err, os.ErrNotExist) {
+		logger.Error("legacy data layout detected; use a new data root and preserve the old data")
+		return 2
+	}
+	databaseRoot := filepath.Join(cfg.Storage.DataRoot, "state")
 	stores, err := sqlitestore.OpenSet(ctx, databaseRoot)
 	if err != nil {
 		logger.Error("database initialization failed", "error", err)
 		return 1
 	}
 
+	defer stores.Close()
+	var workers sync.WaitGroup
+	defer func() { stop(); workers.Wait() }()
+
 	instanceSecretKeyPath := filepath.Join(databaseRoot, ".simplus-secrets-key-v1")
-	setupService, err := newSetupService(stores, instanceSecretKeyPath)
+	setupService, err := newSetupService(stores)
 	if err != nil {
 		logger.Error("Setup dependency configuration failed", "error", err)
-		_ = stores.Close()
 		return 1
 	}
 	authService := auth.NewService(stores, stores, password.NewDefaultHasher())
 	secretKeyring, err := secretbox.Open(instanceSecretKeyPath)
 	if err != nil {
 		logger.Error("instance secret key initialization failed", "error", err)
-		_ = stores.Close()
 		return 1
 	}
 	var inventoryService *inventory.Service
 	var hardwareAgentClient *agentapi.Client
 	var messageTransports []messaging.SMSTransport
 	mihomoSupervisorSocket := os.Getenv("SIMPLUS_MIHOMO_SUPERVISOR_SOCKET")
-	var voWiFiSupervisor *vowifisupervisor.Client
+	var voWiFiSupervisor interface {
+		vowifidomain.API
+		connectivity.VoWiFiSource
+	}
+	var cellularSource connectivity.CellularSource
+	modemOptions := modemapp.Options{RF: modemapp.DisabledHardware{}, Runtime: modemapp.DisabledHardware{}, Identity: modemapp.DisabledIdentity{}}
 	switch cfg.Runtime.Backend {
 	case config.BackendSimulator:
 		inventoryService = inventory.NewMultiSimulator()
+		simulatedRadio := simulator.NewCellular(inventoryService)
+		cellularSource = simulatedRadio
+		modemOptions.RF, modemOptions.Runtime = simulatedRadio, simulatedRadio
+		voWiFiSupervisor = simulator.NewVoWiFi()
 		const simulatorAgentInstanceID = "01234567-89ab-cdef-0123-456789abcdef"
 		simulatorClient, clientErr := agentapi.NewLocalSMSClient(simulatorAgentInstanceID, agentapi.NewDefaultSimulatorSMSBackend())
 		if clientErr != nil {
 			logger.Error("simulator SMS client configuration rejected", "error", clientErr)
-			_ = stores.Close()
 			return 2
 		}
-		simulatorGateway, gatewayErr := messaging.NewAgentSMSGateway(simulatorClient, simulatorAgentInstanceID)
+		simulatorGateway, gatewayErr := smstransport.NewAgentSMSGateway(simulatorClient)
 		if gatewayErr != nil {
 			logger.Error("simulator SMS gateway configuration rejected", "error", gatewayErr)
-			_ = stores.Close()
 			return 2
 		}
 		simulatorTransport := messaging.AgentNativeSMSTransport(simulatorGateway, simulatorGateway)
@@ -113,7 +138,6 @@ func run() int {
 		agentClient, clientErr := agentapi.NewClient(cfg.Runtime.AgentSocket)
 		if clientErr != nil {
 			logger.Error("hardware agent configuration rejected", "error", clientErr)
-			_ = stores.Close()
 			return 2
 		}
 		helloCtx, cancelHello := context.WithTimeout(ctx, 5*time.Second)
@@ -121,83 +145,61 @@ func run() int {
 		cancelHello()
 		if helloErr != nil {
 			logger.Error("hardware agent unavailable", "socket", cfg.Runtime.AgentSocket, "error", helloErr)
-			_ = stores.Close()
 			return 1
 		}
 		if policyErr := requireTypedHardwareAgent(hello); policyErr != nil {
 			logger.Error("hardware Agent does not satisfy the typed capability policy", "error", policyErr)
-			_ = stores.Close()
 			return 1
 		}
-		inventoryService = inventory.New(inventory.NewAgentSource(agentClient))
+		inventoryService = inventory.New(agentinventory.NewAgentSource(agentClient))
 		hardwareAgentClient = agentClient
-		agentSMSGateway, gatewayErr := messaging.NewAgentSMSGateway(agentClient, hello.AgentInstanceID)
+		agentSMSGateway, gatewayErr := smstransport.NewAgentSMSGateway(agentClient)
 		if gatewayErr != nil {
 			logger.Error("hardware Agent SMS gateway configuration rejected", "error", gatewayErr)
-			_ = stores.Close()
 			return 2
 		}
 		messageTransports = append(messageTransports, messaging.AgentNativeSMSTransport(agentSMSGateway, agentSMSGateway))
 		if mihomoSupervisorSocket != "" {
-			voWiFiSupervisor, clientErr = vowifisupervisor.NewClient(mihomoSupervisorSocket)
+			voWiFiClient, clientErr := vowifisupervisor.NewClient(mihomoSupervisorSocket)
+			voWiFiSupervisor = voWiFiClient
 			if clientErr != nil {
 				logger.Error("Host VoWiFi supervisor client configuration failed", "error", clientErr)
-				_ = stores.Close()
 				return 2
 			}
-			voWiFiGateway, gatewayErr := messaging.NewVoWiFiSMSGateway(voWiFiSupervisor)
+			voWiFiGateway, gatewayErr := smstransport.NewVoWiFiSMSGateway(voWiFiClient)
 			if gatewayErr != nil {
 				logger.Error("Host VoWiFi SMS gateway configuration failed", "error", gatewayErr)
-				_ = stores.Close()
 				return 2
 			}
 			messageTransports = append(messageTransports, messaging.HostVoWiFiSMSTransport(nil, voWiFiGateway, voWiFiGateway))
 		}
-	case config.BackendReplay:
-		logger.Error("replay backend is not implemented", "backend", cfg.Runtime.Backend)
-		_ = stores.Close()
-		return 2
 	default:
 		logger.Error("unsupported backend", "backend", cfg.Runtime.Backend)
-		_ = stores.Close()
 		return 2
 	}
-	managedModemService, err := modemapp.New(stores, inventoryService)
+	if hardwareAgentClient != nil {
+		cellularSource = connectivityagent.Source{Client: hardwareAgentClient}
+		controller := modemagent.NewAgentRFController(hardwareAgentClient)
+		modemOptions.RF, modemOptions.Runtime = controller, controller
+		modemOptions.Identity = modemagent.NewAgentEquipmentIdentityReader(hardwareAgentClient)
+	}
+	managedModemService, err := modemapp.New(stores, inventoryService, modemOptions)
 	if err != nil {
 		logger.Error("managed modem initialization failed", "error", err)
-		_ = stores.Close()
 		return 1
 	}
-	if hardwareAgentClient != nil {
-		managedModemService.UseRFController(modemapp.NewAgentRFController(hardwareAgentClient))
-		managedModemService.UseEquipmentIdentityReader(modemapp.NewAgentEquipmentIdentityReader(hardwareAgentClient))
+	var phoneNumbers lineapp.PhoneNumberSource = lineapp.DisabledPhoneNumbers{}
+	if voWiFiSupervisor != nil {
+		phoneNumbers = lineapp.NewVoWiFiPhoneNumberSource(voWiFiSupervisor)
 	}
-	managedLineService, err := lineapp.New(stores, inventoryService)
+	managedLineService, err := lineapp.New(stores, inventoryService, phoneNumbers)
 	if err != nil {
 		logger.Error("managed line initialization failed", "error", err)
-		_ = stores.Close()
 		return 1
-	}
-	if voWiFiSupervisor != nil {
-		managedLineService.UsePhoneNumberSource(lineapp.NewVoWiFiPhoneNumberSource(voWiFiSupervisor))
-	}
-	messageService, err := messaging.NewService(ctx, stores, managedLineService)
-	if err != nil {
-		logger.Error("messaging initialization failed", "error", err)
-		_ = stores.Close()
-		return 1
-	}
-	if cfg.Runtime.Backend == config.BackendSimulator {
-		if err := messageService.UseTransports(messageTransports...); err != nil {
-			logger.Error("Simulator SMS transport configuration failed", "error", err)
-			_ = stores.Close()
-			return 2
-		}
 	}
 	contactService, err := contacts.New(stores)
 	if err != nil {
 		logger.Error("contacts initialization failed", "error", err)
-		_ = stores.Close()
 		return 1
 	}
 	var callService *calls.Service
@@ -206,161 +208,190 @@ func run() int {
 		callService, err = calls.New(ctx, stores, managedLineService)
 		if err != nil {
 			logger.Error("calls initialization failed", "error", err)
-			_ = stores.Close()
 			return 1
 		}
 		euiccService, err = euicc.New(stores)
 		if err != nil {
 			logger.Error("eUICC initialization failed", "error", err)
-			_ = stores.Close()
 			return 1
 		}
 	}
 	realtimeHub := realtime.NewHub()
 	webhookClient := notificationwebhook.NewClient()
+	feishuClient := feishu.NewFeishuClient()
 	notificationService, err := notificationapp.New(notificationapp.Dependencies{
 		Store: stores, Secrets: secretKeyring, Webhooks: webhookClient,
+		ProcessContext: ctx, Registrar: feishuClient, Messenger: feishuClient, OnChange: func() { realtimeHub.Publish([]realtime.Topic{realtime.TopicNotifications}, "") },
 	})
 	if err != nil {
 		logger.Error("notification dependency configuration failed", "error", err)
-		_ = stores.Close()
 		return 1
 	}
-	feishuClient := notificationapp.NewFeishuClient()
-	notificationService.ConfigureFeishuBinding(ctx, feishuClient, feishuClient, func() {
-		realtimeHub.Publish([]realtime.Topic{realtime.TopicNotifications}, "")
+	defer notificationService.Close()
+
+	workers.Go(func() {
+		notificationService.Run(ctx, func() { realtimeHub.Publish([]realtime.Topic{realtime.TopicNotifications}, "") }, func(err error) { logger.Warn("notification worker failed", "error", err) })
 	})
 	mihomoRoot := filepath.Join(cfg.Storage.DataRoot, "mihomo")
-	mihomoCoreManager := mihomoapp.NewCoreManager(mihomoRoot)
-	mihomoConfigManager := mihomoapp.NewConfigManager(mihomoRoot, stores, mihomoCoreManager)
+	mihomoCoreManager := mihomoassets.NewCoreManager(mihomoRoot)
+	mihomoConfigManager := mihomoassets.NewConfigManager(mihomoRoot, stores, mihomoCoreManager)
 	mihomoController, controllerErr := mihomoControllerAddress(cfg.Server.Listen)
 	if controllerErr != nil {
 		logger.Error("Mihomo controller address derivation failed", "error", controllerErr)
-		_ = stores.Close()
 		return 1
 	}
-	mihomoDashboardManager := mihomoapp.NewDashboardManager(mihomoRoot, mihomoController)
+	mihomoDashboardManager := mihomoassets.NewDashboardManager(mihomoRoot, mihomoController)
 	mihomoDashboardStatus, dashboardErr := mihomoDashboardManager.Ensure()
 	if dashboardErr != nil {
 		logger.Error("Mihomo dashboard initialization failed", "error", dashboardErr)
-		_ = stores.Close()
 		return 1
 	}
 	mihomoConfigManager.ConfigureDashboard(mihomoDashboardStatus)
 	mihomoSupervisor, supervisorErr := newMihomoSupervisor(mihomoRoot, mihomoSupervisorSocket)
 	if supervisorErr != nil {
 		logger.Error("Mihomo supervisor configuration failed", "error", supervisorErr)
-		_ = stores.Close()
 		return 2
+	}
+	if owned, ok := mihomoSupervisor.(interface{ Close(context.Context) error }); ok {
+		defer func() {
+			shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := owned.Close(shutdown); err != nil {
+				logger.Warn("owned Mihomo cleanup failed", "error", err)
+			}
+		}()
 	}
 	mihomoRuntimeManager, runtimeManagerErr := mihomoapp.NewRuntimeManager(mihomoRoot, stores, mihomoConfigManager, mihomoCoreManager, mihomoSupervisor)
 	if runtimeManagerErr != nil {
 		logger.Error("Mihomo runtime manager dependency configuration failed", "error", runtimeManagerErr)
-		_ = stores.Close()
 		return 1
 	}
-	mihomoSubscriptionService := mihomoapp.NewSubscriptionService(stores, secretKeyring, mihomoConfigManager)
+	mihomoSubscriptionService, err := mihomoapp.NewSubscriptionService(stores, secretKeyring, subscriptionhttp.New(), mihomoConfigManager)
+	if err != nil {
+		logger.Error("Mihomo subscription dependencies invalid", "error", err)
+		return 2
+	}
 	lineEgressService := lineegressapp.New(stores, managedLineService, mihomoRuntimeManager)
 	var voWiFiService *vowifiapp.Service
-	if cfg.Runtime.Backend == config.BackendHardware && voWiFiSupervisor != nil {
+	if voWiFiSupervisor != nil {
 		voWiFiService, err = vowifiapp.New(stores, managedLineService, lineEgressService, mihomoRuntimeManager, voWiFiSupervisor)
 		if err != nil {
 			logger.Error("Host VoWiFi service configuration failed", "error", err)
-			_ = stores.Close()
 			return 2
 		}
-		go voWiFiService.Run(ctx, 10*time.Second, func(reconcileErr error) {
-			if reconcileErr != nil {
-				logger.Warn("Host VoWiFi desired-state reconciliation failed", "error", reconcileErr)
-				return
-			}
-			realtimeHub.Publish([]realtime.Topic{realtime.TopicVoWiFi}, "")
+		workers.Go(func() {
+			voWiFiService.Run(ctx, 10*time.Second, func(reconcileErr error) {
+				if reconcileErr != nil {
+					logger.Warn("Host VoWiFi desired-state reconciliation failed", "error", reconcileErr)
+					return
+				}
+				realtimeHub.Publish([]realtime.Topic{realtime.TopicVoWiFi}, "")
+			})
 		})
 		for index := range messageTransports {
 			messageTransports[index] = messageTransports[index].UseHostVoWiFiAvailability(voWiFiService)
 		}
-		if err := messageService.UseTransports(messageTransports...); err != nil {
-			logger.Error("Host VoWiFi SMS transport configuration failed", "error", err)
-			_ = stores.Close()
-			return 2
-		}
 	}
-	if cfg.Runtime.Backend == config.BackendHardware && voWiFiService == nil {
-		if err := messageService.UseTransports(messageTransports...); err != nil {
-			logger.Error("hardware Agent SMS transport configuration failed", "error", err)
-			_ = stores.Close()
-			return 2
-		}
-	}
-	smsSyncCoordinator, err := messaging.NewSyncCoordinator(messageService, notificationService, realtimeHub)
+	messageService, err := messaging.NewService(ctx, stores, managedLineService, messageTransports...)
 	if err != nil {
-		logger.Error("SMS synchronization coordinator configuration failed", "error", err)
-		_ = stores.Close()
+		logger.Error("messaging initialization failed", "error", err)
 		return 1
 	}
-	var agentChangeCoordinator *inventory.AgentChangeCoordinator
+	smsSyncCoordinator, err := messaging.NewSyncCoordinator(messageService, realtimeHub)
+	if err != nil {
+		logger.Error("SMS synchronization coordinator configuration failed", "error", err)
+		return 1
+	}
+	var agentChangeCoordinator *agentinventory.AgentChangeCoordinator
 	if hardwareAgentClient != nil {
-		agentChangeCoordinator, err = inventory.NewAgentChangeCoordinator(hardwareAgentClient, realtimeHub)
+		agentChangeCoordinator, err = agentinventory.NewAgentChangeCoordinator(hardwareAgentClient, realtimeHub)
 		if err != nil {
 			logger.Error("hardware Agent change coordinator configuration failed", "error", err)
-			_ = stores.Close()
 			return 1
 		}
 	}
-	go smsSyncCoordinator.Run(ctx, 2*time.Second, func(report messaging.SyncReport) {
-		if report.SyncError != nil {
-			logger.Warn("SMS synchronization failed", "error", report.SyncError)
-		}
-		if report.DurableChange {
-			logger.Info("SMS synchronization completed",
-				"inbound_persisted", report.Result.Persisted, "inbound_already_known", report.Result.AlreadyKnown,
-				"inbound_acknowledged", report.Result.Acknowledged, "outbound_sent", report.Result.OutboundSent,
-				"outbound_failed", report.Result.OutboundFailed, "outbound_unconfirmed", report.Result.OutboundUnconfirmed,
-				"outbound_reports_acknowledged", report.Result.OutboundReportsAcknowledged)
-		}
-		if report.NotificationError != nil {
-			logger.Warn("inbound SMS notification failed", "error", report.NotificationError)
-		}
-	})
-	if agentChangeCoordinator != nil {
-		go agentChangeCoordinator.Run(ctx, func(report inventory.AgentChangeReport) {
-			switch report.Operation {
-			case inventory.AgentChangeSnapshot:
-				logger.Warn("hardware Agent snapshot watch initialization failed", "error", report.Error)
-			case inventory.AgentChangeWatch:
-				logger.Warn("hardware Agent change watch failed", "error", report.Error)
+	workers.Go(func() {
+		smsSyncCoordinator.Run(ctx, 2*time.Second, func(report messaging.SyncReport) {
+			if report.SyncError != nil {
+				logger.Warn("SMS synchronization failed", "error", report.SyncError)
+			}
+			if report.DurableChange {
+				logger.Info("SMS synchronization completed",
+					"inbound_persisted", report.Result.Persisted, "inbound_already_known", report.Result.AlreadyKnown,
+					"inbound_acknowledged", report.Result.Acknowledged, "outbound_sent", report.Result.OutboundSent,
+					"outbound_failed", report.Result.OutboundFailed, "outbound_unconfirmed", report.Result.OutboundUnconfirmed,
+					"outbound_reports_acknowledged", report.Result.OutboundReportsAcknowledged)
 			}
 		})
+	})
+	if agentChangeCoordinator != nil {
+		workers.Go(func() {
+			agentChangeCoordinator.Run(ctx, func(report agentinventory.AgentChangeReport) {
+				switch report.Operation {
+				case agentinventory.AgentChangeSnapshot:
+					logger.Warn("hardware Agent snapshot watch initialization failed", "error", report.Error)
+				case agentinventory.AgentChangeWatch:
+					logger.Warn("hardware Agent change watch failed", "error", report.Error)
+				}
+			})
+		})
 	}
-	apiServer := httpapi.New(health.New(stores, cfg.Runtime.Backend), setupService, inventoryService, logger, authService, messageService, contactService)
-	apiServer = httpapi.WithManagedModems(apiServer, managedModemService)
-	apiServer = httpapi.WithManagedLines(apiServer, managedLineService)
+	if cellularSource != nil {
+		monitor, monitorErr := connectivity.NewCellularMonitor(stores, stores, cellularSource)
+		if monitorErr != nil {
+			logger.Error("cellular monitor configuration failed", "error", monitorErr)
+			return 2
+		}
+		workers.Go(func() {
+			monitor.Run(ctx, func(err error) { logger.Warn("cellular monitoring unavailable", "error", err) })
+		})
+	}
+	if voWiFiSupervisor != nil {
+		monitor, monitorErr := connectivity.NewVoWiFiMonitor(stores, stores, voWiFiSupervisor)
+		if monitorErr != nil {
+			logger.Error("VoWiFi monitor configuration failed", "error", monitorErr)
+			return 2
+		}
+		workers.Go(func() {
+			monitor.Run(ctx, func(err error) {
+				if err != nil {
+					logger.Warn("VoWiFi monitoring unavailable", "error", err)
+				}
+			})
+		})
+	}
+	dependencies := httpapi.Dependencies{
+		Health: health.New(stores, cfg.Runtime.Backend), Setup: setupService, Inventory: inventoryService,
+		Auth: authService, Messages: messageService, Contacts: contactService, Logger: logger,
+		Modems: managedModemService, Lines: managedLineService, LineEgress: lineEgressService,
+		MihomoCore: mihomoCoreManager, MihomoSubscriptions: mihomoSubscriptionService,
+		MihomoConfig: mihomoConfigManager, MihomoRuntime: mihomoRuntimeManager, MihomoDashboard: mihomoDashboardManager,
+		Notifications: notificationService, Realtime: realtimeHub,
+	}
 	if callService != nil {
-		apiServer = httpapi.WithCalls(apiServer, callService)
+		dependencies.Calls = callService
 	}
 	if euiccService != nil {
-		apiServer = httpapi.WithEUICC(apiServer, euiccService)
+		dependencies.Euicc = euiccService
 	}
-	apiServer = httpapi.WithMihomoCore(apiServer, mihomoCoreManager)
-	apiServer = httpapi.WithMihomoSubscriptions(apiServer, mihomoSubscriptionService)
-	apiServer = httpapi.WithLineEgress(apiServer, lineEgressService)
 	if voWiFiService != nil {
-		apiServer = httpapi.WithVoWiFi(apiServer, voWiFiService)
+		dependencies.Vowifi = voWiFiService
 	}
-	apiServer = httpapi.WithMihomoConfig(apiServer, mihomoConfigManager)
-	apiServer = httpapi.WithMihomoRuntime(apiServer, mihomoRuntimeManager)
-	apiServer = httpapi.WithMihomoDashboard(apiServer, mihomoDashboardManager)
-	apiServer = httpapi.WithNotifications(apiServer, notificationService)
-	apiServer = httpapi.WithRealtime(apiServer, realtimeHub)
+	apiServer, err := httpapi.NewServer(dependencies)
+	if err != nil {
+		logger.Error("HTTP dependencies invalid", "error", err)
+		return 2
+	}
 	handler, err := applicationHandler(httpapi.Router(apiServer), os.Getenv("SIMPLUS_WEB_ROOT"))
 	if err != nil {
 		logger.Error("Web root configuration failed", "error", err)
-		_ = stores.Close()
 		return 2
 	}
+	var requests lifecycle.Requests
 	server := &http.Server{
 		Addr:              cfg.Server.Listen,
-		Handler:           handler,
+		Handler:           requests.Handler(handler),
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -373,13 +404,12 @@ func run() int {
 	controlListener, err := control.ListenRootOnly(controlPath, 0)
 	if err != nil {
 		logger.Error("root control socket bind failed", "path", controlPath, "error", err)
-		if closeErr := stores.Close(); closeErr != nil {
-			logger.Error("database close failed after control socket error", "error", closeErr)
-		}
+
 		return 1
 	}
 	controlServer := &http.Server{
-		Handler:           control.NewBootstrapHandler(setupService, logger),
+		Handler:           requests.Handler(control.NewProvisionHandler(setupService, logger)),
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -391,9 +421,7 @@ func run() int {
 	if err != nil {
 		logger.Error("control plane bind failed", "address", cfg.Server.Listen, "error", err)
 		_ = controlListener.Close()
-		if closeErr := stores.Close(); closeErr != nil {
-			logger.Error("database close failed after bind error", "error", closeErr)
-		}
+
 		return 1
 	}
 	logger.Info("control plane listening",
@@ -425,18 +453,22 @@ func run() int {
 		}
 	}
 
+	requests.StopAdmission()
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := errors.Join(server.Shutdown(shutdownCtx), controlServer.Shutdown(shutdownCtx)); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 		exitCode = 1
 	}
+	_ = server.Close()
+	_ = controlServer.Close()
 	cancel()
+	requests.Wait()
+	apiServer.Wait()
+	workers.Wait()
+	notificationService.Close()
 	if exitCode == 0 {
 		logger.Info("control plane stopped")
-	}
-	if err := stores.Close(); err != nil {
-		logger.Error("database close failed", "error", err)
-		exitCode = 1
 	}
 	return exitCode
 }
@@ -469,7 +501,7 @@ func requireTypedHardwareAgent(hello agentapi.Hello) error {
 			equipmentIdentity = true
 		case agentapi.FeatureSMS:
 			sms = true
-		case agentapi.CommandRadioEnsureOff, "durable-command-outcomes":
+		case "radio.ensure-off", "durable-command-outcomes":
 			return fmt.Errorf("Agent advertises forbidden mutation feature %q", feature)
 		}
 	}

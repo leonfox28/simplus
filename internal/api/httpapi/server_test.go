@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	notificationdomain "github.com/leonfox28/simplus/internal/domain/notification"
+
+	"github.com/leonfox28/simplus/internal/smstransport"
 
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/api/openapi"
@@ -36,7 +39,6 @@ import (
 	modemdomain "github.com/leonfox28/simplus/internal/domain/modem"
 	vowifidomain "github.com/leonfox28/simplus/internal/domain/vowifi"
 	"github.com/leonfox28/simplus/internal/security/password"
-	storagefs "github.com/leonfox28/simplus/internal/storage/filesystem"
 	sqlitestore "github.com/leonfox28/simplus/internal/storage/sqlite"
 )
 
@@ -71,7 +73,7 @@ func (*testNotificationManager) Delete(context.Context, string) error { return n
 func (*testNotificationManager) Test(context.Context, string) (notificationapp.ChannelView, error) {
 	return notificationapp.ChannelView{}, nil
 }
-func (*testNotificationManager) Notify(context.Context, string, string) error { return nil }
+func (*testNotificationManager) Enqueue(context.Context, notificationdomain.Event) error { return nil }
 func (manager *testNotificationManager) FeishuBindingStatus() notificationapp.BindingView {
 	return manager.state
 }
@@ -272,54 +274,6 @@ type testSetupSecretProtector struct{}
 
 func (testSetupSecretProtector) Encrypt(label string, plaintext []byte) ([]byte, error) {
 	return append([]byte(label+":"), plaintext...), nil
-}
-
-func newStatusSetupService(t *testing.T, store setupapp.StateStore) *setupapp.Service {
-	t.Helper()
-	service, err := setupapp.New(setupapp.Dependencies{StateStore: store})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service
-}
-
-func newFullSetupService(t *testing.T, stores *sqlitestore.Set) *setupapp.Service {
-	t.Helper()
-	service, err := setupapp.New(setupapp.Dependencies{
-		StateStore:         stores,
-		AuthorizationStore: stores,
-		AdministratorStore: stores,
-		PasswordHasher:     password.NewDefaultHasher(),
-		StorageStore:       stores,
-		DirectoryPreparer: func(path string) (setupapp.DirectoryIdentity, error) {
-			identity, err := storagefs.PreparePrivateDirectory(path)
-			if err != nil {
-				return setupapp.DirectoryIdentity{}, err
-			}
-			return setupapp.DirectoryIdentity{Path: identity.Path, Device: identity.Device, Inode: identity.Inode}, nil
-		},
-		ManagementTLSStore: stores,
-		SecretProtectorOpener: func() (setupapp.SecretProtector, error) {
-			return testSetupSecretProtector{}, nil
-		},
-		LocalCAGenerator: func(now time.Time, sans []string) (setupapp.LocalCABundle, error) {
-			return setupapp.LocalCABundle{
-				CACertificatePEM:   []byte("test-ca-certificate"),
-				CAPrivateKeyPEM:    []byte("test-ca-private-key"),
-				LeafCertificatePEM: []byte("test-leaf-certificate"),
-				LeafPrivateKeyPEM:  []byte("test-leaf-private-key"),
-				RootFingerprint:    strings.Repeat("a", 64),
-				LeafNotAfter:       now.Add(90 * 24 * time.Hour),
-				SANs:               append([]string(nil), sans...),
-			}, nil
-		},
-		HardwareReviewStore: stores,
-		CompletionStore:     stores,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service
 }
 
 const testBusinessLineID = "line_AQEBAQEBAQEBAQEBAQEBAQ"
@@ -638,257 +592,8 @@ func TestSystemHealthStartsFailClosedAndUninitialized(t *testing.T) {
 	if body.InstallationState != openapi.InstallationState("uninitialized") {
 		t.Fatalf("installationState = %q", body.InstallationState)
 	}
-	if body.DatabaseCount != 5 {
+	if body.DatabaseCount != 1 {
 		t.Fatalf("databaseCount = %d", body.DatabaseCount)
-	}
-}
-
-func TestSetupStatusExposesBootstrapBoundary(t *testing.T) {
-	stores, err := sqlitestore.OpenSet(context.Background(), filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stores.Close()
-	handler := newAuthorizedTestHandler(t, stores)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil)
-	request.Host = "127.0.0.1:8080"
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	var body openapi.SetupStatusResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.InstallationState != openapi.InstallationStateUninitialized || body.Phase != openapi.SetupPhaseBootstrapRequired {
-		t.Fatalf("setup status = %#v", body)
-	}
-	if !body.SetupRequired || body.BusinessApiAvailable || body.BootstrapGenerationAvailable {
-		t.Fatalf("unexpected setup boundary = %#v", body)
-	}
-	if len(body.SupportedFlows) != 1 || body.SupportedFlows[0] != openapi.CreateNew {
-		t.Fatalf("supported flows = %#v", body.SupportedFlows)
-	}
-}
-
-func TestBootstrapExchangeCreatesOneTimePersistentSetupSession(t *testing.T) {
-	stores, err := sqlitestore.OpenSet(context.Background(), filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stores.Close()
-	setupService := newFullSetupService(t, stores)
-	grant, err := setupService.GenerateBootstrap(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := newAuthorizedTestHandler(t, stores)
-
-	consume := func() *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodPost, "/api/v1/setup/bootstrap", strings.NewReader(`{"bootstrapCode":"`+grant.Code+`"}`))
-		request.Host = "127.0.0.1:8080"
-		request.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
-		return response
-	}
-	response := consume()
-	if response.Code != http.StatusOK {
-		t.Fatalf("consume status = %d, body = %s", response.Code, response.Body.String())
-	}
-	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookies = %#v", cookies)
-	}
-	cookie := cookies[0]
-	if cookie.Name != setupSessionCookieName || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/api/v1/setup" {
-		t.Fatalf("setup cookie = %#v", cookie)
-	}
-	if strings.Contains(response.Body.String(), cookie.Value) || strings.Contains(response.Body.String(), grant.Code) {
-		t.Fatal("setup response exposed an opaque credential in its body")
-	}
-	var session openapi.SetupSessionResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if !bool(session.Authorized) || session.SelectedFlow != openapi.CreateNew {
-		t.Fatalf("initial session = %#v", session)
-	}
-
-	if replay := consume(); replay.Code != http.StatusUnauthorized {
-		t.Fatalf("bootstrap replay status = %d, body = %s", replay.Code, replay.Body.String())
-	}
-
-	resumedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/setup/session", nil)
-	resumedRequest.Host = "127.0.0.1:8080"
-	resumedRequest.AddCookie(cookie)
-	resumedResponse := httptest.NewRecorder()
-	newAuthorizedTestHandler(t, stores).ServeHTTP(resumedResponse, resumedRequest)
-	if resumedResponse.Code != http.StatusOK {
-		t.Fatalf("resume status = %d, body = %s", resumedResponse.Code, resumedResponse.Body.String())
-	}
-	if err := json.Unmarshal(resumedResponse.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if session.SelectedFlow != openapi.CreateNew {
-		t.Fatalf("resumed flow response = %#v", session)
-	}
-
-	if _, err := setupService.GenerateBootstrap(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	revokedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(revokedResponse, resumedRequest)
-	if revokedResponse.Code != http.StatusUnauthorized {
-		t.Fatalf("revoked session status = %d, body = %s", revokedResponse.Code, revokedResponse.Body.String())
-	}
-}
-
-func TestSetupAdministratorRequiresSessionAndPersistsArgon2idCredential(t *testing.T) {
-	stores, err := sqlitestore.OpenSet(context.Background(), filepath.Join(t.TempDir(), "db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stores.Close()
-	setupService := newFullSetupService(t, stores)
-	grant, err := setupService.GenerateBootstrap(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := newAuthorizedTestHandler(t, stores)
-	bootstrapRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/bootstrap", strings.NewReader(`{"bootstrapCode":"`+grant.Code+`"}`))
-	bootstrapRequest.Host = "127.0.0.1:8080"
-	bootstrapRequest.Header.Set("Content-Type", "application/json")
-	bootstrapResponse := httptest.NewRecorder()
-	handler.ServeHTTP(bootstrapResponse, bootstrapRequest)
-	if bootstrapResponse.Code != http.StatusOK {
-		t.Fatalf("bootstrap status = %d, body = %s", bootstrapResponse.Code, bootstrapResponse.Body.String())
-	}
-	cookie := bootstrapResponse.Result().Cookies()[0]
-
-	const requestBody = `{"username":"Leon","password":"correct horse battery staple","passwordConfirmation":"correct horse battery staple","instanceDefaultLocale":"zh-CN"}`
-	unauthorizedRequest := httptest.NewRequest(http.MethodPut, "/api/v1/setup/administrator", strings.NewReader(requestBody))
-	unauthorizedRequest.Host = "127.0.0.1:8080"
-	unauthorizedRequest.Header.Set("Content-Type", "application/json")
-	unauthorizedResponse := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorizedResponse, unauthorizedRequest)
-	if unauthorizedResponse.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized status = %d, body = %s", unauthorizedResponse.Code, unauthorizedResponse.Body.String())
-	}
-
-	request := httptest.NewRequest(http.MethodPut, "/api/v1/setup/administrator", strings.NewReader(requestBody))
-	request.Host = "127.0.0.1:8080"
-	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(cookie)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	if strings.Contains(response.Body.String(), "correct horse") || strings.Contains(response.Body.String(), "$argon2id$") {
-		t.Fatal("administrator response exposed password material")
-	}
-	var session openapi.SetupSessionResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if !session.AdministratorConfigured || session.AdministratorUsername != "leon" || session.InstanceDefaultLocale != "zh-CN" {
-		t.Fatalf("administrator session = %#v", session)
-	}
-	credential, err := stores.ReadAdministratorCredential(context.Background(), "leon")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !credential.Found || !strings.HasPrefix(credential.PasswordHash, "$argon2id$v1$") || strings.Contains(credential.PasswordHash, "correct horse") {
-		t.Fatalf("stored credential = %#v", credential)
-	}
-
-	storageBody, err := json.Marshal(openapi.ConfigureSetupStorageRequest{RecordingsRoot: filepath.Join(stores.Root, "recordings")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	storageRequest := httptest.NewRequest(http.MethodPut, "/api/v1/setup/storage", bytes.NewReader(storageBody))
-	storageRequest.Host = "127.0.0.1:8080"
-	storageRequest.Header.Set("Content-Type", "application/json")
-	storageRequest.AddCookie(cookie)
-	storageResponse := httptest.NewRecorder()
-	handler.ServeHTTP(storageResponse, storageRequest)
-	if storageResponse.Code != http.StatusOK {
-		t.Fatalf("storage status = %d, body = %s", storageResponse.Code, storageResponse.Body.String())
-	}
-	if err := json.Unmarshal(storageResponse.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if !session.StorageConfigured || session.DataRoot != stores.Root || session.RecordingsRoot != filepath.Join(stores.Root, "recordings") {
-		t.Fatalf("storage session = %#v", session)
-	}
-
-	httpsRequest := httptest.NewRequest(http.MethodPut, "/api/v1/setup/https", strings.NewReader(`{"mode":"loopback-only","listenHost":"127.0.0.1","listenPort":8080,"subjectAlternativeNames":[]}`))
-	httpsRequest.Host = "127.0.0.1:8080"
-	httpsRequest.Header.Set("Content-Type", "application/json")
-	httpsRequest.AddCookie(cookie)
-	httpsResponse := httptest.NewRecorder()
-	handler.ServeHTTP(httpsResponse, httpsRequest)
-	if httpsResponse.Code != http.StatusOK {
-		t.Fatalf("HTTPS status = %d, body = %s", httpsResponse.Code, httpsResponse.Body.String())
-	}
-	if err := json.Unmarshal(httpsResponse.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if !session.HttpsConfigured || !session.HttpsConfirmed || session.HttpsMode != "loopback-only" || session.HttpsListenUrl != "http://127.0.0.1:8080" {
-		t.Fatalf("HTTPS session = %#v", session)
-	}
-
-	setupTopologyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/setup/hardware/topology", nil)
-	setupTopologyRequest.Host = "127.0.0.1:8080"
-	setupTopologyRequest.AddCookie(cookie)
-	setupTopologyResponse := httptest.NewRecorder()
-	handler.ServeHTTP(setupTopologyResponse, setupTopologyRequest)
-	if setupTopologyResponse.Code != http.StatusOK {
-		t.Fatalf("setup topology status = %d, body = %s", setupTopologyResponse.Code, setupTopologyResponse.Body.String())
-	}
-	var setupTopology openapi.HardwareTopologyResponse
-	if err := json.Unmarshal(setupTopologyResponse.Body.Bytes(), &setupTopology); err != nil {
-		t.Fatal(err)
-	}
-	if len(setupTopology.SubscriptionProfiles) != 1 || setupTopology.SubscriptionProfiles[0].Id != "simulator-profile-1" {
-		t.Fatalf("setup topology = %#v", setupTopology)
-	}
-
-	hardwareRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/hardware/confirm", nil)
-	hardwareRequest.Host = "127.0.0.1:8080"
-	hardwareRequest.AddCookie(cookie)
-	hardwareResponse := httptest.NewRecorder()
-	handler.ServeHTTP(hardwareResponse, hardwareRequest)
-	if hardwareResponse.Code != http.StatusOK {
-		t.Fatalf("hardware confirmation status = %d, body = %s", hardwareResponse.Code, hardwareResponse.Body.String())
-	}
-	if err := json.Unmarshal(hardwareResponse.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	if !session.HardwareReviewed || session.HardwareDeviceCount != 1 || session.HardwareLineCount != 1 || len(session.HardwareInventoryDigest) != 64 {
-		t.Fatalf("hardware session = %#v", session)
-	}
-	completionRequest := httptest.NewRequest(http.MethodPost, "/api/v1/setup/complete", nil)
-	completionRequest.Host = "127.0.0.1:8080"
-	completionRequest.AddCookie(cookie)
-	completionResponse := httptest.NewRecorder()
-	handler.ServeHTTP(completionResponse, completionRequest)
-	if completionResponse.Code != http.StatusOK {
-		t.Fatalf("setup completion status = %d, body = %s", completionResponse.Code, completionResponse.Body.String())
-	}
-	var completion openapi.SetupCompletionResponse
-	if err := json.Unmarshal(completionResponse.Body.Bytes(), &completion); err != nil {
-		t.Fatal(err)
-	}
-	if completion.InstallationState != openapi.SetupCompletionResponseInstallationStateReady || !bool(completion.LoginRequired) {
-		t.Fatalf("completion = %#v", completion)
-	}
-	status, err := stores.InstallationState(context.Background())
-	if err != nil || status != setupapp.InstallationReady {
-		t.Fatalf("installation state after completion = %q/%v", status, err)
 	}
 }
 
@@ -913,25 +618,6 @@ func TestBusinessAPIsStayLockedUntilSetupCompletes(t *testing.T) {
 	}
 }
 
-func TestSetupStatusReturnsStableErrorCode(t *testing.T) {
-	handler := newTestHandler(t, failingStateStore{}, newTestInventory())
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil)
-	request.Host = "127.0.0.1:8080"
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	var body openapi.ApiError
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Code != "SETUP_STATUS_UNAVAILABLE" || !body.Retryable {
-		t.Fatalf("error body = %#v", body)
-	}
-}
-
 func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 	ctx := context.Background()
 	stores, err := sqlitestore.OpenSet(ctx, filepath.Join(t.TempDir(), "db"))
@@ -946,7 +632,7 @@ func TestAdministratorLoginSessionCSRFAndLogout(t *testing.T) {
 	if err := stores.ConfigureInitialAdministrator(ctx, "admin", hash, "zh-CN", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
+	if _, err := stores.DB.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -1051,7 +737,7 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
+	if _, err := stores.DB.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
 	inventoryService := inventory.NewSimulator()
@@ -1060,7 +746,7 @@ func TestMessageSendAndHistoryUseBusinessAuthCSRFAndIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	simulatorGateway, err := messageapp.NewAgentSMSGateway(simulatorClient, simulatorAgentInstanceID)
+	simulatorGateway, err := smstransport.NewAgentSMSGateway(simulatorClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1309,7 +995,7 @@ func TestContactsCRUDUsesBusinessAuthCSRFAndDurableStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
+	if _, err := stores.DB.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
 	contacts, err := contactapp.New(stores)
@@ -1370,7 +1056,7 @@ func TestSimulatorCallHTTPFlowRejectsEmergencyAndPersistsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stores.Close()
-	if _, err := stores.Core.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
+	if _, err := stores.DB.ExecContext(ctx, `UPDATE installation_state SET state = 'ready' WHERE singleton = 1`); err != nil {
 		t.Fatal(err)
 	}
 	lines := inventory.NewSimulator()
@@ -1802,18 +1488,6 @@ func TestRouterRejectsUntrustedHostHeader(t *testing.T) {
 	}
 }
 
-func TestRequestManagementURLUsesValidatedRequestAuthority(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "http://192.168.50.10:8080/api/v1/setup/complete", nil)
-	request.Host = "192.168.50.10:8080"
-	if actual := requestManagementURL(request); actual != "http://192.168.50.10:8080" {
-		t.Fatalf("management URL = %q", actual)
-	}
-	request.TLS = &tls.ConnectionState{}
-	if actual := requestManagementURL(request); actual != "https://192.168.50.10:8080" {
-		t.Fatalf("TLS management URL = %q", actual)
-	}
-}
-
 func TestFeishuBindingRouterRequiresAuthAndCSRFUsesNoStoreAndHidesCredentials(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	manager := &testNotificationManager{state: notificationapp.BindingView{
@@ -1891,4 +1565,24 @@ func TestFeishuBindingRouterRequiresAuthAndCSRFUsesNoStoreAndHidesCredentials(t 
 	if cancelConflictResponse.Code != http.StatusConflict || !strings.Contains(cancelConflictResponse.Body.String(), `"code":"FEISHU_BINDING_NOT_CANCELLABLE"`) {
 		t.Fatalf("cancel conflict status=%d body=%s", cancelConflictResponse.Code, cancelConflictResponse.Body.String())
 	}
+}
+
+func newFullSetupService(t *testing.T, stores *sqlitestore.Set) *setupapp.Service {
+	t.Helper()
+	service, err := setupapp.New(setupapp.Dependencies{StateStore: stores, AdministratorStore: stores, PasswordHasher: password.NewDefaultHasher()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
+type testInstallationStatus struct{ store setupapp.StateStore }
+
+func (s testInstallationStatus) Status(ctx context.Context) (setupapp.Status, error) {
+	state, err := s.store.InstallationState(ctx)
+	return setupapp.Status{InstallationState: state, BusinessAPIAvailable: state == "ready", SetupRequired: state == "uninitialized"}, err
+}
+func newStatusSetupService(t *testing.T, store setupapp.StateStore) SetupManager {
+	t.Helper()
+	return testInstallationStatus{store}
 }

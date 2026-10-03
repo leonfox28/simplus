@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leonfox28/simplus/internal/smstransport"
+
 	"github.com/leonfox28/simplus/internal/agentapi"
 	"github.com/leonfox28/simplus/internal/application/inventory"
 	lineapp "github.com/leonfox28/simplus/internal/application/line"
@@ -122,7 +124,7 @@ func (inbox *failOnceInbox) AcknowledgeSMS(ctx context.Context, target InboxTarg
 	return inbox.Inbox.AcknowledgeSMS(ctx, target, messageID, operationID)
 }
 
-func newAgentGatewayForTest(t *testing.T, messages ...agentapi.SMSStoredMessage) (*AgentSMSGateway, *agentapi.SimulatorSMSBackend) {
+func newAgentGatewayForTest(t *testing.T, messages ...agentapi.SMSStoredMessage) (*smstransport.AgentSMSGateway, *agentapi.SimulatorSMSBackend) {
 	t.Helper()
 	const instanceID = "01234567-89ab-cdef-0123-456789abcdef"
 	backend := agentapi.NewSimulatorSMSBackend(messages...)
@@ -130,7 +132,7 @@ func newAgentGatewayForTest(t *testing.T, messages ...agentapi.SMSStoredMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gateway, err := NewAgentSMSGateway(client, instanceID)
+	gateway, err := smstransport.NewAgentSMSGateway(client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +500,7 @@ func TestHostVoWiFiSMSRequiresOnlineTransport(t *testing.T) {
 		return SendSMSResult{ProviderMessageID: "provider-" + command.OperationID}, nil
 	}))
 	request := SendRequest{OperationID: "operation-vowifi-sms-001", LineID: testManagedLineID1, Destination: "13800138000", Body: "VoWiFi"}
-	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(false), service.transports[0].Sender, noopInbox{})); err != nil {
+	if err := service.configureTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(false), service.transports[0].Sender, noopInbox{})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Send(context.Background(), request); !errors.Is(err, ErrTransportUnavailable) {
@@ -507,7 +509,7 @@ func TestHostVoWiFiSMSRequiresOnlineTransport(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("offline transport calls=%d", calls)
 	}
-	if err := service.UseTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), service.transports[0].Sender, noopInbox{})); err != nil {
+	if err := service.configureTransports(HostVoWiFiSMSTransport(messagingTransportAvailability(true), service.transports[0].Sender, noopInbox{})); err != nil {
 		t.Fatal(err)
 	}
 	request.OperationID = "operation-vowifi-sms-002"
@@ -548,7 +550,7 @@ func TestPerLineTransportResolverRequiresOneEligibleTransportAndNeverFallsBack(t
 		vowifiCalls++
 		return SendSMSResult{ProviderMessageID: "vowifi"}, nil
 	}), noopInbox{})
-	if err := service.UseTransports(native, vowifi); err != nil {
+	if err := service.configureTransports(native, vowifi); err != nil {
 		t.Fatal(err)
 	}
 	request := SendRequest{OperationID: "operation-resolver-0001", LineID: testManagedLineID1, Destination: "10086", Body: "test"}
@@ -559,7 +561,7 @@ func TestPerLineTransportResolverRequiresOneEligibleTransportAndNeverFallsBack(t
 		t.Fatalf("ambiguous calls native=%d vowifi=%d", nativeCalls, vowifiCalls)
 	}
 
-	if err := service.UseTransports(native); err != nil {
+	if err := service.configureTransports(native); err != nil {
 		t.Fatal(err)
 	}
 	request.OperationID = "operation-resolver-0002"
@@ -570,7 +572,7 @@ func TestPerLineTransportResolverRequiresOneEligibleTransportAndNeverFallsBack(t
 		t.Fatalf("fallback calls native=%d vowifi=%d", nativeCalls, vowifiCalls)
 	}
 
-	if err := service.UseTransports(SMSTransport{Name: "none", Eligible: func(inventory.Line) bool { return false }, Sender: vowifi.Sender, Inbox: noopInbox{}}); err != nil {
+	if err := service.configureTransports(SMSTransport{Name: "none", Eligible: func(inventory.Line) bool { return false }, Sender: vowifi.Sender, Inbox: noopInbox{}}); err != nil {
 		t.Fatal(err)
 	}
 	request.OperationID = "operation-resolver-0003"
@@ -608,7 +610,7 @@ func TestInboundTransportFailureDoesNotStarveAnotherLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := AgentNativeSMSTransport(senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) { return SendSMSResult{}, nil }), inbox)
-	if err := service.UseTransports(transport); err != nil {
+	if err := service.configureTransports(transport); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.SyncInbound(ctx)
@@ -698,7 +700,7 @@ func TestAgentGatewayPreservesUnknownSendOutcomeCode(t *testing.T) {
 		agentapi.ErrSMSOutcomeUnknown,
 		&agentapi.ErrorResponse{Code: "SMS_SEND_OUTCOME_UNKNOWN", Detail: "do not resend"},
 	} {
-		gateway, err := NewAgentSMSGateway(sendErrorSMSClient{err: transportErr}, instanceID)
+		gateway, err := smstransport.NewAgentSMSGateway(sendErrorSMSClient{err: transportErr})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -719,9 +721,9 @@ func TestAgentGatewayPreservesUnknownSendOutcomeCode(t *testing.T) {
 
 func TestAgentGatewayMapsMissingDeviceToStableStaleCode(t *testing.T) {
 	const instanceID = "01234567-89ab-cdef-0123-456789abcdef"
-	gateway, err := NewAgentSMSGateway(sendErrorSMSClient{err: &agentapi.ErrorResponse{
+	gateway, err := smstransport.NewAgentSMSGateway(sendErrorSMSClient{err: &agentapi.ErrorResponse{
 		Code: "SMS_DEVICE_NOT_FOUND", Detail: "device unavailable",
-	}}, instanceID)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -844,9 +846,6 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	if !errors.Is(err, ErrInboundSync) || first.Persisted != 1 || first.Acknowledged != 0 {
 		t.Fatalf("first sync = %#v, error = %v", first, err)
 	}
-	if len(first.receivedSMS) != 1 || first.receivedSMS[0].Sender != inbound.Sender || first.receivedSMS[0].Body != inbound.Body {
-		t.Fatalf("first received SMS notifications = %#v", first.receivedSMS)
-	}
 	messages, err := stores.ListSMS(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -860,9 +859,6 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	if second.AlreadyKnown != 1 || second.Acknowledged != 1 {
 		t.Fatalf("second sync = %#v", second)
-	}
-	if len(second.receivedSMS) != 0 {
-		t.Fatalf("replay returned received SMS notification = %#v", second.receivedSMS)
 	}
 	remaining, err := backend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
@@ -883,9 +879,6 @@ func TestInboundSyncPersistsBeforeAcknowledgeAndDeduplicatesRestart(t *testing.T
 	}
 	if restartResult.Persisted != 0 || restartResult.AlreadyKnown != 1 || restartResult.Acknowledged != 1 {
 		t.Fatalf("restart sync = %#v", restartResult)
-	}
-	if len(restartResult.receivedSMS) != 0 {
-		t.Fatalf("restart replay returned received SMS notification = %#v", restartResult.receivedSMS)
 	}
 	remaining, err = restartedBackend.ListSMS(ctx, agentapi.SMSListRequest{DeviceID: inbound.DeviceID})
 	if err != nil {
@@ -924,11 +917,6 @@ func TestInboundSyncReturnsOrderedNarrowReceivedSMSValues(t *testing.T) {
 	result, err := service.SyncInbound(ctx)
 	if err != nil || result.Persisted != 2 || result.Acknowledged != 2 {
 		t.Fatalf("sync result = %#v, error = %v", result, err)
-	}
-	if len(result.receivedSMS) != 2 ||
-		result.receivedSMS[0] != (receivedSMSNotification{Sender: inbound[0].Sender, Body: inbound[0].Body}) ||
-		result.receivedSMS[1] != (receivedSMSNotification{Sender: inbound[1].Sender, Body: inbound[1].Body}) {
-		t.Fatalf("received SMS notifications = %#v", result.receivedSMS)
 	}
 }
 
@@ -984,4 +972,32 @@ func TestInboundSyncDoesNotAcknowledgePersistenceFailure(t *testing.T) {
 	if len(remaining) != 1 || remaining[0].MessageID != inbound.MessageID {
 		t.Fatalf("Agent inbox was acknowledged after persistence failure: %#v", remaining)
 	}
+}
+
+func TestReplaySurvivesUnavailableInventoryAndMalformedSubmission(t *testing.T) {
+	calls := 0
+	service, _ := newTestService(t, senderFunc(func(context.Context, SendSMSCommand) (SendSMSResult, error) {
+		calls++
+		return SendSMSResult{}, nil // transport submitted but lost the receipt
+	}))
+	request := SendRequest{OperationID: "operation-lost-receipt", LineID: testManagedLineID1, Destination: "10086", Body: "synthetic"}
+	result, err := service.Send(t.Context(), request)
+	if err != nil || result.Message.Status != sms.StatusUnconfirmed {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	service.lines = unavailableLines{}
+	replay, err := service.Send(t.Context(), request)
+	if err != nil || !replay.Replayed || replay.Message.ID != result.Message.ID || calls != 1 {
+		t.Fatalf("replay=%+v calls=%d error=%v", replay, calls, err)
+	}
+	request.Body = "changed"
+	if _, err := service.Send(t.Context(), request); !errors.Is(err, sms.ErrOperationConflict) {
+		t.Fatalf("conflict=%v", err)
+	}
+}
+
+type unavailableLines struct{}
+
+func (unavailableLines) Topology(context.Context) (inventory.Topology, error) {
+	return inventory.Topology{}, errors.New("Agent unavailable")
 }

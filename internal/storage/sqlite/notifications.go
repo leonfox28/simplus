@@ -9,13 +9,14 @@ import (
 	"time"
 
 	domain "github.com/leonfox28/simplus/internal/domain/notification"
+	coredb "github.com/leonfox28/simplus/internal/storage/sqlite/generated/core"
 )
 
 const webhookNotificationColumns = `id,provider,display_name,webhook_ciphertext,webhook_hint,signing_secret_ciphertext,enabled,event_kinds,last_delivery_at_utc,last_delivery_status,last_error_code,created_at_utc,updated_at_utc`
 const feishuAppNotificationColumns = `id,display_name,app_id_ciphertext,app_secret_ciphertext,recipient_open_id_ciphertext,enabled,event_kinds,last_delivery_at_utc,last_delivery_status,last_error_code,created_at_utc,updated_at_utc`
 
 func (set *Set) ListNotificationChannels(ctx context.Context) ([]domain.Channel, error) {
-	webhookRows, err := set.Core.QueryContext(ctx, `SELECT `+webhookNotificationColumns+` FROM notification_channels`)
+	webhookRows, err := set.DB.QueryContext(ctx, `SELECT `+webhookNotificationColumns+` FROM notification_channels`)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +36,7 @@ func (set *Set) ListNotificationChannels(ctx context.Context) ([]domain.Channel,
 		return nil, err
 	}
 
-	appRows, err := set.Core.QueryContext(ctx, `SELECT `+feishuAppNotificationColumns+` FROM feishu_app_notification_channels`)
+	appRows, err := set.DB.QueryContext(ctx, `SELECT `+feishuAppNotificationColumns+` FROM feishu_app_notification_channels`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,14 +68,14 @@ func sortNotificationChannels(items []domain.Channel) {
 }
 
 func (set *Set) ReadNotificationChannel(ctx context.Context, id string) (domain.Channel, bool, error) {
-	item, err := scanWebhookNotificationChannel(set.Core.QueryRowContext(ctx, `SELECT `+webhookNotificationColumns+` FROM notification_channels WHERE id=?`, id))
+	item, err := scanWebhookNotificationChannel(set.DB.QueryRowContext(ctx, `SELECT `+webhookNotificationColumns+` FROM notification_channels WHERE id=?`, id))
 	if err == nil {
 		return item, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return domain.Channel{}, false, err
 	}
-	item, err = scanFeishuAppNotificationChannel(set.Core.QueryRowContext(ctx, `SELECT `+feishuAppNotificationColumns+` FROM feishu_app_notification_channels WHERE id=?`, id))
+	item, err = scanFeishuAppNotificationChannel(set.DB.QueryRowContext(ctx, `SELECT `+feishuAppNotificationColumns+` FROM feishu_app_notification_channels WHERE id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Channel{}, false, nil
 	}
@@ -147,7 +148,7 @@ func (set *Set) UpsertNotificationChannel(ctx context.Context, item domain.Chann
 	if err != nil {
 		return err
 	}
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -186,15 +187,28 @@ func (set *Set) UpsertNotificationChannel(ctx context.Context, item domain.Chann
 	if err != nil {
 		return err
 	}
+	q := coredb.New(tx)
+	if err := q.RemoveInactiveNotificationSubscriptions(ctx, coredb.RemoveInactiveNotificationSubscriptionsParams{ChannelID: item.ID, Enabled: int64(boolInt(item.Enabled)), EventKinds: string(events)}); err != nil {
+		return err
+	}
+	if err := q.AddNotificationSubscriptions(ctx, coredb.AddNotificationSubscriptionsParams{ChannelID: item.ID, Enabled: int64(boolInt(item.Enabled)), EventKinds: string(events), SubscribedAt: item.UpdatedAt.UnixMilli()}); err != nil {
+		return err
+	}
+	if err := coredb.New(tx).CancelChannelNotifications(ctx, coredb.CancelChannelNotificationsParams{ChannelID: item.ID, Enabled: int64(boolInt(item.Enabled)), EventKinds: string(events)}); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
 func (set *Set) DeleteNotificationChannel(ctx context.Context, id string) (bool, error) {
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
+	if err := coredb.New(tx).DeleteNotificationSubscriptions(ctx, id); err != nil {
+		return false, err
+	}
 	webhook, err := tx.ExecContext(ctx, `DELETE FROM notification_channels WHERE id=?`, id)
 	if err != nil {
 		return false, err
@@ -211,6 +225,9 @@ func (set *Set) DeleteNotificationChannel(ctx context.Context, id string) (bool,
 	if err != nil {
 		return false, err
 	}
+	if err := coredb.New(tx).CancelChannelNotifications(ctx, coredb.CancelChannelNotificationsParams{ChannelID: id, Enabled: 0, EventKinds: "[]"}); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -219,7 +236,7 @@ func (set *Set) DeleteNotificationChannel(ctx context.Context, id string) (bool,
 
 func (set *Set) RecordNotificationDelivery(ctx context.Context, id, status, errorCode string, at time.Time) error {
 	formatted := at.UTC().Format(time.RFC3339Nano)
-	tx, err := set.Core.BeginTx(ctx, nil)
+	tx, err := set.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

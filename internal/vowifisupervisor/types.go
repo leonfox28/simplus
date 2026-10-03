@@ -7,20 +7,22 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	domain "github.com/leonfox28/simplus/internal/domain/vowifi"
 )
 
 const (
-	EgressDirect        = "direct"
-	EgressMihomoCountry = "mihomo-country"
+	EgressDirect        = domain.EgressDirect
+	EgressMihomoCountry = domain.EgressMihomoCountry
 
-	StateStopped      = "stopped"
-	StateStarting     = "starting"
-	StateConnecting   = "connecting"
-	StateRegistering  = "registering"
-	StateOnline       = "online"
-	StateReconnecting = "reconnecting"
-	StateStopping     = "stopping"
-	StateFailed       = "failed"
+	StateStopped      = domain.StateStopped
+	StateStarting     = domain.StateStarting
+	StateConnecting   = domain.StateConnecting
+	StateRegistering  = domain.StateRegistering
+	StateOnline       = domain.StateOnline
+	StateReconnecting = domain.StateReconnecting
+	StateStopping     = domain.StateStopping
+	StateFailed       = domain.StateFailed
 
 	SMSSubmitAccepted    = "accepted"
 	SMSSubmitSent        = "sent"
@@ -29,13 +31,14 @@ const (
 )
 
 var (
-	ErrAlreadyRunning     = errors.New("Host VoWiFi Line is already running")
-	ErrNotRunning         = errors.New("Host VoWiFi Line is not running")
-	ErrRequestInvalid     = errors.New("Host VoWiFi supervisor request is invalid")
-	ErrStartupFailed      = errors.New("Host VoWiFi worker startup failed")
+	ErrAlreadyRunning     = domain.ErrAlreadyRunning
+	ErrNotRunning         = domain.ErrNotRunning
+	ErrRequestInvalid     = domain.ErrRequestInvalid
+	ErrStartupFailed      = domain.ErrStartupFailed
 	ErrSMSUnavailable     = errors.New("Host VoWiFi SMS is unavailable")
 	ErrSMSMessageNotFound = errors.New("Host VoWiFi SMS message was not found")
 	ErrSMSOutcomeUnknown  = errors.New("Host VoWiFi SMS outcome is unknown")
+	ErrSMSNotDispatched   = errors.New("Host VoWiFi SMS request was not dispatched")
 	ErrSMSRejected        = errors.New("Host VoWiFi SMS was rejected")
 )
 
@@ -49,12 +52,6 @@ var (
 // StartRequest contains a stable business Line and the current opaque hardware
 // target resolved by the unprivileged application. The privileged supervisor
 // still resolves every executable path, port and kernel object itself.
-type StartRequest struct {
-	LineID         string `json:"lineId"`
-	HardwareLineID string `json:"hardwareLineId"`
-	EgressMode     string `json:"egressMode"`
-	CountryCode    string `json:"countryCode"`
-}
 
 type StopRequest struct {
 	LineID string `json:"lineId"`
@@ -63,20 +60,6 @@ type StopRequest struct {
 // Status is safe for the management plane. It intentionally excludes PID,
 // namespace/interface names, addresses, P-CSCF, SPIs and authentication data.
 // PhoneNumber is present only when IMS returned an unambiguous E.164 identity.
-type Status struct {
-	LineID       string    `json:"lineId"`
-	State        string    `json:"state"`
-	Stage        string    `json:"stage,omitempty"`
-	Online       bool      `json:"online"`
-	EgressMode   string    `json:"egressMode"`
-	CountryCode  string    `json:"countryCode"`
-	StartedAt    time.Time `json:"startedAt,omitempty"`
-	RegisteredAt time.Time `json:"registeredAt,omitempty"`
-	NextRefresh  time.Time `json:"nextRefreshAt,omitempty"`
-	PhoneNumber  string    `json:"phoneNumber"`
-	Attempt      int       `json:"attempt"`
-	ErrorCode    string    `json:"errorCode,omitempty"`
-}
 
 type StatusList struct {
 	Lines []Status `json:"lines"`
@@ -170,12 +153,6 @@ type SMSSubmitReportAcknowledgeRequest struct {
 	ProviderMessageID string `json:"providerMessageId"`
 }
 
-type API interface {
-	List(context.Context) ([]Status, error)
-	Start(context.Context, StartRequest) (Status, error)
-	Stop(context.Context, string) (Status, error)
-}
-
 type SMSAPI interface {
 	SendSMS(context.Context, SMSSendRequest) (SMSSendResponse, error)
 	ListSMS(context.Context, string) ([]SMSMessageReference, error)
@@ -233,3 +210,7 @@ func validSMSSubmitReport(report SMSSubmitReport) bool {
 		return false
 	}
 }
+
+type StartRequest = domain.StartRequest
+type Status = domain.Status
+type API = domain.API
